@@ -5,16 +5,34 @@ import { getConfig } from '../config/guildConfig.js';
 import { audit } from './audit.js';
 import { log } from '../util/log.js';
 
-// Cargos da guilda que podem votar (Owner + Chiefs).
-const VOTE_ROLES = ['owner', 'chief'];
+// Fallback: ranks DA GUILDA que podem votar, usado só se `voterRoles` não estiver
+// configurado. O caminho normal é por cargo do Discord.
+const FALLBACK_GUILD_RANKS = ['owner', 'chief'];
 
-export async function eligibleVoterCount() {
-  return collections.members().countDocuments({ guildRank: { $in: VOTE_ROLES } });
+async function voterRoleIds(guildDiscordId) {
+  const cfg = await getConfig(guildDiscordId);
+  const raw = cfg.params?.voterRoles;
+  return Array.isArray(raw) ? raw.filter(Boolean) : [];
 }
 
-export async function isEligibleVoter(discordId) {
-  const m = await collections.members().findOne({ discordId });
-  return !!m && VOTE_ROLES.includes(m.guildRank);
+// Quantos podem votar. Recebe a Guild do Discord porque contar cargo exige o
+// cache de membros — o rank do jogo vinha do banco, o cargo não.
+export async function eligibleVoterCount(discordGuild) {
+  const ids = await voterRoleIds(discordGuild.id);
+  if (!ids.length) {
+    return collections.members().countDocuments({ guildRank: { $in: FALLBACK_GUILD_RANKS } });
+  }
+  await discordGuild.members.fetch().catch(() => {});
+  return discordGuild.members.cache.filter(
+    (m) => !m.user.bot && ids.some((id) => m.roles.cache.has(id)),
+  ).size;
+}
+
+export async function isEligibleVoter(member) {
+  const ids = await voterRoleIds(member.guild.id);
+  if (ids.length) return ids.some((id) => member.roles.cache.has(id));
+  const m = await collections.members().findOne({ discordId: member.id });
+  return !!m && FALLBACK_GUILD_RANKS.includes(m.guildRank);
 }
 
 export function tally(votes = []) {
@@ -67,6 +85,8 @@ export function voteButtons(appId, disabled = false) {
   );
 }
 
+// O contador é público, mas o voto é anônimo: mostramos só os totais, nunca
+// quem votou o quê. O canal é o de recrutamento, à vista de todos.
 export function voteEmbed(app, eligibleCount) {
   const { approve, reject, abstain } = tally(app.votes);
   const expiresUnix = Math.floor(new Date(app.expiresAt).getTime() / 1000);
@@ -125,7 +145,8 @@ export async function finalizeApplication(client, appId, cause = 'deadline') {
 
   const cfg = await getConfig(app.guildDiscordId);
   const rule = cfg.params?.voteRule || 'effective';
-  const eligibleCount = await eligibleVoterCount();
+  const discordGuild = await client.guilds.fetch(app.guildDiscordId).catch(() => null);
+  const eligibleCount = discordGuild ? await eligibleVoterCount(discordGuild) : 0;
   const result = decide(app.votes, rule, eligibleCount);
 
   await apps.updateOne(

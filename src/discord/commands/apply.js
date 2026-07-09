@@ -68,7 +68,7 @@ async function submitApplication(interaction) {
   if (!channel) {
     return interaction.editReply('Não consegui acessar o canal de candidaturas.');
   }
-  const eligibleCount = await eligibleVoterCount();
+  const eligibleCount = await eligibleVoterCount(interaction.guild);
   const msg = await channel.send({
     embeds: [voteEmbed(doc, eligibleCount)],
     components: [voteButtons(insertedId.toString())],
@@ -84,16 +84,16 @@ async function applicationStatus(interaction) {
     .findOne({ memberDiscordId: interaction.user.id, status: 'open' });
   if (!app) return interaction.editReply('Você não tem candidatura em aberto.');
   const { approve, reject, abstain } = tally(app.votes);
-  const eligibleCount = await eligibleVoterCount();
+  const eligibleCount = await eligibleVoterCount(interaction.guild);
   return interaction.editReply(
     `Sua candidatura está aberta. Votos — Aprovar: **${approve}**, Reprovar: **${reject}**, Abster: **${abstain}** (elegíveis: ${eligibleCount}). Encerra <t:${Math.floor(new Date(app.expiresAt).getTime() / 1000)}:R>.`,
   );
 }
 
 async function handleVote(interaction, appId, choice) {
-  if (!(await isEligibleVoter(interaction.user.id))) {
+  if (!(await isEligibleVoter(interaction.member))) {
     return interaction.reply({
-      content: 'Apenas Owner e Chiefs podem votar.',
+      content: 'Você não tem cargo para votar nesta candidatura.',
       ephemeral: true,
     });
   }
@@ -111,7 +111,7 @@ async function handleVote(interaction, appId, choice) {
   await apps.updateOne({ _id }, { $set: { votes } });
   app.votes = votes;
 
-  const eligibleCount = await eligibleVoterCount();
+  const eligibleCount = await eligibleVoterCount(interaction.guild);
   await interaction.update({
     embeds: [voteEmbed(app, eligibleCount)],
     components: [voteButtons(appId)],

@@ -10,7 +10,8 @@ export const CHANNEL_KEYS = [
   'loans',
   'logs',
   'panel', // painel ao vivo da guilda
-  'activity', // logs de atividade (online/XP/guerras/nível/guild raids)
+  'activity', // ruído: online/offline, servidor, XP, nível, season
+  'raids', // guild raids concluídas (cai em activity se não configurado)
   'territory', // atualizações de território
   'errors', // erros do bot
 ];
@@ -47,6 +48,8 @@ export const PARAM_KEYS = [
   'verifyHourUTC',
   'territoryMultiplierCap',
   'seasonMode',
+  'voterRoles',
+  'announcePresence',
 ];
 
 const DEFAULT_PARAMS = {
@@ -62,6 +65,12 @@ const DEFAULT_PARAMS = {
   // 'wynn': a season do bot acompanha a do jogo (S31, depois OFF-31, depois S32).
   // 'manual': só muda com /season start.
   seasonMode: 'wynn',
+  // Cargos do Discord que podem votar nas candidaturas. Vazio = cai no rank do
+  // jogo (Owner + Chief), que é o comportamento antigo.
+  voterRoles: [],
+  // Online/offline e troca de servidor de cada membro. Com 50+ membros isso são
+  // centenas de mensagens por dia; XP, nível, guerras e season não são afetados.
+  announcePresence: true,
   reapplyCooldownHours: 48,
   snapshotHourUTC: 5, // horário (UTC) do snapshot diário de progresso
   loanReminderHourUTC: 12,
