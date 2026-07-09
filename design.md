@@ -276,7 +276,9 @@ config                       // um por guilda do Discord
       ficam guardadas em `seasonParticipation` para relatórios futuros.
 - [ ] Reputação de empréstimo influencia prioridade de Tome? (ainda **não** ligado;
       a base de dados já registra pagos/atrasados para habilitar depois.)
-- [ ] Confirmar o formato real da `WYNN_API_KEY` no dashboard (`bearer` vs `raw`).
+- [x] Formato da `WYNN_API_KEY`: **`Authorization: Bearer <token>`** (testado; outros
+      formatos retornam 400 `MalformedTokenError`). Com chave o limite sobe de
+      **50 → 120 req/min**.
 
 ## 16. Recursos portados do bot antigo
 

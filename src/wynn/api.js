@@ -11,11 +11,9 @@ let lastReq = 0;
 
 function authHeaders() {
   const key = optional('WYNN_API_KEY');
-  if (!key) return {};
-  // Esquema configurável: "bearer" (padrão) ou "raw". Confirme o formato exato
-  // esperado no seu dashboard de desenvolvedor da WynnCraft.
-  const scheme = (optional('WYNN_API_KEY_SCHEME', 'bearer') || 'bearer').toLowerCase();
-  return { Authorization: scheme === 'raw' ? key : `Bearer ${key}` };
+  // A v3 exige exatamente "Bearer <token>" — qualquer outro formato retorna
+  // 400 MalformedTokenError. Com chave: 120 req/min; sem chave: 50 req/min.
+  return key ? { Authorization: `Bearer ${key}` } : {};
 }
 
 async function throttle() {
