@@ -17,8 +17,10 @@ import calc from './commands/calc.js';
 import points from './commands/points.js';
 import verificar from './commands/verificar.js';
 import membros from './commands/membros.js';
+import registro from './commands/registro.js';
+import missao from './commands/missao.js';
 
-const commands = [link, unlink, config, apply, season, leaderboard, profile, war, tome, loan, calc, points, verificar, membros];
+const commands = [link, unlink, config, apply, season, leaderboard, profile, war, tome, loan, calc, points, verificar, membros, registro, missao];
 const byName = new Map(commands.map((c) => [c.data.name, c]));
 
 export async function registerCommands() {

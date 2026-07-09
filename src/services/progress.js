@@ -1,7 +1,7 @@
 import { collections } from '../db/mongo.js';
 import { fetchGuildMembers } from './guildData.js';
 import { ensureActiveSeason } from './seasons.js';
-import { getConfig } from '../config/guildConfig.js';
+import { recordEvent } from './points.js';
 import { optional } from '../config/env.js';
 import { log } from '../util/log.js';
 
@@ -14,7 +14,9 @@ function safeDelta(current, previous, cap) {
 }
 
 // Tira um snapshot diário de progresso de TODOS os membros da guilda e
-// acumula os deltas de guerras/raids/contribuição (all-time e por season).
+// registra os deltas de guerras/raids/contribuição como eventos de pontos.
+// O snapshot NÃO calcula pontos: quem converte quantidade em ponto é o
+// recompute, usando os pesos vigentes na hora (ver services/points.js).
 export async function takeSnapshots() {
   const prefix = optional('WYNN_GUILD_PREFIX');
   if (!prefix) return;
@@ -23,9 +25,6 @@ export async function takeSnapshots() {
   if (!res) return;
 
   const season = await ensureActiveSeason();
-  const gid = optional('DISCORD_GUILD_ID');
-  const cfg = gid ? await getConfig(gid) : null;
-  const pw = cfg?.params?.pointsWeights || { war: 10, raid: 5, contribPerMillion: 1 };
   const now = new Date();
   const snaps = collections.progressSnapshots();
   const stats = collections.guildStats();
@@ -33,7 +32,12 @@ export async function takeSnapshots() {
 
   let counted = 0;
   for (const m of res.members) {
-    const metrics = { wars: m.wars, raids: m.raids, contributed: m.contributed };
+    const metrics = {
+      wars: m.wars,
+      raids: m.raids,
+      guildRaids: m.guildRaids,
+      contributed: m.contributed,
+    };
 
     const last = await snaps
       .find({ uuid: m.uuid })
@@ -51,17 +55,21 @@ export async function takeSnapshots() {
 
     let dWars = 0;
     let dRaids = 0;
+    let dGuildRaids = 0;
     let dContrib = 0;
     if (last?.metrics) {
       dWars = safeDelta(metrics.wars, last.metrics.wars, 2000);
       dRaids = safeDelta(metrics.raids, last.metrics.raids, 2000);
+      dGuildRaids = safeDelta(metrics.guildRaids, last.metrics.guildRaids ?? 0, 500);
       dContrib = Math.max(0, metrics.contributed - (last.metrics.contributed ?? 0));
     }
 
-    // Pontos automáticos (design.md §17): guerras + raids + contribuição.
-    const dPoints = Math.round(
-      dWars * (pw.war || 0) + dRaids * (pw.raid || 0) + (dContrib / 1_000_000) * (pw.contribPerMillion || 0),
-    );
+    // Quantidades brutas viram eventos. `snapshotAt` torna a gravação idempotente.
+    const meta = { snapshotAt: now };
+    await recordEvent({ uuid: m.uuid, username: m.username, type: 'war', qty: dWars, meta, at: now });
+    await recordEvent({ uuid: m.uuid, username: m.username, type: 'raid', qty: dRaids, meta, at: now });
+    await recordEvent({ uuid: m.uuid, username: m.username, type: 'guildRaid', qty: dGuildRaids, meta, at: now });
+    await recordEvent({ uuid: m.uuid, username: m.username, type: 'contribution', qty: dContrib, meta, at: now });
 
     await stats.updateOne(
       { uuid: m.uuid },
@@ -71,20 +79,28 @@ export async function takeSnapshots() {
           lastWars: metrics.wars,
           lastRaids: metrics.raids,
           contributed: metrics.contributed,
+          contributionRank: m.contributionRank,
+          // Absoluto e já escopado à guilda pela API — não precisa acumular.
+          guildRaids: metrics.guildRaids,
           updatedAt: now,
         },
-        $inc: { guildWars: dWars, guildRaids: dRaids, points: dPoints },
+        $inc: { guildWars: dWars, raidsInGuild: dRaids },
         $setOnInsert: { firstSeenAt: now },
       },
       { upsert: true },
     );
 
-    if (season && (dWars > 0 || dRaids > 0 || dContrib > 0 || dPoints > 0)) {
+    if (season && (dWars > 0 || dRaids > 0 || dGuildRaids > 0 || dContrib > 0)) {
       await part.updateOne(
         { seasonId: season.seasonId, uuid: m.uuid },
         {
           $set: { username: m.username, lastUpdatedAt: now },
-          $inc: { warsFought: dWars, raidsDelta: dRaids, contributedDelta: dContrib, points: dPoints },
+          $inc: {
+            warsFought: dWars,
+            raidsDelta: dRaids,
+            guildRaidsDelta: dGuildRaids,
+            contributedDelta: dContrib,
+          },
         },
         { upsert: true },
       );

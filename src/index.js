@@ -9,6 +9,7 @@ import { runProgressSnapshot } from './jobs/progressSnapshot.js';
 import { runLoanReminders } from './jobs/loanReminders.js';
 import { runVerificationReport } from './jobs/verificationReport.js';
 import { runGuildWatch } from './services/watcher.js';
+import { ensureRegistrationPanel, attachRegistrationGuard } from './services/registration.js';
 import { initErrorReport, reportError } from './services/errorReport.js';
 import { getConfig } from './config/guildConfig.js';
 import { startHealthServer } from './health.js';
@@ -29,6 +30,7 @@ async function main() {
 
   const client = createClient();
   attachHandlers(client, { log });
+  attachRegistrationGuard(client);
 
   client.on('error', (e) => {
     log.error('Discord client error:', e);
@@ -43,6 +45,9 @@ async function main() {
     ready = true;
     log.info(`Logado como ${client.user.tag}`);
     initErrorReport(client, guildId);
+    await ensureRegistrationPanel(client, guildId).catch((e) =>
+      log.error('Falha ao publicar o painel de registro:', e),
+    );
     const cfg = await getConfig(guildId);
     const minutes = Number(cfg.params?.roleSyncMinutes) || 10;
     const snapH = Number(cfg.params?.snapshotHourUTC) || 5;

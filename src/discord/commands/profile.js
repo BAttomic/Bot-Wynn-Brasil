@@ -32,6 +32,7 @@ export default {
     const p = await wynn.player(nick);
     if (!p || !p.uuid) return interaction.editReply(`Não encontrei o jogador **${nick}**.`);
     const stats = await collections.guildStats().findOne({ uuid: p.uuid });
+    const link = await collections.members().findOne({ uuid: p.uuid });
     const g = p.globalData || {};
 
     const lines = [];
@@ -48,7 +49,12 @@ export default {
     if (g.pvp) lines.push(`- 🗡️ PvP: \`${g.pvp.kills ?? 0}\` kills / \`${g.pvp.deaths ?? 0}\` mortes`);
     lines.push('');
     lines.push('**Na nossa guilda (rastreado):**');
-    lines.push(`- ⭐ Pontos: \`${stats?.points ?? 0}\` · ⚔ Guerras: \`${stats?.guildWars ?? 0}\` · 🚀 Raids: \`${stats?.guildRaids ?? 0}\``);
+    lines.push(`- ⭐ Pontos: \`${stats?.points ?? 0}\` · ⚔ Guerras: \`${stats?.guildWars ?? 0}\` · 🛡️ Guild Raids: \`${stats?.guildRaids ?? 0}\``);
+    if (link?.peakRank) {
+      const peak = RANK_LABEL[link.peakRank] ?? link.peakRank;
+      const back = link.guildRank && link.guildRank !== link.peakRank ? ' — pode ser restaurado' : '';
+      lines.push(`- 🥇 Cargo mais alto já alcançado: \`${peak}\`${back}`);
+    }
     lines.push(`- 📅 Primeira entrada no jogo: ${ts(p.firstJoin, 'D')}`);
 
     return interaction.editReply({

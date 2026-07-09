@@ -31,6 +31,9 @@ export const collections = {
   tomeQueue: () => getDb().collection('tomeQueue'),
   loans: () => getDb().collection('loans'),
   warCalls: () => getDb().collection('warCalls'),
+  territoryCaptures: () => getDb().collection('territoryCaptures'),
+  pointsEvents: () => getDb().collection('pointsEvents'),
+  leaderboardCache: () => getDb().collection('leaderboardCache'),
   watcherState: () => getDb().collection('watcherState'),
   config: () => getDb().collection('config'),
 };
@@ -47,6 +50,17 @@ async function ensureIndexes() {
   await collections.tomeQueue().createIndex({ uuid: 1 }, { unique: true });
   await collections.loans().createIndex({ borrowerDiscordId: 1, status: 1 });
   await collections.warCalls().createIndex({ messageId: 1 }, { unique: true });
+  await collections.territoryCaptures().createIndex({ at: -1 });
+  await collections.territoryCaptures().createIndex({ territory: 1, at: -1 });
+  await collections.pointsEvents().createIndex({ uuid: 1, at: -1 });
+  await collections.pointsEvents().createIndex({ seasonId: 1, uuid: 1 });
+  // Idempotência do snapshot: um evento por membro/tipo/instante de snapshot.
+  await collections
+    .pointsEvents()
+    .createIndex(
+      { uuid: 1, type: 1, 'meta.snapshotAt': 1 },
+      { unique: true, partialFilterExpression: { 'meta.snapshotAt': { $exists: true } } },
+    );
   await collections.config().createIndex({ guildDiscordId: 1 }, { unique: true });
 }
 

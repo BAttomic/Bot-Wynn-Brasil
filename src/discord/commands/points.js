@@ -1,7 +1,12 @@
 import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
 import { collections } from '../../db/mongo.js';
 import { getActiveSeason } from '../../services/seasons.js';
-import { awardPoints, pointsLeaderboard } from '../../services/points.js';
+import {
+  awardPoints,
+  pointsLeaderboard,
+  recomputePoints,
+  rebuildLeaderboards,
+} from '../../services/points.js';
 import { audit } from '../../services/audit.js';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
@@ -27,11 +32,26 @@ export default {
         .addIntegerOption((o) => o.setName('amount').setDescription('Quantidade (use negativo para remover)').setRequired(true))
         .addStringOption((o) => o.setName('reason').setDescription('Motivo').setRequired(true)),
     )
+    .addSubcommand((s) =>
+      s
+        .setName('recalcular')
+        .setDescription('(Staff) Recalcula todo o histórico com os pesos atuais e refaz o ranking'),
+    )
     .toJSON(),
 
   async execute(interaction) {
-    await interaction.deferReply({ ephemeral: interaction.options.getSubcommand() === 'add' });
     const sub = interaction.options.getSubcommand();
+    await interaction.deferReply({ ephemeral: sub === 'add' || sub === 'recalcular' });
+
+    if (sub === 'recalcular') {
+      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+        return interaction.editReply('Apenas staff pode recalcular.');
+      }
+      const { members } = await recomputePoints();
+      await rebuildLeaderboards();
+      audit(interaction.client, interaction.guildId, `♻️ <@${interaction.user.id}> recalculou os pontos (${members} membros).`);
+      return interaction.editReply(`Histórico reprocessado com os pesos atuais: **${members}** membro(s). Ranking refeito.`);
+    }
 
     if (sub === 'add') {
       if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
@@ -54,11 +74,17 @@ export default {
         const s = await getActiveSeason();
         seasonId = s?.seasonId;
       }
-      const rows = await pointsLeaderboard(scope, seasonId);
+      const { rows, builtAt } = await pointsLeaderboard(scope, seasonId);
       if (!rows.length) return interaction.editReply('Ainda não há pontos registrados.');
       const lines = rows.map((r, i) => `${MEDALS[i] || `\`${String(i + 1).padStart(2, ' ')}\``} **${r.username}** — ${r.points} pts`);
       return interaction.editReply({
-        embeds: [{ title: `⭐ Ranking de Pontos${scope === 'season' ? ` — Season ${seasonId}` : ' — Acumulado'}`, description: lines.join('\n'), color: 0xf1c40f }],
+        embeds: [{
+          title: `⭐ Ranking de Pontos${scope === 'season' ? ` — Season ${seasonId}` : ' — Acumulado'}`,
+          description: lines.join('\n'),
+          color: 0xf1c40f,
+          footer: { text: 'Apurado uma vez por dia' },
+          timestamp: builtAt ? new Date(builtAt).toISOString() : undefined,
+        }],
       });
     }
 
@@ -88,7 +114,8 @@ export default {
           { name: 'Acumulado', value: String(stats.points ?? 0), inline: true },
           { name: `Season ${season?.seasonId ?? '-'}`, value: String(seasonPts), inline: true },
           { name: 'Guerras', value: String(stats.guildWars ?? 0), inline: true },
-          { name: 'Raids', value: String(stats.guildRaids ?? 0), inline: true },
+          { name: 'Guild Raids', value: String(stats.guildRaids ?? 0), inline: true },
+          { name: 'Raids (todas)', value: String(stats.raidsInGuild ?? 0), inline: true },
         ],
       }],
     });

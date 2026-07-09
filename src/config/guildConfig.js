@@ -2,6 +2,7 @@ import { collections } from '../db/mongo.js';
 
 export const CHANNEL_KEYS = [
   'registration',
+  'blacklist', // único canal visível para quem tem o cargo de banido
   'applications',
   'recruiters',
   'war',
@@ -9,7 +10,7 @@ export const CHANNEL_KEYS = [
   'loans',
   'logs',
   'panel', // painel ao vivo da guilda
-  'activity', // logs de atividade (online/XP/guerras/nível)
+  'activity', // logs de atividade (online/XP/guerras/nível/guild raids)
   'territory', // atualizações de território
   'errors', // erros do bot
 ];
@@ -17,6 +18,8 @@ export const CHANNEL_KEYS = [
 export const ROLE_KEYS = [
   'community',
   'guildMember', // cargo único automático para quem está na guilda
+  'neutral', // registrado, mas fora da nossa guilda e da black-list
+  'banned', // registrado e pertencente à guilda da black-list
   'topContributor', // cargo automático para os top N em pontos
   'war',
   'mainWar',
@@ -42,6 +45,7 @@ export const PARAM_KEYS = [
   'inactivityDays',
   'topContributorCount',
   'verifyHourUTC',
+  'territoryMultiplierCap',
 ];
 
 const DEFAULT_PARAMS = {
@@ -49,7 +53,11 @@ const DEFAULT_PARAMS = {
   voteRule: 'effective', // 'effective' | 'total' (ver design.md §6)
   roleSyncMinutes: 10,
   // Multiplicadores do sistema de pontos unificado (design.md §17).
-  pointsWeights: { war: 10, raid: 5, contribPerMillion: 1 },
+  // territoryBase é o valor de uma captura ANTES do multiplicador de fronteiras.
+  pointsWeights: { war: 10, raid: 5, guildRaid: 15, contribPerMillion: 1, territoryBase: 20 },
+  // Teto do multiplicador de captura. O HQ de uma guilda grande chega a x25 pela
+  // fórmula do jogo, o que sozinho dominaria o ranking.
+  territoryMultiplierCap: 8,
   reapplyCooldownHours: 48,
   snapshotHourUTC: 5, // horário (UTC) do snapshot diário de progresso
   loanReminderHourUTC: 12,

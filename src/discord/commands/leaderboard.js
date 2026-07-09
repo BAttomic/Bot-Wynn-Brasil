@@ -1,18 +1,33 @@
 import { SlashCommandBuilder } from 'discord.js';
-import { collections } from '../../db/mongo.js';
 import { getActiveSeason } from '../../services/seasons.js';
+import { pointsLeaderboard } from '../../services/points.js';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
-function rankLine(i, name, value, unit) {
-  const badge = MEDALS[i] || `\`${String(i + 1).padStart(2, ' ')}\``;
-  return `${badge} **${name}** — ${value} ${unit}`;
+// Serve o placar materializado. Ele é reconstruído uma vez por dia, junto do
+// snapshot — não consulta guildStats ao vivo de propósito.
+function render(title, doc) {
+  const lines = doc.rows.map((r, i) => {
+    const badge = MEDALS[i] || `\`${String(i + 1).padStart(2, ' ')}\``;
+    return `${badge} **${r.username}** — ${r.points} pts · ⚔ ${r.guildWars} · 🛡️ ${r.guildRaids}`;
+  });
+  return {
+    embeds: [
+      {
+        title,
+        description: lines.join('\n'),
+        color: 0xf1c40f,
+        footer: { text: 'Apurado uma vez por dia · pts · guerras · guild raids' },
+        timestamp: doc.builtAt ? new Date(doc.builtAt).toISOString() : undefined,
+      },
+    ],
+  };
 }
 
 export default {
   data: new SlashCommandBuilder()
     .setName('leaderboard')
-    .setDescription('Placar de guerras pela guilda')
+    .setDescription('Placar da guilda (apurado 1x por dia)')
     .addSubcommand((s) =>
       s
         .setName('season')
@@ -33,30 +48,17 @@ export default {
         if (!s) return interaction.editReply('Não há season ativa. Use `/season start`.');
         seasonId = s.seasonId;
       }
-      const rows = await collections
-        .seasonParticipation()
-        .find({ seasonId, warsFought: { $gt: 0 } })
-        .sort({ warsFought: -1 })
-        .limit(15)
-        .toArray();
-      if (!rows.length) return interaction.editReply(`Ninguém pontuou guerras na season **${seasonId}** ainda.`);
-      const lines = rows.map((r, i) => rankLine(i, r.username, r.warsFought, 'guerras'));
-      return interaction.editReply({
-        embeds: [{ title: `🏆 Leaderboard — Season ${seasonId}`, description: lines.join('\n'), color: 0xf1c40f }],
-      });
+      const doc = await pointsLeaderboard('season', seasonId);
+      if (!doc.rows.length) {
+        return interaction.editReply(`Ninguém pontuou na season **${seasonId}** ainda.`);
+      }
+      return interaction.editReply(render(`🏆 Leaderboard — Season ${seasonId}`, doc));
     }
 
-    // alltime
-    const rows = await collections
-      .guildStats()
-      .find({ guildWars: { $gt: 0 } })
-      .sort({ guildWars: -1 })
-      .limit(15)
-      .toArray();
-    if (!rows.length) return interaction.editReply('Ainda não há guerras contabilizadas.');
-    const lines = rows.map((r, i) => rankLine(i, r.username, r.guildWars, 'guerras'));
-    return interaction.editReply({
-      embeds: [{ title: '🏆 Leaderboard — Acumulado', description: lines.join('\n'), color: 0xf1c40f }],
-    });
+    const doc = await pointsLeaderboard('alltime');
+    if (!doc.rows.length) {
+      return interaction.editReply('Ainda não há pontos apurados. O placar é montado na apuração diária.');
+    }
+    return interaction.editReply(render('🏆 Leaderboard — Acumulado', doc));
   },
 };

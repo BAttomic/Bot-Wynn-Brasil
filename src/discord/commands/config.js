@@ -8,6 +8,7 @@ import {
   ROLE_KEYS,
   PARAM_KEYS,
 } from '../../config/guildConfig.js';
+import { recomputePoints, rebuildLeaderboards } from '../../services/points.js';
 
 function choices(keys) {
   return keys.map((k) => ({ name: k, value: k }));
@@ -84,6 +85,16 @@ export default {
         }
       }
       await setParam(gid, key, value);
+
+      // Os pontos são derivados do histórico, então mexer num peso reescreve
+      // todo o passado. Fazemos na hora para o /config nunca mentir.
+      if (key === 'pointsWeights' || key === 'territoryMultiplierCap') {
+        const { members } = await recomputePoints();
+        await rebuildLeaderboards();
+        return interaction.editReply(
+          `Parâmetro **${key}** = \`${JSON.stringify(value)}\`.\nHistórico reprocessado: **${members}** membro(s), ranking refeito.`,
+        );
+      }
       return interaction.editReply(`Parâmetro **${key}** = \`${JSON.stringify(value)}\`.`);
     }
 
