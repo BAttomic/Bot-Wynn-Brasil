@@ -37,6 +37,8 @@ export async function takeSnapshots() {
       raids: m.raids,
       guildRaids: m.guildRaids,
       contributed: m.contributed,
+      weeklyCompleted: m.weeklyCompleted,
+      weeklyStreak: m.weeklyStreak,
     };
 
     const last = await snaps
@@ -57,11 +59,17 @@ export async function takeSnapshots() {
     let dRaids = 0;
     let dGuildRaids = 0;
     let dContrib = 0;
+    let dWeekly = 0;
     if (last?.metrics) {
       dWars = safeDelta(metrics.wars, last.metrics.wars, 2000);
       dRaids = safeDelta(metrics.raids, last.metrics.raids, 2000);
       dGuildRaids = safeDelta(metrics.guildRaids, last.metrics.guildRaids ?? 0, 500);
       dContrib = Math.max(0, metrics.contributed - (last.metrics.contributed ?? 0));
+      // A API só diz se o objetivo desta semana está feito, não quantos já foram.
+      // Contamos a virada de "não fez" para "fez"; como o snapshot é diário e o
+      // objetivo é semanal, cada semana concluída é contada uma vez só.
+      // `weeklyCompleted` é null sem WYNN_API_KEY — aí não contamos nada.
+      if (metrics.weeklyCompleted === true && last.metrics.weeklyCompleted === false) dWeekly = 1;
     }
 
     // Quantidades brutas viram eventos. `snapshotAt` torna a gravação idempotente.
@@ -70,6 +78,7 @@ export async function takeSnapshots() {
     await recordEvent({ uuid: m.uuid, username: m.username, type: 'raid', qty: dRaids, meta, at: now });
     await recordEvent({ uuid: m.uuid, username: m.username, type: 'guildRaid', qty: dGuildRaids, meta, at: now });
     await recordEvent({ uuid: m.uuid, username: m.username, type: 'contribution', qty: dContrib, meta, at: now });
+    await recordEvent({ uuid: m.uuid, username: m.username, type: 'weekly', qty: dWeekly, meta, at: now });
 
     await stats.updateOne(
       { uuid: m.uuid },
@@ -82,15 +91,16 @@ export async function takeSnapshots() {
           contributionRank: m.contributionRank,
           // Absoluto e já escopado à guilda pela API — não precisa acumular.
           guildRaids: metrics.guildRaids,
+          weeklyStreak: metrics.weeklyStreak,
           updatedAt: now,
         },
-        $inc: { guildWars: dWars, raidsInGuild: dRaids },
+        $inc: { guildWars: dWars, raidsInGuild: dRaids, weeklyObjectives: dWeekly },
         $setOnInsert: { firstSeenAt: now },
       },
       { upsert: true },
     );
 
-    if (season && (dWars > 0 || dRaids > 0 || dGuildRaids > 0 || dContrib > 0)) {
+    if (season && (dWars > 0 || dRaids > 0 || dGuildRaids > 0 || dContrib > 0 || dWeekly > 0)) {
       await part.updateOne(
         { seasonId: season.seasonId, uuid: m.uuid },
         {
@@ -100,6 +110,7 @@ export async function takeSnapshots() {
             raidsDelta: dRaids,
             guildRaidsDelta: dGuildRaids,
             contributedDelta: dContrib,
+            weeklyDelta: dWeekly,
           },
         },
         { upsert: true },

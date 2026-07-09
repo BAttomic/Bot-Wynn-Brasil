@@ -1,27 +1,21 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { getActiveSeason } from '../../services/seasons.js';
-import { pointsLeaderboard } from '../../services/points.js';
+import { pointsLeaderboard, categoryLeaderboard, CATEGORIES } from '../../services/points.js';
+import { shortNumber } from '../../util/format.js';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
-// Serve o placar materializado. Ele é reconstruído uma vez por dia, junto do
-// snapshot — não consulta guildStats ao vivo de propósito.
-function render(title, doc) {
-  const lines = doc.rows.map((r, i) => {
-    const badge = MEDALS[i] || `\`${String(i + 1).padStart(2, ' ')}\``;
-    return `${badge} **${r.username}** — ${r.points} pts · ⚔ ${r.guildWars} · 🛡️ ${r.guildRaids}`;
-  });
-  return {
-    embeds: [
-      {
-        title,
-        description: lines.join('\n'),
-        color: 0xf1c40f,
-        footer: { text: 'Apurado uma vez por dia · pts · guerras · guild raids' },
-        timestamp: doc.builtAt ? new Date(doc.builtAt).toISOString() : undefined,
-      },
-    ],
-  };
+const badge = (i) => MEDALS[i] || `\`${String(i + 1).padStart(2, ' ')}\``;
+
+function footer(seasonId) {
+  return { text: `${seasonId ? `Season ${seasonId}` : 'Acumulado'} · apurado uma vez por dia` };
+}
+
+// Resolve a season pedida. `atual` (ou vazio no subcomando season) usa a ativa.
+async function resolveSeason(raw) {
+  if (!raw) return null;
+  if (raw.toLowerCase() === 'atual') return (await getActiveSeason())?.seasonId ?? null;
+  return raw;
 }
 
 export default {
@@ -30,35 +24,78 @@ export default {
     .setDescription('Placar da guilda (apurado 1x por dia)')
     .addSubcommand((s) =>
       s
-        .setName('season')
-        .setDescription('Placar da season (padrão: ativa)')
-        .addStringOption((o) => o.setName('id').setDescription('ID da season').setRequired(false)),
+        .setName('pontos')
+        .setDescription('Ranking de pontos de contribuição')
+        .addStringOption((o) =>
+          o.setName('season').setDescription('ID da season, ou "atual" (padrão: acumulado)').setRequired(false),
+        ),
     )
-    .addSubcommand((s) => s.setName('alltime').setDescription('Placar acumulado (todas as seasons)'))
+    .addSubcommand((s) =>
+      s
+        .setName('categoria')
+        .setDescription('Ranking de uma fonte específica, em números crus')
+        .addStringOption((o) =>
+          o
+            .setName('tipo')
+            .setDescription('Qual fonte')
+            .setRequired(true)
+            .addChoices(
+              ...Object.entries(CATEGORIES).map(([value, c]) => ({ name: c.label, value })),
+            ),
+        )
+        .addStringOption((o) =>
+          o.setName('season').setDescription('ID da season, ou "atual" (padrão: acumulado)').setRequired(false),
+        ),
+    )
     .toJSON(),
 
   async execute(interaction) {
     await interaction.deferReply();
     const sub = interaction.options.getSubcommand();
+    const seasonId = await resolveSeason(interaction.options.getString('season'));
 
-    if (sub === 'season') {
-      let seasonId = interaction.options.getString('id');
-      if (!seasonId) {
-        const s = await getActiveSeason();
-        if (!s) return interaction.editReply('Não há season ativa. Use `/season start`.');
-        seasonId = s.seasonId;
-      }
-      const doc = await pointsLeaderboard('season', seasonId);
+    if (sub === 'pontos') {
+      const doc = await pointsLeaderboard(seasonId ? 'season' : 'alltime', seasonId);
       if (!doc.rows.length) {
-        return interaction.editReply(`Ninguém pontuou na season **${seasonId}** ainda.`);
+        return interaction.editReply(
+          seasonId
+            ? `Ninguém pontuou na season **${seasonId}** ainda.`
+            : 'Ainda não há pontos apurados. O placar é montado na apuração diária — a staff pode forçar com `/points recalcular`.',
+        );
       }
-      return interaction.editReply(render(`🏆 Leaderboard — Season ${seasonId}`, doc));
+      const lines = doc.rows.map(
+        (r, i) => `${badge(i)} **${r.username}** — ${r.points} pts · ⚔ ${r.guildWars} · 🛡️ ${r.guildRaids}`,
+      );
+      return interaction.editReply({
+        embeds: [{
+          title: '🏆 Pontos de contribuição',
+          description: lines.join('\n'),
+          color: 0xf1c40f,
+          footer: footer(seasonId),
+          timestamp: doc.builtAt ? new Date(doc.builtAt).toISOString() : undefined,
+        }],
+      });
     }
 
-    const doc = await pointsLeaderboard('alltime');
+    // categoria
+    const key = interaction.options.getString('tipo', true);
+    const cat = CATEGORIES[key];
+    const doc = await categoryLeaderboard(key, seasonId);
     if (!doc.rows.length) {
-      return interaction.editReply('Ainda não há pontos apurados. O placar é montado na apuração diária.');
+      return interaction.editReply(`Ninguém pontuou em **${cat.label}**${seasonId ? ` na season ${seasonId}` : ''} ainda.`);
     }
-    return interaction.editReply(render('🏆 Leaderboard — Acumulado', doc));
+
+    const fmt = (v) => (cat.short ? shortNumber(v) : v.toLocaleString('pt-BR'));
+    const lines = doc.rows.map((r, i) => `${badge(i)} **${r.username}** — \`${fmt(r.value)}\` ${cat.unit}`);
+
+    return interaction.editReply({
+      embeds: [{
+        title: `${cat.emoji} ${cat.label}`,
+        description: lines.join('\n'),
+        color: 0x3498db,
+        footer: footer(seasonId),
+        timestamp: doc.builtAt ? new Date(doc.builtAt).toISOString() : undefined,
+      }],
+    });
   },
 };

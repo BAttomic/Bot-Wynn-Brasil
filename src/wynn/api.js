@@ -59,4 +59,8 @@ export const wynn = {
   guildByPrefix: (prefix, opts) => request(`/guild/prefix/${encodeURIComponent(prefix)}`, opts),
   guildByName: (name, opts) => request(`/guild/name/${encodeURIComponent(name)}`, opts),
   territoryList: (opts) => request(`/guild/list/territory`, opts),
+  leaderboardTypes: (opts) => request(`/leaderboards/types`, opts),
+  // Ranking de uma season da guilda. Chaves são as posições ("1", "2", ...).
+  guildSeasonBoard: (n, limit = 3, opts) =>
+    request(`/leaderboards/guildSeason${n}?resultLimit=${limit}`, opts),
 };

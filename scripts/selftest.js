@@ -150,6 +150,81 @@ async function main() {
     const lb = await P.pointsLeaderboard('alltime');
     check('leaderboard materializado e ordenado', lb.rows.map((r) => r.username), ['Alice', 'Bob']);
     check('leaderboard tem data de apuração', !!lb.builtAt, true);
+
+    // ------------------------------------------ Leaderboards por categoria
+    section('8. Leaderboards por categoria (números crus)');
+    await collections.guildStats().updateOne({ uuid: 'uuid-a' }, { $set: { guildWars: 40, contributed: 9_000_000, guildRaids: 1, weeklyObjectives: 7 } });
+    await collections.guildStats().updateOne({ uuid: 'uuid-b' }, { $set: { guildWars: 5, contributed: 50_000_000, guildRaids: 12, weeklyObjectives: 2 } });
+    await P.rebuildLeaderboards();
+
+    const top = async (k) => (await P.categoryLeaderboard(k)).rows.map((r) => `${r.username}:${r.value}`);
+    check('guerras: Alice na frente', await top('war'), ['Alice:40', 'Bob:5']);
+    check('XP: Bob na frente', await top('xp'), ['Bob:50000000', 'Alice:9000000']);
+    check('guild raids: Bob na frente', await top('guildraid'), ['Bob:12', 'Alice:1']);
+    check('objetivos semanais: Alice na frente', await top('weekly'), ['Alice:7', 'Bob:2']);
+    check('categoria inexistente devolve vazio', (await P.categoryLeaderboard('xablau')).rows, []);
+
+    // ---------------------------------------------------- Banimentos
+    section('9. Banimento pega UUID e Discord, e é permanente');
+    const B2 = await import('../src/services/bans.js');
+    await B2.recordBan({ uuid: 'uuid-gsw', username: 'Fulano', discordId: 'discord-1', reason: 'teste' });
+
+    check('acha pelo uuid', !!(await B2.findBan({ uuid: 'uuid-gsw' })), true);
+    check('acha pelo discord', !!(await B2.findBan({ discordId: 'discord-1' })), true);
+    check('não acha um terceiro', await B2.findBan({ uuid: 'uuid-limpo', discordId: 'discord-9' }), null);
+
+    // Troca de conta do Minecraft: mesmo Discord, uuid novo.
+    check('mesmo Discord + conta nova => banido', await B2.isBanned({ uuid: 'uuid-novo', discordId: 'discord-1' }), true);
+    // Troca de Discord: mesmo uuid, Discord novo.
+    check('mesmo uuid + Discord novo => banido', await B2.isBanned({ uuid: 'uuid-gsw', discordId: 'discord-2' }), true);
+
+    // Anexar o par novo faz a teia crescer.
+    await B2.recordBan({ uuid: 'uuid-gsw', username: 'FulanoNovoNick', discordId: 'discord-2', reason: 'teste' });
+    const doc = await B2.findBan({ uuid: 'uuid-gsw' });
+    check('dois Discords no mesmo registro', doc.discordIds.sort(), ['discord-1', 'discord-2']);
+    check('dois nicks no mesmo registro', doc.usernames.sort(), ['Fulano', 'FulanoNovoNick']);
+    check('um registro só (sem duplicar)', await B2.countBans(), 1);
+
+    const idx = await B2.loadBanIndex();
+    check('índice em memória tem o uuid', idx.uuids.has('uuid-gsw'), true);
+    check('índice em memória tem os discords', idx.discordIds.has('discord-2'), true);
+
+    check('remover por discord apaga o registro', await B2.removeBan({ discordId: 'discord-1' }), 1);
+    check('depois de remover, não está banido', await B2.isBanned({ uuid: 'uuid-gsw' }), false);
+
+    // ------------------------------------------------ Season e off-season
+    section('10. Season do jogo e off-season');
+    const WS = await import('../src/services/wynnSeason.js');
+    const S = await import('../src/services/seasons.js');
+
+    const live = await WS.currentWynnSeason();
+    check('detectou a season do jogo', typeof live?.number, 'number');
+    check('id bate com o estado', live.id, live.active ? `S${live.number}` : `OFF-${live.number}`);
+    check('id de off-season', WS.seasonIdFor({ number: 31, active: false }), 'OFF-31');
+    check('id de season ativa', WS.seasonIdFor({ number: 31, active: true }), 'S31');
+
+    // Modo 'wynn' (padrão) troca a season sozinho e fecha a anterior.
+    const opened = await S.ensureActiveSeason();
+    check('bot passa a contabilizar na season do jogo', opened.seasonId, live.id);
+    check('marca se é off-season', opened.offSeason, !live.active);
+    const oldS1 = await collections.seasons().findOne({ seasonId: 'S1' });
+    check('season anterior foi encerrada', oldS1.active === false && !!oldS1.endAt, true);
+
+    const again = await S.ensureActiveSeason();
+    check('chamar de novo é idempotente', again.seasonId, live.id);
+    check('não duplicou a season', await collections.seasons().countDocuments({ seasonId: live.id }), 1);
+
+    // Pontos de season e de off-season vão para baldes distintos.
+    const C = { uuid: 'uuid-c', username: 'Carol' };
+    await P.recordEvent({ ...C, type: 'war', qty: 1 }); // cai na season atual
+    await S.startSeason('OFF-99'); // simula a virada para off-season
+    await P.recordEvent({ ...C, type: 'war', qty: 4 }); // cai no off-season
+    await P.recomputePoints();
+
+    const bucket = async (id) => (await collections.seasonParticipation().findOne({ seasonId: id, uuid: 'uuid-c' }))?.points;
+    check('1 guerra na season do jogo = 20 pts', await bucket(live.id), 20);
+    check('4 guerras no off-season = 80 pts', await bucket('OFF-99'), 80);
+    check('acumulado soma os dois = 100 pts', await pts('uuid-c'), 100);
   } finally {
     await getDb().dropDatabase();
     await closeMongo();

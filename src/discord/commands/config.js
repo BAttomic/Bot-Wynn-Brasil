@@ -64,8 +64,8 @@ export default {
       const ch = interaction.options.getChannel('channel', true);
       await setChannel(gid, key, ch.id);
 
-      // Esses dois canais vivem de uma mensagem fixa; publica já.
-      if (key === 'registration' || key === 'blacklist') {
+      // O canal de registro vive de uma mensagem fixa; publica já.
+      if (key === 'registration') {
         await ensurePanels(interaction.client, gid);
         return interaction.editReply(`Canal **${key}** definido para <#${ch.id}>. Painel publicado.`);
       }

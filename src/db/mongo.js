@@ -32,6 +32,7 @@ export const collections = {
   loans: () => getDb().collection('loans'),
   warCalls: () => getDb().collection('warCalls'),
   territoryCaptures: () => getDb().collection('territoryCaptures'),
+  bans: () => getDb().collection('bans'),
   pointsEvents: () => getDb().collection('pointsEvents'),
   leaderboardCache: () => getDb().collection('leaderboardCache'),
   watcherState: () => getDb().collection('watcherState'),
@@ -52,6 +53,9 @@ async function ensureIndexes() {
   await collections.warCalls().createIndex({ messageId: 1 }, { unique: true });
   await collections.territoryCaptures().createIndex({ at: -1 });
   await collections.territoryCaptures().createIndex({ territory: 1, at: -1 });
+  // Banimento pega pelos dois lados da identidade.
+  await collections.bans().createIndex({ uuid: 1 }, { unique: true });
+  await collections.bans().createIndex({ discordIds: 1 });
   await collections.pointsEvents().createIndex({ uuid: 1, at: -1 });
   await collections.pointsEvents().createIndex({ seasonId: 1, uuid: 1 });
   // Idempotência do snapshot: um evento por membro/tipo/instante de snapshot.

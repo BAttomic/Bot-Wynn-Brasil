@@ -10,6 +10,7 @@ import { runLoanReminders } from './jobs/loanReminders.js';
 import { runVerificationReport } from './jobs/verificationReport.js';
 import { runGuildWatch } from './services/watcher.js';
 import { ensurePanels, attachRegistrationGuard } from './services/registration.js';
+import { ensureActiveSeason } from './services/seasons.js';
 import { initErrorReport, reportError } from './services/errorReport.js';
 import { getConfig } from './config/guildConfig.js';
 import { startHealthServer } from './health.js';
@@ -54,6 +55,8 @@ async function main() {
 
     // Se alguém apagar um painel fixo, ele volta no próximo ciclo.
     everyMinutes(5, 'panels', () => ensurePanels(client, guildId), { runOnStart: true });
+    // Vira a season (ou entra em off-season) assim que o jogo virar.
+    everyMinutes(60, 'seasonSync', () => ensureActiveSeason(), { runOnStart: true });
     everyMinutes(minutes, 'roleSync', () => runRoleSync(client), { runOnStart: true });
     everyMinutes(1, 'applicationExpiry', () => runApplicationExpiry(client));
     everySeconds(watchS, 'guildWatch', () => runGuildWatch(client), { runOnStart: true });

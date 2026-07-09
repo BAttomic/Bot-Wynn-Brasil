@@ -15,7 +15,17 @@ import { log } from '../util/log.js';
 // guildStats.points e seasonParticipation.points são cache materializado:
 // recomputáveis a qualquer momento a partir de pointsEvents.
 
-export const EVENT_TYPES = ['war', 'raid', 'guildRaid', 'contribution', 'territory', 'manual'];
+export const EVENT_TYPES = ['war', 'raid', 'guildRaid', 'weekly', 'contribution', 'territory', 'manual'];
+
+// Leaderboards de número cru, um por fonte de contribuição. `alltime` aponta
+// para o campo em guildStats; `season`, para o campo em seasonParticipation.
+export const CATEGORIES = {
+  war: { label: 'Guerras', emoji: '⚔️', unit: 'guerras', alltime: 'guildWars', season: 'warsFought' },
+  guildraid: { label: 'Guild Raids', emoji: '🛡️', unit: 'raids', alltime: 'guildRaids', season: 'guildRaidsDelta' },
+  xp: { label: 'XP contribuído', emoji: '📈', unit: 'XP', alltime: 'contributed', season: 'contributedDelta', short: true },
+  weekly: { label: 'Objetivos semanais', emoji: '📅', unit: 'objetivos', alltime: 'weeklyObjectives', season: 'weeklyDelta' },
+  raid: { label: 'Raids (todas)', emoji: '🚀', unit: 'raids', alltime: 'raidsInGuild', season: 'raidsDelta' },
+};
 
 export async function recordEvent({ uuid, username, type, qty, meta = null, at = new Date() }) {
   if (!qty) return null;
@@ -49,6 +59,8 @@ export function eventPoints(event, params = {}) {
       return event.qty * (w.raid || 0);
     case 'guildRaid':
       return event.qty * (w.guildRaid || 0);
+    case 'weekly':
+      return event.qty * (w.weekly || 0);
     case 'contribution':
       return (event.qty / 1_000_000) * (w.contribPerMillion || 0);
     case 'territory': {
@@ -148,71 +160,99 @@ export async function memberEvents(uuid, limit = 10) {
 
 const CACHE_LIMIT = 15;
 
-function cacheId(seasonId) {
+function pointsId(seasonId) {
   return seasonId ? `season:${seasonId}` : 'alltime';
 }
 
-export async function rebuildLeaderboards() {
-  const cache = collections.leaderboardCache();
-  const builtAt = new Date();
+function categoryId(key, seasonId) {
+  return seasonId ? `cat:${key}:season:${seasonId}` : `cat:${key}`;
+}
 
-  const alltime = await collections
-    .guildStats()
-    .find({ points: { $gt: 0 } })
-    .sort({ points: -1 })
+// Ordena por um campo cru e materializa { username, value }.
+async function buildCategoryBoard(cache, _id, collection, field, extraFilter, builtAt) {
+  const rows = await collection
+    .find({ ...extraFilter, [field]: { $gt: 0 } })
+    .sort({ [field]: -1 })
     .limit(CACHE_LIMIT)
     .toArray();
 
   await cache.updateOne(
-    { _id: cacheId(null) },
+    { _id },
     {
       $set: {
         builtAt,
-        rows: alltime.map((r) => ({
-          uuid: r.uuid,
-          username: r.username,
-          points: r.points ?? 0,
-          guildWars: r.guildWars ?? 0,
-          guildRaids: r.guildRaids ?? 0,
-        })),
+        rows: rows.map((r) => ({ uuid: r.uuid, username: r.username, value: r[field] ?? 0 })),
       },
     },
     { upsert: true },
   );
+}
 
-  const seasonIds = await collections.seasonParticipation().distinct('seasonId');
+export async function rebuildLeaderboards() {
+  const cache = collections.leaderboardCache();
+  const stats = collections.guildStats();
+  const part = collections.seasonParticipation();
+  const builtAt = new Date();
+
+  const seasonIds = await part.distinct('seasonId');
+
+  const pointRow = (r, warsField, raidsField) => ({
+    uuid: r.uuid,
+    username: r.username,
+    points: r.points ?? 0,
+    guildWars: r[warsField] ?? 0,
+    guildRaids: r[raidsField] ?? 0,
+  });
+
+  const alltime = await stats
+    .find({ points: { $gt: 0 } })
+    .sort({ points: -1 })
+    .limit(CACHE_LIMIT)
+    .toArray();
+  await cache.updateOne(
+    { _id: pointsId(null) },
+    { $set: { builtAt, rows: alltime.map((r) => pointRow(r, 'guildWars', 'guildRaids')) } },
+    { upsert: true },
+  );
+
   for (const seasonId of seasonIds) {
-    const rows = await collections
-      .seasonParticipation()
+    const rows = await part
       .find({ seasonId, points: { $gt: 0 } })
       .sort({ points: -1 })
       .limit(CACHE_LIMIT)
       .toArray();
     await cache.updateOne(
-      { _id: cacheId(seasonId) },
-      {
-        $set: {
-          builtAt,
-          rows: rows.map((r) => ({
-            uuid: r.uuid,
-            username: r.username,
-            points: r.points ?? 0,
-            guildWars: r.warsFought ?? 0,
-            guildRaids: r.guildRaidsDelta ?? 0,
-          })),
-        },
-      },
+      { _id: pointsId(seasonId) },
+      { $set: { builtAt, rows: rows.map((r) => pointRow(r, 'warsFought', 'guildRaidsDelta')) } },
       { upsert: true },
     );
   }
 
-  log.info(`Leaderboards reconstruídos (acumulado + ${seasonIds.length} season(s)).`);
-  return { seasons: seasonIds.length, builtAt };
+  // Números crus, uma tabela por categoria e escopo.
+  for (const [key, cat] of Object.entries(CATEGORIES)) {
+    await buildCategoryBoard(cache, categoryId(key, null), stats, cat.alltime, {}, builtAt);
+    for (const seasonId of seasonIds) {
+      await buildCategoryBoard(cache, categoryId(key, seasonId), part, cat.season, { seasonId }, builtAt);
+    }
+  }
+
+  log.info(
+    `Leaderboards reconstruídos (pontos + ${Object.keys(CATEGORIES).length} categorias × ${seasonIds.length + 1} escopo(s)).`,
+  );
+  return { seasons: seasonIds.length, categories: Object.keys(CATEGORIES).length, builtAt };
 }
+
+const EMPTY = { rows: [], builtAt: null };
 
 export async function pointsLeaderboard(scope = 'alltime', seasonId = null) {
   const doc = await collections
     .leaderboardCache()
-    .findOne({ _id: cacheId(scope === 'season' ? seasonId : null) });
-  return doc ?? { rows: [], builtAt: null };
+    .findOne({ _id: pointsId(scope === 'season' ? seasonId : null) });
+  return doc ?? EMPTY;
+}
+
+export async function categoryLeaderboard(key, seasonId = null) {
+  if (!CATEGORIES[key]) return EMPTY;
+  const doc = await collections.leaderboardCache().findOne({ _id: categoryId(key, seasonId) });
+  return doc ?? EMPTY;
 }

@@ -2,7 +2,8 @@ import { collections } from '../db/mongo.js';
 import { fetchGuildMembers, isHigherRank, RANK_LABEL } from '../services/guildData.js';
 import { getConfig } from '../config/guildConfig.js';
 import { audit } from '../services/audit.js';
-import { applyClassificationRoles, blacklistGuild } from '../services/registration.js';
+import { applyClassificationRoles, blacklistGuild, syncNickname } from '../services/registration.js';
+import { loadBanIndex, recordBan, BAN_REASON_BLACKLIST_GUILD } from '../services/bans.js';
 import { optional } from '../config/env.js';
 import { log } from '../util/log.js';
 
@@ -26,6 +27,7 @@ export async function runRoleSync(client) {
 
   const blacklisted = await fetchGuildMembers(blacklistGuild().prefix).catch(() => null);
   const blacklistedUuids = new Set(blacklisted?.members.map((m) => m.uuid) ?? []);
+  const banIndex = await loadBanIndex();
 
   await guild.members.fetch().catch(() => {});
 
@@ -48,8 +50,24 @@ export async function runRoleSync(client) {
   for (const m of linked) {
     const rank = rankByUuid.get(m.uuid) || null;
     const inGuild = !!rank;
-    // A black-list vence: estar na guilda dela bane mesmo que também conste na nossa.
-    const kind = blacklistedUuids.has(m.uuid) ? 'banned' : inGuild ? 'member' : 'neutral';
+
+    // Entrou na guilda proibida desde o último ciclo? Entra na lista, para sempre.
+    const nowInBlacklistGuild = blacklistedUuids.has(m.uuid);
+    if (nowInBlacklistGuild && !banIndex.uuids.has(m.uuid)) {
+      await recordBan({
+        uuid: m.uuid,
+        username: m.username,
+        discordId: m.discordId,
+        reason: BAN_REASON_BLACKLIST_GUILD,
+      });
+      banIndex.uuids.add(m.uuid);
+      if (m.discordId) banIndex.discordIds.add(m.discordId);
+    }
+
+    // O banimento vence tudo, e não expira: sair da guilda proibida não devolve
+    // o acesso. Só /ban remove desfaz.
+    const banned = banIndex.uuids.has(m.uuid) || banIndex.discordIds.has(m.discordId);
+    const kind = banned ? 'banned' : inGuild ? 'member' : 'neutral';
 
     const update = { inGuild, guildRank: rank, classification: kind };
 
@@ -76,15 +94,16 @@ export async function runRoleSync(client) {
       update.leftGuildAt = new Date();
       audit(client, guildDiscordId, `👋 <@${m.discordId}> (**${m.username}**) saiu da guilda.`);
     }
-    if (kind === 'banned' && m.classification !== 'banned') {
-      audit(client, guildDiscordId, `🚫 <@${m.discordId}> (**${m.username}**) entrou na [${blacklistGuild().prefix}] e recebeu o cargo de banido.`);
-    }
+    // Passar a banido é registrado só no banco (campo `classification`).
+    // Nenhum aviso no Discord — ver notifyRecruiters em services/registration.js.
     await collections.members().updateOne({ uuid: m.uuid }, { $set: update });
 
     const member = guild.members.cache.get(m.discordId);
     if (!member) continue;
 
     await applyClassificationRoles(member, cfg, kind);
+    // Pega quem trocou de nick no Minecraft depois de registrado.
+    await syncNickname(member, m.username);
 
     // Cargo "Top Contribuidor": top N em pontos que ainda estão na guilda.
     if (topRoleId) {

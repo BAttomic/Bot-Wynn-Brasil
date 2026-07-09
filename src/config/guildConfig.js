@@ -46,6 +46,7 @@ export const PARAM_KEYS = [
   'topContributorCount',
   'verifyHourUTC',
   'territoryMultiplierCap',
+  'seasonMode',
 ];
 
 const DEFAULT_PARAMS = {
@@ -54,10 +55,13 @@ const DEFAULT_PARAMS = {
   roleSyncMinutes: 10,
   // Multiplicadores do sistema de pontos unificado (design.md §17).
   // territoryBase é o valor de uma captura ANTES do multiplicador de fronteiras.
-  pointsWeights: { war: 10, raid: 5, guildRaid: 15, contribPerMillion: 1, territoryBase: 20 },
+  pointsWeights: { war: 10, raid: 5, guildRaid: 15, weekly: 20, contribPerMillion: 1, territoryBase: 20 },
   // Teto do multiplicador de captura. O HQ de uma guilda grande chega a x25 pela
   // fórmula do jogo, o que sozinho dominaria o ranking.
   territoryMultiplierCap: 8,
+  // 'wynn': a season do bot acompanha a do jogo (S31, depois OFF-31, depois S32).
+  // 'manual': só muda com /season start.
+  seasonMode: 'wynn',
   reapplyCooldownHours: 48,
   snapshotHourUTC: 5, // horário (UTC) do snapshot diário de progresso
   loanReminderHourUTC: 12,

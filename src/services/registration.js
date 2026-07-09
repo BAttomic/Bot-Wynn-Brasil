@@ -12,6 +12,7 @@ import { getConfig } from '../config/guildConfig.js';
 import { optional } from '../config/env.js';
 import { audit } from './audit.js';
 import { isHigherRank } from './guildData.js';
+import { findBan, recordBan, BAN_REASON_BLACKLIST_GUILD } from './bans.js';
 import { log } from '../util/log.js';
 
 export const BUTTON_ID = 'registro:verificar';
@@ -19,7 +20,6 @@ export const MODAL_ID = 'registro:modal';
 export const NICK_FIELD = 'nick';
 
 const PANEL_STATE_ID = 'registrationPanel';
-const BLACKLIST_STATE_ID = 'blacklistPanel';
 
 // UUID da guilda é imutável; o prefixo pode ser trocado pelo dono a qualquer
 // momento, então ele serve só de fallback. Ambos podem vir do ambiente.
@@ -49,10 +49,7 @@ const ROLE_KEY_BY_KIND = { member: 'guildMember', neutral: 'neutral', banned: 'b
 const KIND_LABEL = {
   member: 'Membro da Wynn Brasil',
   neutral: 'Neutro',
-  banned: 'BANIDO — membro da Guardians of Wynn',
 };
-
-const KIND_COLOR = { member: 0x2ecc71, neutral: 0x95a5a6, banned: 0xe74c3c };
 
 // Garante que o membro tenha EXATAMENTE um dos três cargos de classificação.
 // Um banido também perde o cargo de comunidade: o acesso dele é só a black-list.
@@ -79,15 +76,32 @@ export async function applyClassificationRoles(member, cfg, kind) {
   return wanted;
 }
 
+// Deixa o apelido no Discord igual ao nick do WynnCraft.
+//
+// Falha silenciosamente em dois casos que o Discord não deixa contornar: o dono
+// do servidor nunca pode ser renomeado por um bot, e nem quem tem cargo acima do
+// cargo do bot. Não é erro do registro, então não atrapalha o resto.
+export async function syncNickname(member, username) {
+  if (!member?.manageable) return false;
+  if (member.nickname === username) return true;
+  const ok = await member.setNickname(username).then(() => true).catch(() => false);
+  if (!ok) log.warn(`Não consegui renomear ${member.user?.tag ?? member.id} para "${username}".`);
+  return ok;
+}
+
+// Só o registro de um NEUTRO vira aviso: é um recruta em potencial.
+//
+// Um banido não gera mensagem nenhuma, em canal nenhum. O log e o canal de
+// recrutadores são lidos por gente demais para guardar segredo, e basta um
+// print vazar para a regra virar pública — e aí quem é da guilda proibida passa
+// a saber que precisa sair dela antes de se registrar.
 async function notifyRecruiters(client, cfg, { player, kind, discordId }) {
-  // Membros da nossa guilda que se registram não são novidade para o recrutamento.
-  if (kind === 'member') return;
+  if (kind !== 'neutral') return;
   const channelId = cfg.channels?.recruiters;
   if (!channelId) return;
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel) return;
 
-  const title = kind === 'banned' ? '🚫 Registro de membro da GsW' : '🆕 Possível novo membro';
   const guildLine = player.guild
     ? `[${player.guild.prefix}] ${player.guild.name} — ${player.guild.rank}`
     : 'Sem guilda';
@@ -96,8 +110,8 @@ async function notifyRecruiters(client, cfg, { player, kind, discordId }) {
     .send({
       embeds: [
         {
-          title,
-          color: KIND_COLOR[kind],
+          title: '🆕 Possível novo membro',
+          color: 0x95a5a6,
           description:
 `**Discord:** <@${discordId}>
 **Nick:** \`${player.username}\`
@@ -138,7 +152,22 @@ export async function linkAndClassify(interaction, rawNick) {
     return `Seu Discord já está vinculado a **${byDiscord.username}**. Peça à staff um \`/unlink\` para trocar.`;
   }
 
-  const kind = classifyPlayer(player);
+  // A lista de banidos vem antes da guilda: quem já foi banido continua banido,
+  // mesmo que hoje esteja sem guilda ou até dentro da nossa. E o registro é
+  // reforçado com o par (uuid, discord) desta tentativa, então trocar de conta
+  // do Minecraft ou de Discord só amplia a teia em vez de escapar dela.
+  const priorBan = await findBan({ uuid: player.uuid, discordId: interaction.user.id });
+  let kind = classifyPlayer(player);
+  if (priorBan || kind === 'banned') {
+    kind = 'banned';
+    await recordBan({
+      uuid: player.uuid,
+      username: player.username,
+      discordId: interaction.user.id,
+      reason: priorBan?.reason ?? BAN_REASON_BLACKLIST_GUILD,
+    });
+  }
+
   const now = new Date();
   // O endpoint de player devolve o rank em MAIÚSCULAS ("OWNER"); o de guilda usa
   // minúsculas. Normalizamos aqui para o resto do bot comparar sem surpresa.
@@ -170,6 +199,7 @@ export async function linkAndClassify(interaction, rawNick) {
   let roleId = null;
   if (interaction.member?.roles?.add) {
     roleId = await applyClassificationRoles(interaction.member, cfg, kind);
+    await syncNickname(interaction.member, player.username);
   }
 
   await notifyRecruiters(interaction.client, cfg, {
@@ -177,16 +207,22 @@ export async function linkAndClassify(interaction, rawNick) {
     kind,
     discordId: interaction.user.id,
   });
-  await audit(
-    interaction.client,
-    interaction.guildId,
-    `🔗 <@${interaction.user.id}> vinculou **${player.username}** → ${KIND_LABEL[kind]}.`,
-  );
+  // Banimento não deixa rastro nem no log: o canal tem leitores demais.
+  if (kind !== 'banned') {
+    await audit(
+      interaction.client,
+      interaction.guildId,
+      `🔗 <@${interaction.user.id}> vinculou **${player.username}** → ${KIND_LABEL[kind]}.`,
+    );
+  }
 
-  const roleNote = roleId ? ` Cargo <@&${roleId}> aplicado.` : '';
+  // O banimento é SILENCIOSO. Quem cai na black-list vê uma confirmação comum,
+  // sem citar o cargo, a GsW ou o motivo — e sem sugerir /apply, que só chamaria
+  // atenção. Quem precisa saber (staff) é avisado no canal de recrutadores e no
+  // log de auditoria, que o banido não enxerga.
+  const roleNote = roleId && kind !== 'banned' ? ` Cargo <@&${roleId}> aplicado.` : '';
   if (kind === 'banned') {
-    const blChannel = cfg.channels?.blacklist;
-    return `Conta **${player.username}** vinculada. Você é membro da **Guardians of Wynn**, então recebeu o cargo de banido e só tem acesso a ${blChannel ? `<#${blChannel}>` : 'a black-list'}.${roleNote}`;
+    return `Conta **${player.username}** vinculada com sucesso!`;
   }
   if (kind === 'member') {
     return `Conta **${player.username}** vinculada! Bem-vindo de volta, membro da **Wynn Brasil**.${roleNote}`;
@@ -210,8 +246,7 @@ export function panelPayload() {
 
 **Qual cargo você recebe**
 > 🟢 Está na **Wynn Brasil** → cargo de membro, acesso completo.
-> ⚪ Não está em nenhuma das duas → cargo **neutro**. Pode se candidatar com \`/apply submit\`.
-> 🔴 Está na **Guardians of Wynn [GsW]** → cargo de **banido**, acesso apenas à black-list.
+> ⚪ Não está na guilda → cargo **neutro**. Pode se candidatar com \`/apply submit\`.
 
 -# Só você enxerga a resposta da verificação. Este canal não aceita mensagens.`,
         footer: { text: 'Dados verificados na API oficial do Wynncraft' },
@@ -245,26 +280,6 @@ export function nickModal() {
           .setRequired(true),
       ),
     );
-}
-
-export function blacklistPayload() {
-  return {
-    embeds: [
-      {
-        title: '🚫 Você está na black-list',
-        color: 0xe74c3c,
-        description:
-`Sua conta do WynnCraft pertence à guilda **Guardians of Wynn [GsW]**, e por isso você só tem acesso a este canal.
-
-**Não é uma decisão manual.** O bot compara o seu vínculo com a lista de membros da GsW pela API oficial, e refaz essa checagem a cada poucos minutos.
-
-**Como sair daqui**
-> Se você deixar a GsW, o bot devolve seu acesso sozinho na próxima checagem — não precisa pedir nada a ninguém.
-> Se você não é membro da GsW e mesmo assim caiu aqui, chame a staff: pode ser vínculo errado.`,
-        footer: { text: 'Verificado na API oficial do Wynncraft' },
-      },
-    ],
-  };
 }
 
 // Publica, reaproveita ou RECRIA a mensagem fixa de um canal. Chamado de tempos
@@ -304,11 +319,13 @@ export async function ensureRegistrationPanel(client, guildDiscordId) {
   return ensurePanel(client, cfg.channels?.registration, PANEL_STATE_ID, panelPayload(), 'registro');
 }
 
-// Garante os dois painéis fixos. Roda periodicamente e logo após /config.
+// Garante o painel fixo do registro. Roda periodicamente e logo após /config.
+//
+// A black-list NÃO recebe painel: qualquer texto ali entregaria que existe uma
+// regra automática contra a GsW. O canal fica mudo de propósito.
 export async function ensurePanels(client, guildDiscordId) {
   const cfg = await getConfig(guildDiscordId);
   await ensurePanel(client, cfg.channels?.registration, PANEL_STATE_ID, panelPayload(), 'registro');
-  await ensurePanel(client, cfg.channels?.blacklist, BLACKLIST_STATE_ID, blacklistPayload(), 'black-list');
 }
 
 // O canal de registro guarda só a mensagem do painel. Qualquer outra coisa
