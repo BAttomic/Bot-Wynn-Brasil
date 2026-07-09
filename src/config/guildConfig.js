@@ -1,0 +1,112 @@
+import { collections } from '../db/mongo.js';
+
+export const CHANNEL_KEYS = [
+  'registration',
+  'applications',
+  'recruiters',
+  'war',
+  'tome',
+  'loans',
+  'logs',
+  'panel', // painel ao vivo da guilda
+  'activity', // logs de atividade (online/XP/guerras/nível)
+  'territory', // atualizações de território
+  'errors', // erros do bot
+];
+
+export const ROLE_KEYS = [
+  'community',
+  'guildMember', // cargo único automático para quem está na guilda
+  'topContributor', // cargo automático para os top N em pontos
+  'war',
+  'mainWar',
+  'recruiters',
+  // Cargos de rank abaixo: NÃO são atribuídos automaticamente (gestão manual).
+  'owner',
+  'chief',
+  'strategist',
+  'captain',
+  'recruiter',
+  'recruit',
+];
+
+export const PARAM_KEYS = [
+  'voteWindowHours',
+  'voteRule',
+  'roleSyncMinutes',
+  'pointsWeights',
+  'reapplyCooldownHours',
+  'snapshotHourUTC',
+  'loanReminderHourUTC',
+  'watcherSeconds',
+  'inactivityDays',
+  'topContributorCount',
+  'verifyHourUTC',
+];
+
+const DEFAULT_PARAMS = {
+  voteWindowHours: 24,
+  voteRule: 'effective', // 'effective' | 'total' (ver design.md §6)
+  roleSyncMinutes: 10,
+  // Multiplicadores do sistema de pontos unificado (design.md §17).
+  pointsWeights: { war: 10, raid: 5, contribPerMillion: 1 },
+  reapplyCooldownHours: 48,
+  snapshotHourUTC: 5, // horário (UTC) do snapshot diário de progresso
+  loanReminderHourUTC: 12,
+  watcherSeconds: 60, // frequência do poller de monitoramento
+  inactivityDays: 7, // limite para marcar membro como inativo
+  topContributorCount: 3, // nº de "Top Contribuidores"
+  verifyHourUTC: 12, // horário (UTC) do relatório automático de verificação
+};
+
+const cache = new Map(); // guildDiscordId -> doc
+
+export async function getConfig(guildDiscordId) {
+  if (cache.has(guildDiscordId)) return cache.get(guildDiscordId);
+  let doc = await collections.config().findOne({ guildDiscordId });
+  if (!doc) {
+    doc = {
+      guildDiscordId,
+      channels: {},
+      roles: {},
+      params: { ...DEFAULT_PARAMS },
+    };
+    await collections.config().insertOne(doc);
+  }
+  doc.params = { ...DEFAULT_PARAMS, ...(doc.params || {}) };
+  cache.set(guildDiscordId, doc);
+  return doc;
+}
+
+export async function setChannel(guildDiscordId, key, channelId) {
+  await collections
+    .config()
+    .updateOne(
+      { guildDiscordId },
+      { $set: { [`channels.${key}`]: channelId } },
+      { upsert: true },
+    );
+  cache.delete(guildDiscordId);
+}
+
+export async function setRole(guildDiscordId, key, roleId) {
+  await collections
+    .config()
+    .updateOne(
+      { guildDiscordId },
+      { $set: { [`roles.${key}`]: roleId } },
+      { upsert: true },
+    );
+  cache.delete(guildDiscordId);
+}
+
+export async function setParam(guildDiscordId, key, value) {
+  await collections
+    .config()
+    .updateOne(
+      { guildDiscordId },
+      { $set: { [`params.${key}`]: value } },
+      { upsert: true },
+    );
+  cache.delete(guildDiscordId);
+}

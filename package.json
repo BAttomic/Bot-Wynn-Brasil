@@ -1,0 +1,18 @@
+{
+  "name": "bot-wynncraft",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Bot de Discord para gerir uma guilda do WynnCraft",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "mongodb": "^6.9.0"
+  }
+}

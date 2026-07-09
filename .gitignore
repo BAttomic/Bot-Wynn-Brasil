@@ -1,0 +1,7 @@
+node_modules/
+npm-debug.log*
+
+# Segredos — NUNCA commitar
+.env
+.env.*
+!.env.example
