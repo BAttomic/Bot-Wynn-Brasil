@@ -9,7 +9,7 @@ import { runProgressSnapshot } from './jobs/progressSnapshot.js';
 import { runLoanReminders } from './jobs/loanReminders.js';
 import { runVerificationReport } from './jobs/verificationReport.js';
 import { runGuildWatch } from './services/watcher.js';
-import { ensureRegistrationPanel, attachRegistrationGuard } from './services/registration.js';
+import { ensurePanels, attachRegistrationGuard } from './services/registration.js';
 import { initErrorReport, reportError } from './services/errorReport.js';
 import { getConfig } from './config/guildConfig.js';
 import { startHealthServer } from './health.js';
@@ -45,9 +45,6 @@ async function main() {
     ready = true;
     log.info(`Logado como ${client.user.tag}`);
     initErrorReport(client, guildId);
-    await ensureRegistrationPanel(client, guildId).catch((e) =>
-      log.error('Falha ao publicar o painel de registro:', e),
-    );
     const cfg = await getConfig(guildId);
     const minutes = Number(cfg.params?.roleSyncMinutes) || 10;
     const snapH = Number(cfg.params?.snapshotHourUTC) || 5;
@@ -55,6 +52,8 @@ async function main() {
     const watchS = Number(cfg.params?.watcherSeconds) || 60;
     const verifyH = Number(cfg.params?.verifyHourUTC) || 12;
 
+    // Se alguém apagar um painel fixo, ele volta no próximo ciclo.
+    everyMinutes(5, 'panels', () => ensurePanels(client, guildId), { runOnStart: true });
     everyMinutes(minutes, 'roleSync', () => runRoleSync(client), { runOnStart: true });
     everyMinutes(1, 'applicationExpiry', () => runApplicationExpiry(client));
     everySeconds(watchS, 'guildWatch', () => runGuildWatch(client), { runOnStart: true });

@@ -9,6 +9,7 @@ import {
   PARAM_KEYS,
 } from '../../config/guildConfig.js';
 import { recomputePoints, rebuildLeaderboards } from '../../services/points.js';
+import { ensurePanels } from '../../services/registration.js';
 
 function choices(keys) {
   return keys.map((k) => ({ name: k, value: k }));
@@ -62,6 +63,12 @@ export default {
       const key = interaction.options.getString('key', true);
       const ch = interaction.options.getChannel('channel', true);
       await setChannel(gid, key, ch.id);
+
+      // Esses dois canais vivem de uma mensagem fixa; publica já.
+      if (key === 'registration' || key === 'blacklist') {
+        await ensurePanels(interaction.client, gid);
+        return interaction.editReply(`Canal **${key}** definido para <#${ch.id}>. Painel publicado.`);
+      }
       return interaction.editReply(`Canal **${key}** definido para <#${ch.id}>.`);
     }
 

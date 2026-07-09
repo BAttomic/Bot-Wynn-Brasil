@@ -19,6 +19,7 @@ export const MODAL_ID = 'registro:modal';
 export const NICK_FIELD = 'nick';
 
 const PANEL_STATE_ID = 'registrationPanel';
+const BLACKLIST_STATE_ID = 'blacklistPanel';
 
 // UUID da guilda é imutável; o prefixo pode ser trocado pelo dono a qualquer
 // momento, então ele serve só de fallback. Ambos podem vir do ambiente.
@@ -246,23 +247,41 @@ export function nickModal() {
     );
 }
 
-// Publica (ou reaproveita) a ÚNICA mensagem do bot no canal de registro.
-export async function ensureRegistrationPanel(client, guildDiscordId) {
-  const cfg = await getConfig(guildDiscordId);
-  const channelId = cfg.channels?.registration;
+export function blacklistPayload() {
+  return {
+    embeds: [
+      {
+        title: '🚫 Você está na black-list',
+        color: 0xe74c3c,
+        description:
+`Sua conta do WynnCraft pertence à guilda **Guardians of Wynn [GsW]**, e por isso você só tem acesso a este canal.
+
+**Não é uma decisão manual.** O bot compara o seu vínculo com a lista de membros da GsW pela API oficial, e refaz essa checagem a cada poucos minutos.
+
+**Como sair daqui**
+> Se você deixar a GsW, o bot devolve seu acesso sozinho na próxima checagem — não precisa pedir nada a ninguém.
+> Se você não é membro da GsW e mesmo assim caiu aqui, chame a staff: pode ser vínculo errado.`,
+        footer: { text: 'Verificado na API oficial do Wynncraft' },
+      },
+    ],
+  };
+}
+
+// Publica, reaproveita ou RECRIA a mensagem fixa de um canal. Chamado de tempos
+// em tempos: se alguém apagar o painel, ele volta sozinho no próximo ciclo.
+async function ensurePanel(client, channelId, stateId, payload, label) {
   if (!channelId) return null;
 
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel) {
-    log.warn('Canal de registro configurado mas inacessível.');
+    log.warn(`Canal de ${label} configurado mas inacessível.`);
     return null;
   }
 
   const state = collections.watcherState();
-  const saved = await state.findOne({ _id: PANEL_STATE_ID });
-  const payload = panelPayload();
+  const saved = await state.findOne({ _id: stateId });
 
-  if (saved?.messageId) {
+  if (saved?.messageId && saved.channelId === channel.id) {
     const msg = await channel.messages.fetch(saved.messageId).catch(() => null);
     if (msg) {
       await msg.edit(payload).catch(() => {});
@@ -272,26 +291,40 @@ export async function ensureRegistrationPanel(client, guildDiscordId) {
 
   const msg = await channel.send(payload);
   await state.updateOne(
-    { _id: PANEL_STATE_ID },
+    { _id: stateId },
     { $set: { messageId: msg.id, channelId: channel.id } },
     { upsert: true },
   );
-  log.info('Painel de registro publicado.');
+  log.info(`Painel de ${label} publicado.`);
   return msg.id;
 }
 
+export async function ensureRegistrationPanel(client, guildDiscordId) {
+  const cfg = await getConfig(guildDiscordId);
+  return ensurePanel(client, cfg.channels?.registration, PANEL_STATE_ID, panelPayload(), 'registro');
+}
+
+// Garante os dois painéis fixos. Roda periodicamente e logo após /config.
+export async function ensurePanels(client, guildDiscordId) {
+  const cfg = await getConfig(guildDiscordId);
+  await ensurePanel(client, cfg.channels?.registration, PANEL_STATE_ID, panelPayload(), 'registro');
+  await ensurePanel(client, cfg.channels?.blacklist, BLACKLIST_STATE_ID, blacklistPayload(), 'black-list');
+}
+
 // O canal de registro guarda só a mensagem do painel. Qualquer outra coisa
-// postada ali (inclusive por bots) é removida.
+// postada ali é removida.
 export function attachRegistrationGuard(client) {
   client.on('messageCreate', async (message) => {
     if (!message.guildId) return;
+
+    // Nunca apagamos o que nós mesmos postamos. O painel chega aqui pelo evento
+    // ANTES de ensurePanel gravar o messageId, então checar o estado salvo faria
+    // o guardião apagar o painel recém-criado — e o ciclo se repetiria sem fim.
+    if (message.author?.id === client.user?.id) return;
+
     try {
       const cfg = await getConfig(message.guildId);
       if (message.channelId !== cfg.channels?.registration) return;
-
-      const saved = await collections.watcherState().findOne({ _id: PANEL_STATE_ID });
-      if (saved?.messageId === message.id) return;
-
       await message.delete().catch(() => {});
     } catch (e) {
       log.error('Falha ao limpar o canal de registro:', e);
