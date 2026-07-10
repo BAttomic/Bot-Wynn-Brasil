@@ -7,11 +7,19 @@ import { loadBanIndex, recordBan, BAN_REASON_BLACKLIST_GUILD } from '../services
 import { optional } from '../config/env.js';
 import { log } from '../util/log.js';
 
-// Sincroniza a classificação (membro / neutro / banido) e o cargo automático
-// "Top Contribuidor". Os cargos de RANK (Líder/Chefe/...) NÃO são automáticos —
-// gestão manual (decisão do dono). O rank é apenas registrado no banco para
-// /verificar, pontos, etc. Rodar isto de novo é o que pega quem entrou na guilda
-// da black-list DEPOIS de já ter se registrado.
+/**
+ * Sincroniza a classificação de cada vínculo (membro / neutro / banido), o
+ * apelido e o cargo mais alto já alcançado.
+ *
+ * Os cargos de RANK (Líder, Sub-líder, …) NÃO são automáticos: são gestão manual
+ * da staff. O rank só é gravado no banco, para /verificar e para o peakRank.
+ *
+ * Rodar isto de novo é o que pega quem entrou na guilda da black-list DEPOIS de
+ * já ter se registrado.
+ *
+ * @param {import('discord.js').Client} client
+ * @returns {Promise<void>}
+ */
 export async function runRoleSync(client) {
   const guildDiscordId = optional('DISCORD_GUILD_ID');
   const prefix = optional('WYNN_GUILD_PREFIX');
@@ -30,21 +38,6 @@ export async function runRoleSync(client) {
   const banIndex = await loadBanIndex();
 
   await guild.members.fetch().catch(() => {});
-
-  const topRoleId = cfg.roles?.topContributor;
-  const topCount = Number(cfg.params?.topContributorCount) || 3;
-
-  // Top N por pontos (para o cargo de Top Contribuidor).
-  let topUuids = new Set();
-  if (topRoleId) {
-    const top = await collections
-      .guildStats()
-      .find({ points: { $gt: 0 } })
-      .sort({ points: -1 })
-      .limit(topCount)
-      .toArray();
-    topUuids = new Set(top.map((t) => t.uuid));
-  }
 
   const linked = await collections.members().find({}).toArray();
   for (const m of linked) {
@@ -104,14 +97,6 @@ export async function runRoleSync(client) {
     await applyClassificationRoles(member, cfg, kind);
     // Pega quem trocou de nick no Minecraft depois de registrado.
     await syncNickname(member, m.username);
-
-    // Cargo "Top Contribuidor": top N em pontos que ainda estão na guilda.
-    if (topRoleId) {
-      const should = kind === 'member' && topUuids.has(m.uuid);
-      const has = member.roles.cache.has(topRoleId);
-      if (should && !has) await member.roles.add(topRoleId).catch(() => {});
-      else if (!should && has) await member.roles.remove(topRoleId).catch(() => {});
-    }
   }
   log.info(`Role sync concluído (${linked.length} vínculos, ${res.members.length} membros na guilda, ${blacklistedUuids.size} na black-list).`);
 }

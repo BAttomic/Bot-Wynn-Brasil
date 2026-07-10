@@ -161,7 +161,7 @@ export default {
     .addSubcommand((s) => s.setName('status').setDescription('Vê o status da sua candidatura aberta'))
     .toJSON(),
 
-  // Roteamento de botões (apply:vote:* e apply:invited:*).
+  // Botões: apply:vote:*, apply:invited:*, e os do painel de recrutamento.
   owns(interaction) {
     return interaction.isButton?.() && interaction.customId.startsWith('apply:');
   },
@@ -170,6 +170,11 @@ export default {
     const [, action, appId, choice] = interaction.customId.split(':');
     if (action === 'vote') return handleVote(interaction, appId, choice);
     if (action === 'invited') return handleInvited(interaction, appId);
+
+    if (action === 'submit' || action === 'status') {
+      await interaction.deferReply({ ephemeral: true });
+      return action === 'submit' ? submitApplication(interaction) : applicationStatus(interaction);
+    }
   },
 
   async execute(interaction) {

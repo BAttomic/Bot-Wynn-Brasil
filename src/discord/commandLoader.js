@@ -36,19 +36,54 @@ export async function registerCommands() {
   log.info(`Slash commands registrados: ${commands.map((c) => c.data.name).join(', ')}`);
 }
 
+/**
+ * Responde a uma interação que já pode (ou não) ter sido deferida.
+ * Sem isto, uma interação sem resposta vira "Interação falhou" no cliente.
+ * @param {import('discord.js').Interaction} interaction
+ * @param {string} content
+ * @returns {Promise<void>}
+ */
+async function safeReply(interaction, content) {
+  if (!interaction.isRepliable?.()) return;
+  const payload = { content, ephemeral: true };
+  const p = interaction.deferred || interaction.replied
+    ? interaction.followUp(payload)
+    : interaction.reply(payload);
+  await p.catch(() => {});
+}
+
+/** @param {import('discord.js').Interaction} interaction */
+function ownerOf(interaction) {
+  for (const c of commands) {
+    if (typeof c.handleComponent !== 'function') continue;
+    // Um `owns` mal escrito não pode derrubar o roteamento inteiro.
+    try {
+      if (c.owns?.(interaction)) return c;
+    } catch (e) {
+      log.error(`owns() de /${c.data.name} lançou:`, e);
+    }
+  }
+  return null;
+}
+
 export function attachHandlers(client, ctx) {
   client.on('interactionCreate', async (interaction) => {
-    // Botões / menus são roteados para o comando "dono" (usado nos próximos módulos).
+    // Botões, menus e modais são roteados para o comando "dono".
     if (!interaction.isChatInputCommand()) {
-      for (const c of commands) {
-        if (typeof c.handleComponent === 'function' && c.owns?.(interaction)) {
-          try {
-            await c.handleComponent(interaction, ctx);
-          } catch (e) {
-            log.error('Erro ao tratar componente:', e);
-          }
-          return;
-        }
+      if (interaction.isAutocomplete?.()) return; // não é componente
+
+      const owner = ownerOf(interaction);
+      if (!owner) {
+        log.warn(`Componente sem dono: ${interaction.customId}`);
+        await safeReply(interaction, 'Este botão não responde mais. Use o comando equivalente.');
+        return;
+      }
+      try {
+        await owner.handleComponent(interaction, ctx);
+      } catch (e) {
+        log.error(`Erro no componente ${interaction.customId}:`, e);
+        reportError(`Componente ${interaction.customId}`, e);
+        await safeReply(interaction, 'Ocorreu um erro ao processar sua ação.');
       }
       return;
     }

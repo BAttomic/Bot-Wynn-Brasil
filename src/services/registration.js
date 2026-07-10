@@ -13,6 +13,7 @@ import { optional } from '../config/env.js';
 import { audit } from './audit.js';
 import { isHigherRank } from './guildData.js';
 import { findBan, recordBan, BAN_REASON_BLACKLIST_GUILD } from './bans.js';
+import { ensurePanel } from './panels.js';
 import { log } from '../util/log.js';
 
 export const BUTTON_ID = 'registro:verificar';
@@ -44,7 +45,15 @@ export function classifyPlayer(player) {
   return 'neutral';
 }
 
-const ROLE_KEY_BY_KIND = { member: 'guildMember', neutral: 'neutral', banned: 'banned' };
+// Cargos que cada classificação DEVE ter. O membro da guilda também é da
+// comunidade — a recíproca não vale: o neutro tem só o de comunidade.
+const ROLES_BY_KIND = {
+  member: ['guildMember', 'community'],
+  neutral: ['community'],
+  banned: [],
+};
+
+const ALL_CLASSIFICATION_KEYS = ['guildMember', 'community', 'banned'];
 
 const KIND_LABEL = {
   member: 'Membro da Wynn Brasil',
@@ -59,21 +68,27 @@ const KIND_LABEL = {
 // quem só escreveu o nick de um Capitão seria entregar a guilda. Rank é sempre
 // aplicado à mão pela staff; o bot no máximo avisa (ver peakRank em roleSync).
 export async function applyClassificationRoles(member, cfg, kind) {
-  const wanted = cfg.roles?.[ROLE_KEY_BY_KIND[kind]];
+  const wantedKeys = ROLES_BY_KIND[kind] ?? [];
+  const wantedIds = wantedKeys.map((k) => cfg.roles?.[k]).filter(Boolean);
 
-  const toRemove = Object.entries(ROLE_KEY_BY_KIND)
-    .filter(([k]) => k !== kind)
-    .map(([, key]) => cfg.roles?.[key])
-    .filter(Boolean);
-  if (kind === 'banned' && cfg.roles?.community) toRemove.push(cfg.roles.community);
+  // O banido fica sem nenhum dos três: o cargo de banido é aplicado à parte
+  // (abaixo) e o acesso dele vem só do override de canal na black-list.
+  const bannedId = cfg.roles?.banned;
+  const removeIds = ALL_CLASSIFICATION_KEYS.map((k) => cfg.roles?.[k])
+    .filter(Boolean)
+    .filter((id) => !wantedIds.includes(id) && !(kind === 'banned' && id === bannedId));
 
-  for (const id of toRemove) {
+  for (const id of removeIds) {
     if (member.roles.cache.has(id)) await member.roles.remove(id).catch(() => {});
   }
-  if (wanted && !member.roles.cache.has(wanted)) {
-    await member.roles.add(wanted).catch(() => {});
+  if (kind === 'banned' && bannedId && !member.roles.cache.has(bannedId)) {
+    await member.roles.add(bannedId).catch(() => {});
   }
-  return wanted;
+  for (const id of wantedIds) {
+    if (!member.roles.cache.has(id)) await member.roles.add(id).catch(() => {});
+  }
+
+  return kind === 'banned' ? bannedId : wantedIds[0] ?? null;
 }
 
 // Deixa o apelido no Discord igual ao nick do WynnCraft.
@@ -280,38 +295,6 @@ export function nickModal() {
           .setRequired(true),
       ),
     );
-}
-
-// Publica, reaproveita ou RECRIA a mensagem fixa de um canal. Chamado de tempos
-// em tempos: se alguém apagar o painel, ele volta sozinho no próximo ciclo.
-async function ensurePanel(client, channelId, stateId, payload, label) {
-  if (!channelId) return null;
-
-  const channel = await client.channels.fetch(channelId).catch(() => null);
-  if (!channel) {
-    log.warn(`Canal de ${label} configurado mas inacessível.`);
-    return null;
-  }
-
-  const state = collections.watcherState();
-  const saved = await state.findOne({ _id: stateId });
-
-  if (saved?.messageId && saved.channelId === channel.id) {
-    const msg = await channel.messages.fetch(saved.messageId).catch(() => null);
-    if (msg) {
-      await msg.edit(payload).catch(() => {});
-      return msg.id;
-    }
-  }
-
-  const msg = await channel.send(payload);
-  await state.updateOne(
-    { _id: stateId },
-    { $set: { messageId: msg.id, channelId: channel.id } },
-    { upsert: true },
-  );
-  log.info(`Painel de ${label} publicado.`);
-  return msg.id;
 }
 
 export async function ensureRegistrationPanel(client, guildDiscordId) {

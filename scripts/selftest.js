@@ -164,6 +164,15 @@ async function main() {
     check('objetivos semanais: Alice na frente', await top('weekly'), ['Alice:7', 'Bob:2']);
     check('categoria inexistente devolve vazio', (await P.categoryLeaderboard('xablau')).rows, []);
 
+    const LP = await import('../src/services/leaderboardPanel.js');
+    const painel = await LP.buildLeaderboardPanel();
+    const menu = painel.components[0].toJSON().components[0];
+    check('painel mostra pontos por padrão', painel.embeds[0].title.includes('Pontos'), true);
+    check('seletor tem pontos + todas as categorias', menu.options.length, 1 + Object.keys(P.CATEGORIES).length);
+    check('seletor dentro do limite de 25 opções', menu.options.length <= 25, true);
+    check('descrições do seletor ≤ 100 chars', menu.options.every((o) => (o.description || '').length <= 100), true);
+    check('nunca mais de 15 linhas', painel.embeds[0].description.split('\n').length <= 15, true);
+
     // ---------------------------------------------------- Banimentos
     section('9. Banimento pega UUID e Discord, e é permanente');
     const B2 = await import('../src/services/bans.js');
@@ -225,6 +234,40 @@ async function main() {
     check('1 guerra na season do jogo = 20 pts', await bucket(live.id), 20);
     check('4 guerras no off-season = 80 pts', await bucket('OFF-99'), 80);
     check('acumulado soma os dois = 100 pts', await pts('uuid-c'), 100);
+
+    // -------------------------------------------------- Empréstimo vencido
+    section('11. Empréstimo vencido continua ativo e pode ser quitado');
+    const { ACTIVE_STATUSES } = await import('../src/discord/commands/loan.js');
+    const loans = collections.loans();
+    const ontem = new Date(Date.now() - 86_400_000);
+    const { insertedId } = await loans.insertOne({
+      borrowerDiscordId: 'discord-x',
+      type: 'item',
+      itemDesc: 'Set de XP',
+      dueAt: ontem,
+      status: 'open',
+      overdueReminders: 0,
+      lastReminderAt: null,
+    });
+
+    // É isto que o job de lembretes faz.
+    await loans.updateMany({ status: 'open', dueAt: { $lt: new Date() } }, { $set: { status: 'overdue' } });
+    check('venceu, virou overdue', (await loans.findOne({ _id: insertedId })).status, 'overdue');
+
+    const ativos = await loans.find({ status: { $in: ACTIVE_STATUSES } }).toArray();
+    check('atrasado ainda aparece no /loan list', ativos.length, 1);
+
+    const quitado = await loans.updateOne(
+      { _id: insertedId, status: { $in: ACTIVE_STATUSES } },
+      { $set: { status: 'repaid' } },
+    );
+    check('atrasado PODE ser marcado como pago', quitado.matchedCount, 1);
+    check('estado final', (await loans.findOne({ _id: insertedId })).status, 'repaid');
+
+    // Regressão: o filtro antigo (só 'open') não pegava o atrasado.
+    await loans.updateOne({ _id: insertedId }, { $set: { status: 'overdue' } });
+    const filtroAntigo = await loans.updateOne({ _id: insertedId, status: 'open' }, { $set: { status: 'repaid' } });
+    check('o filtro antigo falhava (bug reproduzido)', filtroAntigo.matchedCount, 0);
   } finally {
     await getDb().dropDatabase();
     await closeMongo();

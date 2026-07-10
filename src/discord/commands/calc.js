@@ -5,6 +5,32 @@ const STX = 64 * 64 * 64; // 262144
 const LE = 64 * 64; // 4096
 const EB = 64;
 
+const MARKET_FEE = 0.05; // taxa de 5% do TradeMarket
+
+function parseEmeralds(raw) {
+  const n = parseFloat(raw) || 0;
+  if (raw.endsWith('stx')) return n * STX;
+  if (raw.endsWith('le')) return n * LE;
+  if (raw.endsWith('eb')) return n * EB;
+  return n; // "em" ou número puro
+}
+
+// Quebra um total de esmeraldas em stx / le / eb / em.
+function split(total) {
+  return {
+    stx: Math.floor(total / STX),
+    le: Math.floor((total % STX) / LE),
+    eb: Math.floor((total % LE) / EB),
+    em: total % EB,
+  };
+}
+
+function fracLine(total) {
+  const f = split(total);
+  const e = EMOJI.em;
+  return `${e.stx} \`${f.stx}\` · ${e.le} \`${f.le}\` · ${e.eb} \`${f.eb}\` · ${e.em} \`${f.em}\``;
+}
+
 export default {
   data: new SlashCommandBuilder()
     .setName('calc')
@@ -16,21 +42,9 @@ export default {
 
   async execute(interaction) {
     const raw = interaction.options.getString('valor', true).toLowerCase().trim();
-    const n = parseFloat(raw) || 0;
-    let em = n;
-    if (raw.endsWith('stx')) em = n * STX;
-    else if (raw.endsWith('le')) em = n * LE;
-    else if (raw.endsWith('eb')) em = n * EB;
-    // "em" ou número puro = esmeraldas
-
-    em = Math.floor(em);
-    const frac = {
-      stx: Math.floor(em / STX),
-      le: Math.floor((em % STX) / LE),
-      eb: Math.floor((em % LE) / EB),
-      em: em % EB,
-    };
-    const market = Math.floor(em * 1.05);
+    const em = Math.floor(parseEmeralds(raw));
+    const market = Math.floor(em * (1 + MARKET_FEE));
+    const e = EMOJI.em;
 
     await interaction.reply({
       embeds: [
@@ -38,17 +52,18 @@ export default {
           title: 'Conversor de Esmeraldas',
           color: 0x2ecc71,
           description:
-`**Entrada:** \`${raw}\` = **${em}** ${EMOJI.em.em}
+`**Entrada:** \`${raw}\` = **${em.toLocaleString('pt-BR')}** ${e.em}
 
-**Fracionado:** ${EMOJI.em.stx} \`${frac.stx}\` · ${EMOJI.em.le} \`${frac.le}\` · ${EMOJI.em.eb} \`${frac.eb}\` · ${EMOJI.em.em} \`${frac.em}\`
+**Fracionado:** ${fracLine(em)}
 
 **Equivalências:**
-- ${EMOJI.em.stx} \`${(em / STX).toFixed(2)}\`
-- ${EMOJI.em.le} \`${(em / LE).toFixed(2)}\`
-- ${EMOJI.em.eb} \`${(em / EB).toFixed(2)}\`
-- ${EMOJI.em.em} \`${em}\`
+- ${e.stx} \`${(em / STX).toFixed(2)}\` stx
+- ${e.le} \`${(em / LE).toFixed(2)}\` le
+- ${e.eb} \`${(em / EB).toFixed(2)}\` eb
+- ${e.em} \`${em}\` em
 
-**TradeMarket (+5% taxa):** ${EMOJI.em.em} \`${market}\` ( ${EMOJI.em.le} \`${(market / LE).toFixed(2)}\` )`,
+**TradeMarket (+5% de taxa):** **${market.toLocaleString('pt-BR')}** ${e.em}
+${fracLine(market)}`,
         },
       ],
     });

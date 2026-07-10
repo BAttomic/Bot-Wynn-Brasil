@@ -105,34 +105,40 @@ export function voteEmbed(app, eligibleCount) {
   };
 }
 
-async function pingRecruiters(client, cfg, app) {
+/**
+ * Anuncia o recruta aprovado no canal de recrutamento, com o comando de convite
+ * pronto para copiar. Não pinga cargo nenhum: quem acompanha o canal já está lá.
+ * @param {import('discord.js').Client} client
+ * @param {import('../config/guildConfig.js').GuildConfig} cfg
+ * @param {object} app  documento da candidatura
+ */
+async function announceApproved(client, cfg, app) {
   const channelId = cfg.channels?.recruiters;
   if (!channelId) {
     log.warn('Candidatura aprovada, mas canal "recruiters" não está configurado.');
     return;
   }
-  const roleId = cfg.roles?.recruiters;
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel) return;
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`apply:invited:${app._id}`)
-      .setLabel('Convidado ✅')
+      .setLabel('Convidado')
+      .setEmoji('✅')
       .setStyle(ButtonStyle.Success),
   );
 
   await channel.send({
-    content: roleId ? `<@&${roleId}>` : '',
     embeds: [
       {
-        title: 'Novo recruta aprovado!',
+        title: '🎉 Novo recruta aprovado!',
         description: `Convide **${app.username}** para a guilda:\n\`\`\`\n/guild invite ${app.username}\n\`\`\``,
         color: 0x2ecc71,
       },
     ],
     components: [row],
-    allowedMentions: { roles: roleId ? [roleId] : [] },
+    allowedMentions: { parse: [] },
   });
 }
 
@@ -182,6 +188,6 @@ export async function finalizeApplication(client, appId, cause = 'deadline') {
     `Candidatura de **${app.username}**: ${result === 'approved' ? '✅ aprovada' : '❌ reprovada'} (${cause}).`,
   );
 
-  if (result === 'approved') await pingRecruiters(client, cfg, app);
+  if (result === 'approved') await announceApproved(client, cfg, app);
   return result;
 }

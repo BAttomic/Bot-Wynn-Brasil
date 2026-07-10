@@ -10,6 +10,20 @@ import {
 } from '../../config/guildConfig.js';
 import { recomputePoints, rebuildLeaderboards } from '../../services/points.js';
 import { ensurePanels } from '../../services/registration.js';
+import { ensureStaticPanels } from '../../services/staticPanels.js';
+import { ensureLeaderboardPanel } from '../../services/leaderboardPanel.js';
+
+// Canais que hospedam uma mensagem fixa mantida pelo bot.
+const PANEL_CHANNEL_KEYS = new Set([
+  'registration',
+  'rules',
+  'pings',
+  'recruiters',
+  'warApplication',
+  'tome',
+  'loans',
+  'panel',
+]);
 
 function choices(keys) {
   return keys.map((k) => ({ name: k, value: k }));
@@ -64,9 +78,11 @@ export default {
       const ch = interaction.options.getChannel('channel', true);
       await setChannel(gid, key, ch.id);
 
-      // O canal de registro vive de uma mensagem fixa; publica já.
-      if (key === 'registration') {
+      // Estes canais vivem de uma mensagem fixa; publica já, sem esperar o job.
+      if (PANEL_CHANNEL_KEYS.has(key)) {
         await ensurePanels(interaction.client, gid);
+        await ensureStaticPanels(interaction.client, gid);
+        await ensureLeaderboardPanel(interaction.client, gid);
         return interaction.editReply(`Canal **${key}** definido para <#${ch.id}>. Painel publicado.`);
       }
       return interaction.editReply(`Canal **${key}** definido para <#${ch.id}>.`);

@@ -1,7 +1,69 @@
-import { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import {
+  SlashCommandBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+} from 'discord.js';
 import { collections } from '../../db/mongo.js';
 import { getConfig } from '../../config/guildConfig.js';
 import { audit } from '../../services/audit.js';
+
+/** Campos do modal de aplicação para guerra. @type {readonly string[]} */
+const APPLY_FIELDS = Object.freeze(['classe', 'interesse', 'funcao']);
+
+function applyModal() {
+  const field = (id, label, placeholder, required = true) =>
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId(id)
+        .setLabel(label)
+        .setPlaceholder(placeholder)
+        .setStyle(TextInputStyle.Short)
+        .setRequired(required)
+        .setMaxLength(100),
+    );
+
+  return new ModalBuilder()
+    .setCustomId('war:applyModal')
+    .setTitle('Aplicação para Guerra')
+    .addComponents(
+      field('classe', 'Sua classe exclusiva para guerra', 'Ex.: Warrior lvl 106 (ou "não tenho")'),
+      field('interesse', 'Interesse', 'WAR ou MAIN WAR'),
+      field('funcao', 'Função pretendida', 'DPS, Tank ou Healer'),
+    );
+}
+
+/** Publica a aplicação no canal de aplicação de guerra, para a staff avaliar. */
+async function submitWarApplication(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const cfg = await getConfig(interaction.guildId);
+  const channelId = cfg.channels?.warApplication ?? interaction.channelId;
+  const channel = await interaction.client.channels.fetch(channelId).catch(() => null);
+  if (!channel) return interaction.editReply('Canal de aplicação de guerra inacessível.');
+
+  const get = (id) => interaction.fields.getTextInputValue(id).trim();
+  const [classe, interesse, funcao] = APPLY_FIELDS.map(get);
+
+  await channel.send({
+    embeds: [
+      {
+        title: '📩 Nova aplicação para guerra',
+        color: 0xe74c3c,
+        description: `**Jogador:** <@${interaction.user.id}>\n**Classe:** \`${classe}\`\n**Interesse:** \`${interesse}\`\n**Função:** \`${funcao}\``,
+        thumbnail: { url: interaction.user.displayAvatarURL() },
+        timestamp: new Date().toISOString(),
+      },
+    ],
+    allowedMentions: { parse: [] },
+  });
+
+  audit(interaction.client, interaction.guildId, `⚔️ <@${interaction.user.id}> aplicou para guerra (${interesse}).`);
+  return interaction.editReply('Aplicação enviada! A staff vai avaliar e te retornar.');
+}
 
 function hasWarRole(member, cfg) {
   const ids = [cfg.roles?.war, cfg.roles?.mainWar].filter(Boolean);
@@ -59,13 +121,18 @@ export default {
     .addStringOption((o) => o.setName('nota').setDescription('Mensagem opcional').setRequired(false))
     .toJSON(),
 
+  // Botões da convocação (war:att:*), botão do painel (war:apply) e o modal.
   owns(interaction) {
-    return interaction.isButton?.() && interaction.customId.startsWith('war:');
+    return typeof interaction.customId === 'string' && interaction.customId.startsWith('war:');
   },
 
   async handleComponent(interaction) {
+    if (interaction.isModalSubmit?.() && interaction.customId === 'war:applyModal') {
+      return submitWarApplication(interaction);
+    }
     const [, action, answer] = interaction.customId.split(':');
     if (action === 'att') return handleAttend(interaction, answer);
+    if (action === 'apply') return interaction.showModal(applyModal());
   },
 
   async execute(interaction) {
