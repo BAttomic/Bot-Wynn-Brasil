@@ -13,7 +13,8 @@ export const CHANNEL_KEYS = Object.freeze([
   'registration', // painel de verificação; mensagens de membro são apagadas
   'blacklist', // único canal visível para quem tem o cargo de banido
   'applications', // votação de candidatura (público, voto anônimo)
-  'recruiters', // painel de recrutamento e aviso de novo registro neutro
+  'recruiters', // painel de recrutamento e anúncio de recruta aprovado
+  'recruitAlerts', // privado: avisa a staff quando um neutro se registra
   'war', // convocação de guerra e alerta de território
   'warApplication', // painel de como pedir cargo WAR / MAIN WAR
   'tome', // painel e fila de tomes
@@ -142,10 +143,9 @@ const DEFAULT_PARAMS = Object.freeze({
   watcherSeconds: 60,
   // Limite base de dias offline antes de o membro poder ser expulso.
   inactivityDays: 7,
-  // Cada 100 pontos compram +1 dia de perdão. Equivale à regra antiga de +1 dia
-  // por 100 milhões de Guild XP, já que 1 milhão de XP = 1 ponto — mas agora
-  // guerras, guild raids e objetivos semanais também rendem margem.
-  inactivityForgivenessPerPoints: 100,
+  // Cada 1000 pontos compram +1 dia de perdão. Guerras, guild raids e objetivos
+  // semanais rendem margem tanto quanto o Guild XP.
+  inactivityForgivenessPerPoints: 1000,
   inactivityForgivenessMaxDays: 30,
   verifyHourUTC: 12,
 });
@@ -165,6 +165,35 @@ const DEFAULT_PARAMS = Object.freeze({
  */
 const cache = new Map();
 
+/** @param {unknown} v @returns {boolean} objeto simples (não array, não null) */
+function isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * Mescla os parâmetros salvos sobre os padrões, UM NÍVEL PARA DENTRO.
+ *
+ * Um merge raso seria um bug silencioso: o documento no banco foi gravado quando
+ * `pointsWeights` só tinha três chaves, e substituiria o objeto inteiro. As
+ * chaves novas (guildRaid, weekly, territoryBase) virariam `undefined`, e como
+ * `eventPoints` faz `peso || 0`, guild raids e objetivos semanais passariam a
+ * valer ZERO sem ninguém notar.
+ *
+ * Arrays são substituídos, não mesclados — `voterRoles: []` precisa poder zerar.
+ *
+ * @param {Partial<GuildParams>} stored
+ * @returns {GuildParams}
+ */
+function mergeParams(stored = {}) {
+  const out = { ...DEFAULT_PARAMS };
+  for (const [key, value] of Object.entries(stored)) {
+    const fallback = DEFAULT_PARAMS[key];
+    out[key] =
+      isPlainObject(fallback) && isPlainObject(value) ? { ...fallback, ...value } : value;
+  }
+  return out;
+}
+
 /**
  * @param {string} guildDiscordId
  * @returns {Promise<GuildConfig>}
@@ -178,8 +207,9 @@ export async function getConfig(guildDiscordId) {
     doc = { guildDiscordId, channels: {}, roles: {}, params: { ...DEFAULT_PARAMS } };
     await collections.config().insertOne(doc);
   }
-  // Parâmetros novos entram com o padrão sem precisar de migração.
-  doc.params = { ...DEFAULT_PARAMS, ...(doc.params || {}) };
+  // Parâmetros novos entram com o padrão sem precisar de migração — inclusive os
+  // aninhados, como pointsWeights.
+  doc.params = mergeParams(doc.params);
   cache.set(guildDiscordId, doc);
   return doc;
 }

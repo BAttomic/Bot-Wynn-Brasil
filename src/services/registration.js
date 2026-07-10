@@ -106,13 +106,16 @@ export async function syncNickname(member, username) {
 
 // Só o registro de um NEUTRO vira aviso: é um recruta em potencial.
 //
-// Um banido não gera mensagem nenhuma, em canal nenhum. O log e o canal de
-// recrutadores são lidos por gente demais para guardar segredo, e basta um
-// print vazar para a regra virar pública — e aí quem é da guilda proibida passa
+// Vai para `recruitAlerts`, um canal de staff — e não para o de recrutamento,
+// que é público e onde o próprio candidato está lendo o painel. Sem esse canal
+// configurado, cai no log de auditoria.
+//
+// Um banido não gera mensagem nenhuma, em canal nenhum. Basta um print vazar
+// para a regra da black-list virar pública, e aí quem é da guilda proibida passa
 // a saber que precisa sair dela antes de se registrar.
-async function notifyRecruiters(client, cfg, { player, kind, discordId }) {
+async function notifyRecruitAlert(client, cfg, { player, kind, discordId }) {
   if (kind !== 'neutral') return;
-  const channelId = cfg.channels?.recruiters;
+  const channelId = cfg.channels?.recruitAlerts ?? cfg.channels?.logs;
   if (!channelId) return;
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel) return;
@@ -217,7 +220,7 @@ export async function linkAndClassify(interaction, rawNick) {
     await syncNickname(interaction.member, player.username);
   }
 
-  await notifyRecruiters(interaction.client, cfg, {
+  await notifyRecruitAlert(interaction.client, cfg, {
     player,
     kind,
     discordId: interaction.user.id,
@@ -242,7 +245,7 @@ export async function linkAndClassify(interaction, rawNick) {
   if (kind === 'member') {
     return `Conta **${player.username}** vinculada! Bem-vindo de volta, membro da **Wynn Brasil**.${roleNote}`;
   }
-  return `Conta **${player.username}** vinculada! Você entrou como **neutro** — use \`/apply submit\` se quiser entrar na guilda.${roleNote}`;
+  return `Conta **${player.username}** vinculada! Quer entrar na guilda? Vá ao canal de recrutamento e clique em **Enviar candidatura**.${roleNote}`;
 }
 
 export function panelPayload() {
@@ -265,7 +268,7 @@ export function panelPayload() {
 
 **O que o bot passa a rastrear**
 > Seu apelido no Discord vira o seu nick, e se atualiza sozinho caso você troque de nome no jogo.
-> Guild XP, guerras, guild raids e objetivos semanais viram **pontos de contribuição**, que definem a fila de Tomes e a sua margem de inatividade. Veja com \`/points show\`.
+> Guild XP, guerras, guild raids e objetivos semanais viram **pontos de contribuição**, que definem a fila de Tomes e a sua margem de inatividade. O botão **Meus pontos**, no canal de status da guilda, mostra os seus.
 
 -# Só você enxerga a resposta da verificação. Este canal não aceita mensagens.`,
         footer: { text: 'Dados verificados na API oficial do Wynncraft' },

@@ -100,21 +100,21 @@ async function main() {
 
   section('6. Perdão de inatividade pela contribuição');
   const inat = await import('../src/services/inactivity.js');
-  const ip = { inactivityDays: 7, inactivityForgivenessPerPoints: 100, inactivityForgivenessMaxDays: 30 };
+  const ip = { inactivityDays: 7, inactivityForgivenessPerPoints: 1000, inactivityForgivenessMaxDays: 30 };
 
   check('0 pontos => limite base de 7d', inat.allowanceDays(0, ip), 7);
-  check('99 pontos ainda não compram 1 dia', inat.forgivenessDays(99, ip), 0);
-  check('100 pontos => +1 dia', inat.forgivenessDays(100, ip), 1);
-  check('1000 pontos => +10 dias (7+10=17)', inat.allowanceDays(1000, ip), 17);
-  check('paridade com a regra antiga: 1B de XP = 1000 pts = +10d', inat.forgivenessDays(1000, ip), 10);
-  check('teto de 30 dias', inat.forgivenessDays(999_999, ip), 30);
+  check('999 pontos ainda não compram 1 dia', inat.forgivenessDays(999, ip), 0);
+  check('1000 pontos => +1 dia', inat.forgivenessDays(1000, ip), 1);
+  check('10.000 pontos => +10 dias (7+10=17)', inat.allowanceDays(10_000, ip), 17);
+  check('teto de 30 dias', inat.forgivenessDays(9_999_999, ip), 30);
   check('pontos negativos não tiram dias', inat.forgivenessDays(-500, ip), 0);
 
   const offline10 = new Date(Date.now() - 10 * 86_400_000);
   const novato = inat.evaluate({ username: 'Novato', lastJoin: offline10, online: false }, 0, ip);
-  const veterano = inat.evaluate({ username: 'Veterano', lastJoin: offline10, online: false }, 1000, ip);
+  const veterano = inat.evaluate({ username: 'Veterano', lastJoin: offline10, online: false }, 10_000, ip);
   check('novato com 10d offline já pode ser expulso', novato.kickable, true);
   check('veterano com 10d offline está protegido', veterano.kickable, false);
+  check('veterano ganhou 10 dias de perdão', veterano.forgiveness, 10);
   check('online nunca é expulsável', inat.evaluate({ username: 'On', lastJoin: offline10, online: true }, 0, ip).kickable, false);
   check('sem lastJoin não é expulsável', inat.evaluate({ username: '?', lastJoin: null, online: false }, 0, ip).kickable, false);
 
@@ -132,6 +132,22 @@ async function main() {
 
   await connectMongo();
   try {
+    // Regressão: config antiga no banco não pode apagar pesos novos.
+    // Um merge raso zeraria guildRaid/weekly/territoryBase silenciosamente.
+    const { getConfig } = await import('../src/config/guildConfig.js');
+    await collections.config().insertOne({
+      guildDiscordId: process.env.DISCORD_GUILD_ID,
+      channels: {},
+      roles: {},
+      params: { pointsWeights: { war: 10, raid: 5, contribPerMillion: 1 } }, // schema velho
+    });
+    const velha = await getConfig(process.env.DISCORD_GUILD_ID);
+    check('peso antigo do banco é preservado', velha.params.pointsWeights.raid, 5);
+    check('guildRaid volta do padrão (era undefined)', velha.params.pointsWeights.guildRaid, 10);
+    check('weekly volta do padrão (era undefined)', velha.params.pointsWeights.weekly, 30);
+    check('territoryBase volta do padrão (era undefined)', velha.params.pointsWeights.territoryBase, 10);
+    check('params de topo novos também entram', velha.params.inactivityForgivenessPerPoints, 1000);
+
     await collections.seasons().insertOne({ seasonId: 'S1', active: true, startAt: new Date() });
     const snapAt = new Date('2026-07-01');
     const A = { uuid: 'uuid-a', username: 'Alice' };

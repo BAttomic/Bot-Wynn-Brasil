@@ -41,7 +41,11 @@ function rulesPayload(params) {
   const per = params.inactivityForgivenessPerPoints;
   const maxDays = params.inactivityForgivenessMaxDays;
   const streakPct = Math.round(params.weeklyStreakBonusPerWeek * 100);
-  const exemplo = base + Math.min(maxDays, Math.floor(1000 / per));
+  // Exemplo de 10 dias de perdão, escrito a partir do divisor real.
+  const exemploPts = per * 10;
+  const exemploDias = Math.min(maxDays, 10);
+  const exemploTotal = base + exemploDias;
+  const fmt = (n) => n.toLocaleString('pt-BR');
 
   return {
     ...SILENT,
@@ -100,13 +104,13 @@ Tudo que você faz pela guilda vira ponto. Os pontos definem a **fila de Tomes**
 > \`1\` Guerra → **${w.war} pontos**, multiplicados pelas fronteiras que o defensor tinha
 > \`1\` Objetivo Semanal → **${w.weekly} pontos**, +${streakPct}% por semana seguida (até o dobro)
 
-Veja o seu com \`/points show\` e o ranking com \`/leaderboard\`.
+No canal de status da guilda, o botão **Meus pontos** mostra os seus, sua posição e quantos dias de tolerância eles te dão.
 
 ## 2. Inatividade e Expulsão
 > Membros que ficarem **${base} dias offline** podem ser removidos.
-> **Quem contribui ganha margem:** a cada **${per} pontos**, você ganha **+1 dia** de perdão, até **+${maxDays} dias**.
-> Exemplo: 1000 pontos = ${base} + ${Math.min(maxDays, Math.floor(1000 / per))} = **${exemplo} dias** de tolerância.
-> O bot <@${BOT_ID}> calcula isso sozinho. Ninguém precisa pedir.
+> **Quem contribui ganha margem:** a cada **${fmt(per)} pontos**, você ganha **+1 dia** de perdão, até **+${maxDays} dias**.
+> Exemplo: ${fmt(exemploPts)} pontos = ${base} + ${exemploDias} = **${exemploTotal} dias** de tolerância.
+> O bot <@${BOT_ID}> calcula isso sozinho. Ninguém precisa pedir: o botão **Meus pontos** te diz quantos dias ainda restam.
 
 **Expulsão por inatividade não é banimento.** Você pode voltar quando quiser, refazendo o processo em <#${RECRUIT_CHANNEL}>.
 
@@ -115,9 +119,13 @@ Veja o seu com \`/points show\` e o ranking com \`/leaderboard\`.
 > **Scrolls** e **Ferramentas** devem ser devolvidos após o uso. Pegou? Devolva!
 
 ## 4. Participação em Atividades da Guilda
-> **Guild Raids:** geram benefícios coletivos, buffs e recompensas compartilhadas.
-> **Guerras:** melhoram o ranking e garantem territórios, que dão bônus a todos.
-> **Farm em Grupo:** aumenta a interação, acelera o progresso e rende troca de dicas.
+Toda atividade abaixo vira ponto, e ponto vira margem de inatividade e prioridade na fila de Tomes.
+
+> **Objetivos Semanais** — a forma mais barata de pontuar. Um objetivo por semana dá \`${w.weekly}\` pontos, e manter a sequência aumenta o valor em ${streakPct}% a cada semana. É o que mais rende por tempo gasto.
+> **Guild XP** (\`/guild xp 100\`) — cada \`1.000.000\` vira \`${w.contribPerMillion}\` ponto. Sobe o nível da guilda, o que libera mais membros e mais territórios.
+> **Guild Raids** — \`${w.guildRaid}\` pontos para **cada um** dos participantes. Geram buffs e recompensas coletivas.
+> **Guerras** — \`${w.war}\` pontos, multiplicados pelas fronteiras que o defensor tinha. Território dá bônus para a guilda inteira.
+> **Farm em Grupo** — não pontua, mas rende amizade, dicas e progresso mais rápido.
 
 **Dúvidas ou sugestões?** Procure um membro da <@&${STAFF_ROLE}>. Estamos aqui para ajudar!`,
       },
@@ -125,16 +133,128 @@ Veja o seu com \`/points show\` e o ranking com \`/leaderboard\`.
   };
 }
 
-function pingsPayload() {
-  const xp = ['1268213746585698375', '1268211113942847603', '1268209833090486423', '1268209831219560560', '1268209827457400844', '1268208726058205245', '1268208320452235306', '1268208320343445516'];
-  const dungeon = ['1268218114999586816', '1268218115402109049', '1268218120196325517', '1268218114043019425', '1268220280166420572', '1268220287510384653', '1268220291788574814', '1268218121324462226', '1268218113137311877', '1268218101682405396', '1268218112319291462'];
-  const bombs = ['1324782914847899648', '1268230328401788928', '1268229844676776099', '1268231995633307812', '1268231994840715355', '1268231996820160614'];
-  const bombsWarn = ['1268231996459585650', '1268231992336449687'];
-  const prof = ['1331682928979218462', '1331682931940528188', '1331682925401473095', '1331682920431226892', '1331682933265793096', '1331682936629497907', '1331682933655867472', '1331682934901444649', '1331682934259978445', '1331682935937564692', '1331682935627190283', '1331682937309102191'];
-  const quests = ['1271168738002997279', '1269810703972171908', '1269810688352718918', '1268229834455253013', '1268229845398327417', '1268229846144647170', '1268229847075786853'];
-  const classes = ['1269826644693221466', '1269826646886584413', '1269826649386385520', '1269826651878068374', '1269826654381805669', '1273252381018165308', '1295760021375815701'];
+/**
+ * Cargos de auto-role, um grupo por assunto.
+ *
+ * Um cargo sem ID é simplesmente omitido do painel, em vez de virar uma menção
+ * quebrada. É o que permite adicionar um cargo aqui antes de criá-lo no Discord.
+ *
+ * @typedef {object} PingGroup
+ * @property {string}    title
+ * @property {string}    [note]   linha de contexto acima da lista
+ * @property {string[]}  roles    IDs; entradas vazias são ignoradas
+ * @property {string}    [suffix] anotação repetida em CADA linha
+ * @type {ReadonlyArray<PingGroup>}
+ */
+const PING_GROUPS = Object.freeze([
+  {
+    title: '1. Pings de Experiência (XP)',
+    roles: [
+      '1268213746585698375',
+      '1268211113942847603',
+      '1268209833090486423',
+      '1268209831219560560',
+      '1268209827457400844',
+      '1268208726058205245',
+      '1268208320452235306',
+      '1268208320343445516',
+      // TODO: PING XP - BatCave (107+)
+      // TODO: PING XP - Fruma Lighthouse (115+)
+    ],
+  },
+  {
+    title: '2. Pings de Dungeon',
+    roles: [
+      '1268218114999586816',
+      '1268218115402109049',
+      '1268218120196325517',
+      '1268218114043019425',
+      '1268220280166420572',
+      '1268220287510384653',
+      '1268220291788574814',
+      '1268218121324462226',
+      '1268218113137311877',
+      '1268218101682405396',
+      '1268218112319291462',
+    ],
+  },
+  {
+    title: '3. Pings de Profissões',
+    note: 'Peça para alguém coletar um recurso ou craftar um item para você.',
+    roles: [
+      '1331682928979218462',
+      '1331682931940528188',
+      '1331682925401473095',
+      '1331682920431226892',
+      '1331682933265793096',
+      '1331682936629497907',
+      '1331682933655867472',
+      '1331682934901444649',
+      '1331682934259978445',
+      '1331682935937564692',
+      '1331682935627190283',
+      '1331682937309102191',
+    ],
+  },
+  {
+    title: '4. Pings de Quests e Raids',
+    note: 'Convide outros membros para participar com você.',
+    roles: [
+      '1271168738002997279',
+      '1269810703972171908',
+      '1269810688352718918',
+      '1268229834455253013',
+      '1268229845398327417',
+      '1268229846144647170',
+      '1268229847075786853',
+      // TODO: PING RAID - The Wartorn Palace (119+)
+    ],
+  },
+  {
+    title: '5. Pings de Classes e Eventos',
+    note: 'Encontre jogadores da mesma classe ou fique por dentro dos eventos.',
+    roles: [
+      '1269826644693221466',
+      '1269826646886584413',
+      '1269826649386385520',
+      '1269826651878068374',
+      '1269826654381805669',
+      '1273252381018165308',
+      '1295760021375815701',
+    ],
+  },
+]);
 
-  const list = (ids) => ids.map((id) => `<@&${id}>`).join(' ');
+/**
+ * Bombas não têm mais cargo de ping. Quem tem Champion enxerga as bombas ativas
+ * no jogo, então basta chamar um em vez de manter oito cargos de notificação.
+ * @type {string}
+ */
+const CHAMPION_ROLE = '';
+
+/** Um cargo por linha. `suffix` anota cada linha, não só a última. */
+function roleLines(ids, suffix = '') {
+  return ids
+    .filter(Boolean)
+    .map((id) => `<@&${id}>${suffix}`)
+    .join('\n');
+}
+
+/** @param {PingGroup} g @returns {string} */
+function renderGroup(g) {
+  const lines = roleLines(g.roles, g.suffix);
+  if (!lines) return '';
+  return [`**${g.title}**`, g.note, lines].filter(Boolean).join('\n');
+}
+
+function pingsPayload() {
+  const blocos = PING_GROUPS.map(renderGroup).filter(Boolean);
+
+  // Dois embeds de lista: o Discord corta descrição em 4096 caracteres.
+  const meio = Math.ceil(blocos.length / 2);
+  const bombas = CHAMPION_ROLE
+    ? `\n\n**Bombas ativas**\nNão existe mais cargo de ping para bombas. Chame um <@&${CHAMPION_ROLE}> — quem tem Champion vê no jogo quais bombas estão rodando.`
+    : '';
 
   return {
     ...SILENT,
@@ -153,34 +273,8 @@ function pingsPayload() {
 
 -# ⚠️ Mensagens enviadas neste canal são apagadas automaticamente após 48 horas.`,
       },
-      {
-        color: COLOR.pings,
-        description:
-`**1. Pings de Experiência (XP)**
-${list(xp)}
-
-**2. Pings de Dungeon**
-${list(dungeon)}
-
-**3. Pings de Bombs**
-${list(bombs)}
-${list(bombsWarn)} — *avise antes de soltar!*`,
-      },
-      {
-        color: COLOR.pings,
-        description:
-`**4. Pings de Profissões**
-Peça para alguém coletar um recurso ou craftar um item para você.
-${list(prof)}
-
-**5. Pings de Quests e Raids**
-Convide outros membros para participar com você.
-${list(quests)}
-
-**6. Pings de Classes e Eventos**
-Encontre jogadores da mesma classe ou fique por dentro dos eventos.
-${list(classes)}`,
-      },
+      { color: COLOR.pings, description: blocos.slice(0, meio).join('\n\n') },
+      { color: COLOR.pings, description: blocos.slice(meio).join('\n\n') + bombas },
     ],
   };
 }
@@ -193,23 +287,21 @@ function recruitPayload() {
         title: '🛡️ Como Entrar na Guilda Wynn Brasil',
         color: COLOR.recruit,
         description:
-`Bem-vindo(a) ao canal de recrutamento! Aqui está o passo a passo para se juntar à nossa guilda:
+`Você já está verificado: seu nick foi confirmado na API oficial quando você se registrou. Agora é só se candidatar.
 
 **1️⃣ Sem requisitos obrigatórios**
 > Nossa guilda é aberta para toda a comunidade, focada na língua portuguesa. Portugueses, angolanos e latinos em geral também são bem-vindos!
 
-**2️⃣ Registre-se primeiro**
-> Vincule sua conta no canal de registro. É de lá que sai o seu nick verificado — não precisa digitá-lo aqui.
+**2️⃣ Clique em Enviar candidatura**
+> Ela aparece **neste canal**, com uma votação aberta. O placar é público, mas **o voto é anônimo**: ninguém vê quem votou o quê.
 
-**3️⃣ Envie sua candidatura**
-> Use \`/apply submit\`. A candidatura aparece **neste canal** com uma votação aberta.
-> O placar é público, mas **o voto é anônimo**: ninguém vê quem votou o quê.
+**3️⃣ Aceite o convite**
+> Aprovado? Um recrutador te chama no jogo. Aceite digitando \`/guild join WnBR\` **dentro do Wynncraft**.
 
-**4️⃣ Aceite o convite**
-> Aprovado? Um recrutador te chama no jogo. Aceite com \`/guild join WnBR\`.
-
-**5️⃣ Escolha seus cargos**
+**4️⃣ Escolha seus cargos**
 > Passe em <id:customize> e marque seus interesses. Isso ajuda na sua integração.
+
+Assim que entrar na guilda, o bot te dá o cargo de membro sozinho — em até 10 minutos, sem precisar avisar ninguém.
 
 Dúvidas? Mencione um <@&${STAFF_ROLE}>. Estamos prontos para ajudar.`,
       },
@@ -235,7 +327,7 @@ function warApplicationPayload() {
 
 ## 🎖️ Cargo de Guerreiro \`WAR\`
 > Para fazer parte do exército geral:
-> - Ter pelo menos uma classe **nível 105**.
+> - Ter pelo menos uma classe **nível 120**.
 > - Estar disposto a receber PINGs sobre as guerras.
 
 **Os requisitos são simples e servem para garantir um time base ativo!**
@@ -281,7 +373,7 @@ function tomePayload() {
 `Regras e requisitos para receber o **Guild Tome**.
 
 ### Requisitos
-> Ter pelo menos uma classe de nível \`105\`.
+> Ter pelo menos uma classe de nível \`120\`.
 > Ter completado a quest \`Realm of Light I - The Worm Holes\`.
 > Ser membro da guilda há pelo menos \`1 semana\`.
 

@@ -4,11 +4,9 @@
  * Todo membro tem um limite base (7 dias). Quem contribuiu mais ganha dias de
  * perdão: a cada `inactivityForgivenessPerPoints` pontos, +1 dia, até um teto.
  *
- * A escala foi calibrada para não mudar a regra antiga: ela dava +1 dia a cada
- * 100 milhões de Guild XP, e como 1 milhão de XP vale 1 ponto, 100 pontos = +1
- * dia é a mesma coisa. A diferença é que agora guerras, guild raids e objetivos
- * semanais também contam — quem defende território ganha margem, não só quem
- * farma XP.
+ * A diferença para a regra antiga, que só olhava Guild XP, é que agora guerras,
+ * guild raids e objetivos semanais também compram margem — quem defende
+ * território ganha tolerância tanto quanto quem farma.
  */
 
 const DAY_MS = 86_400_000;

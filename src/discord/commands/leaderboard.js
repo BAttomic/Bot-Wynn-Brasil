@@ -3,7 +3,9 @@ import { getActiveSeason } from '../../services/seasons.js';
 import { pointsLeaderboard, categoryLeaderboard, CATEGORIES } from '../../services/points.js';
 import {
   SELECT_ID,
+  ME_ID,
   handleLeaderboardSelect,
+  handleMyPoints,
   renderPoints,
   renderCategory,
 } from '../../services/leaderboardPanel.js';
@@ -44,12 +46,13 @@ export default {
     )
     .toJSON(),
 
-  // Seletor do painel fixo no canal de status.
+  // Componentes do painel fixo no canal de status.
   owns(interaction) {
-    return interaction.customId === SELECT_ID;
+    return interaction.customId === SELECT_ID || interaction.customId === ME_ID;
   },
 
   handleComponent(interaction) {
+    if (interaction.customId === ME_ID) return handleMyPoints(interaction);
     return handleLeaderboardSelect(interaction);
   },
 
