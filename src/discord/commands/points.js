@@ -7,6 +7,7 @@ import {
   recomputePoints,
   rebuildLeaderboards,
 } from '../../services/points.js';
+import { ensureLeaderboardPanel } from '../../services/leaderboardPanel.js';
 import { audit } from '../../services/audit.js';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
@@ -49,8 +50,9 @@ export default {
       }
       const { members } = await recomputePoints();
       await rebuildLeaderboards();
+      await ensureLeaderboardPanel(interaction.client, interaction.guildId);
       audit(interaction.client, interaction.guildId, `♻️ <@${interaction.user.id}> recalculou os pontos (${members} membros).`);
-      return interaction.editReply(`Histórico reprocessado com os pesos atuais: **${members}** membro(s). Ranking refeito.`);
+      return interaction.editReply(`Histórico reprocessado com os pesos atuais: **${members}** membro(s). Ranking e painel refeitos.`);
     }
 
     if (sub === 'add') {

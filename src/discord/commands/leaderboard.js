@@ -1,11 +1,18 @@
-import { SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
 import { getActiveSeason } from '../../services/seasons.js';
-import { pointsLeaderboard, categoryLeaderboard, CATEGORIES } from '../../services/points.js';
+import {
+  pointsLeaderboard,
+  categoryLeaderboard,
+  recomputePoints,
+  rebuildLeaderboards,
+  CATEGORIES,
+} from '../../services/points.js';
 import {
   SELECT_ID,
   ME_ID,
   handleLeaderboardSelect,
   handleMyPoints,
+  ensureLeaderboardPanel,
   renderPoints,
   renderCategory,
 } from '../../services/leaderboardPanel.js';
@@ -28,6 +35,11 @@ export default {
         .addStringOption((o) =>
           o.setName('season').setDescription('ID da season, ou "atual" (padrão: acumulado)').setRequired(false),
         ),
+    )
+    .addSubcommand((s) =>
+      s
+        .setName('atualizar')
+        .setDescription('(Staff) Reapura o placar agora e republica o painel'),
     )
     .addSubcommand((s) =>
       s
@@ -57,8 +69,23 @@ export default {
   },
 
   async execute(interaction) {
-    await interaction.deferReply();
     const sub = interaction.options.getSubcommand();
+
+    if (sub === 'atualizar') {
+      await interaction.deferReply({ ephemeral: true });
+      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+        return interaction.editReply('Apenas staff pode forçar a apuração.');
+      }
+      // Recalcula do livro-razão, remonta as tabelas e reedita o painel fixo.
+      const { members } = await recomputePoints();
+      const { categories } = await rebuildLeaderboards();
+      await ensureLeaderboardPanel(interaction.client, interaction.guildId);
+      return interaction.editReply(
+        `Placar reapurado: **${members}** membro(s), pontos + ${categories} categorias. Painel atualizado.`,
+      );
+    }
+
+    await interaction.deferReply();
     const seasonId = await resolveSeason(interaction.options.getString('season'));
 
     if (sub === 'pontos') {

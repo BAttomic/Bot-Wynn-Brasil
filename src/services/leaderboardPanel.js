@@ -56,17 +56,44 @@ export function renderCategory(key, doc, seasonId = null) {
   return { title: `${cat.emoji} ${cat.label}`, color: 0x3498db, description: lines.join('\n'), ...stamp(doc, seasonId) };
 }
 
-function selectRow() {
+/** Visão padrão do painel. @type {string} */
+export const DEFAULT_VIEW = 'pontos';
+
+/**
+ * A visão escolhida vale para TODO MUNDO, então precisa sobreviver ao job que
+ * republica o painel a cada 5 minutos. Fica no mesmo documento do messageId.
+ * @returns {Promise<string>}
+ */
+async function currentView() {
+  const doc = await collections.watcherState().findOne({ _id: STATE_ID });
+  const view = doc?.view;
+  return view === DEFAULT_VIEW || CATEGORIES[view] ? view : DEFAULT_VIEW;
+}
+
+/** @param {string} view */
+function saveView(view) {
+  return collections.watcherState().updateOne({ _id: STATE_ID }, { $set: { view } }, { upsert: true });
+}
+
+/** @param {string} view marca a opção atual como selecionada */
+function selectRow(view = DEFAULT_VIEW) {
   const menu = new StringSelectMenuBuilder()
     .setCustomId(SELECT_ID)
-    .setPlaceholder('Ver outro ranking…')
+    .setPlaceholder('Trocar o ranking exibido…')
     .addOptions(
-      { label: 'Pontos de contribuição', value: 'pontos', emoji: '🏆', description: 'O ranking geral (padrão)' },
+      {
+        label: 'Pontos de contribuição',
+        value: DEFAULT_VIEW,
+        emoji: '🏆',
+        description: 'O ranking geral (padrão)',
+        default: view === DEFAULT_VIEW,
+      },
       ...Object.entries(CATEGORIES).map(([value, c]) => ({
         label: c.label,
         value,
         emoji: c.emoji,
         description: `Números crus de ${c.unit}`,
+        default: view === value,
       })),
     );
   return new ActionRowBuilder().addComponents(menu);
@@ -82,9 +109,17 @@ function meRow() {
   );
 }
 
-export async function buildLeaderboardPanel() {
-  const doc = await pointsLeaderboard('alltime');
-  return { embeds: [renderPoints(doc)], components: [selectRow(), meRow()] };
+/**
+ * Monta o painel na visão pedida (ou na última escolhida).
+ * @param {string} [view]
+ */
+export async function buildLeaderboardPanel(view) {
+  const v = view ?? (await currentView());
+  const embed =
+    v === DEFAULT_VIEW
+      ? renderPoints(await pointsLeaderboard('alltime'))
+      : renderCategory(v, await categoryLeaderboard(v));
+  return { embeds: [embed], components: [selectRow(v), meRow()] };
 }
 
 /**
@@ -151,17 +186,18 @@ export async function ensureLeaderboardPanel(client, guildDiscordId) {
   return ensurePanel(client, cfg.channels?.panel, STATE_ID, payload, 'leaderboards');
 }
 
-// A escolha responde só a quem clicou: a mensagem pública continua nos pontos.
+/**
+ * Troca o ranking exibido no painel PÚBLICO — todo mundo passa a ver a mesma
+ * coisa. A escolha é persistida, senão o job de 5 minutos a desfaria.
+ * @param {import('discord.js').StringSelectMenuInteraction} interaction
+ */
 export async function handleLeaderboardSelect(interaction) {
-  const key = interaction.values?.[0];
-  await interaction.deferReply({ ephemeral: true });
-
-  if (key === 'pontos') {
-    const doc = await pointsLeaderboard('alltime');
-    return interaction.editReply({ embeds: [renderPoints(doc)] });
+  const view = interaction.values?.[0];
+  if (view !== DEFAULT_VIEW && !CATEGORIES[view]) {
+    return interaction.reply({ content: 'Ranking desconhecido.', ephemeral: true });
   }
-  if (!CATEGORIES[key]) return interaction.editReply('Ranking desconhecido.');
 
-  const doc = await categoryLeaderboard(key);
-  return interaction.editReply({ embeds: [renderCategory(key, doc)] });
+  await interaction.deferUpdate();
+  await saveView(view);
+  await interaction.editReply(await buildLeaderboardPanel(view));
 }

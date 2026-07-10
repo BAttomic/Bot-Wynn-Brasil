@@ -122,7 +122,7 @@ No canal de status da guilda, o botão **Meus pontos** mostra os seus, sua posi�
 Toda atividade abaixo vira ponto, e ponto vira margem de inatividade e prioridade na fila de Tomes.
 
 > **Objetivos Semanais** — a forma mais barata de pontuar. Um objetivo por semana dá \`${w.weekly}\` pontos, e manter a sequência aumenta o valor em ${streakPct}% a cada semana. É o que mais rende por tempo gasto.
-> **Guild XP** (\`/guild xp 100\`) — cada \`1.000.000\` vira \`${w.contribPerMillion}\` ponto. Sobe o nível da guilda, o que libera mais membros e mais territórios.
+> **Guild XP** (\`/guild xp 100\`) — cada \`1.000.000\` vira \`${w.contribPerMillion}\` ponto. Sobe o nível da guilda, o que libera mais membros e slots de baú.
 > **Guild Raids** — \`${w.guildRaid}\` pontos para **cada um** dos participantes. Geram buffs e recompensas coletivas.
 > **Guerras** — \`${w.war}\` pontos, multiplicados pelas fronteiras que o defensor tinha. Território dá bônus para a guilda inteira.
 > **Farm em Grupo** — não pontua, mas rende amizade, dicas e progresso mais rápido.

@@ -233,6 +233,21 @@ async function main() {
     check('seletor dentro do limite de 25 opções', menu.options.length <= 25, true);
     check('descrições do seletor ≤ 100 chars', menu.options.every((o) => (o.description || '').length <= 100), true);
     check('nunca mais de 15 linhas', painel.embeds[0].description.split('\n').length <= 15, true);
+    check('botão Meus pontos presente', painel.components[1].toJSON().components[0].custom_id, LP.ME_ID);
+    check('opção "pontos" marcada como selecionada', menu.options.find((o) => o.value === 'pontos').default, true);
+
+    // A visão do painel é PÚBLICA: precisa sobreviver ao job que o republica.
+    await collections.watcherState().updateOne({ _id: 'leaderboardPanel' }, { $set: { view: 'xp' } }, { upsert: true });
+    const emXp = await LP.buildLeaderboardPanel();
+    check('painel republicado respeita a visão salva', emXp.embeds[0].title.includes('XP'), true);
+    const menuXp = emXp.components[0].toJSON().components[0];
+    check('seletor marca a visão salva', menuXp.options.find((o) => o.value === 'xp').default, true);
+    check('e desmarca a anterior', menuXp.options.find((o) => o.value === 'pontos').default, false);
+
+    await collections.watcherState().updateOne({ _id: 'leaderboardPanel' }, { $set: { view: 'inexistente' } });
+    const invalida = await LP.buildLeaderboardPanel();
+    check('visão inválida cai no padrão', invalida.embeds[0].title.includes('Pontos'), true);
+    await collections.watcherState().deleteOne({ _id: 'leaderboardPanel' });
 
     // ---------------------------------------------------- Banimentos
     section('10. Banimento pega UUID e Discord, e é permanente');
@@ -329,6 +344,28 @@ async function main() {
     await loans.updateOne({ _id: insertedId }, { $set: { status: 'overdue' } });
     const filtroAntigo = await loans.updateOne({ _id: insertedId, status: 'open' }, { $set: { status: 'repaid' } });
     check('o filtro antigo falhava (bug reproduzido)', filtroAntigo.matchedCount, 0);
+
+    // Alterar o prazo ressuscita um atrasado e zera o ciclo de cobrança.
+    await loans.updateOne({ _id: insertedId }, { $set: { status: 'overdue', overdueReminders: 4, dueSoonNotified: true } });
+    const novo = await loans.findOneAndUpdate(
+      { _id: insertedId, status: { $in: ACTIVE_STATUSES } },
+      { $set: { dueAt: new Date(Date.now() + 7 * 86_400_000), status: 'open', dueSoonNotified: false, overdueReminders: 0, lastReminderAt: null } },
+      { returnDocument: 'after' },
+    );
+    check('prazo novo devolve o empréstimo para "open"', novo.status, 'open');
+    check('e zera as cobranças de atraso', novo.overdueReminders, 0);
+    check('e o aviso de vencimento pode disparar de novo', novo.dueSoonNotified, false);
+    check('vence no futuro', novo.dueAt > new Date(), true);
+
+    // Confirmação de recebimento é do devedor, e só acontece uma vez.
+    const conf = await loans.findOneAndUpdate(
+      { _id: insertedId, confirmedAt: null },
+      { $set: { confirmedAt: new Date() } },
+      { returnDocument: 'after' },
+    );
+    check('devedor confirma o recebimento', !!conf.confirmedAt, true);
+    const reconf = await loans.updateOne({ _id: insertedId, confirmedAt: null }, { $set: { confirmedAt: new Date() } });
+    check('não dá para confirmar duas vezes', reconf.matchedCount, 0);
   } finally {
     await getDb().dropDatabase();
     await closeMongo();

@@ -2,7 +2,12 @@ import {
   SlashCommandBuilder,
   PermissionFlagsBits,
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   UserSelectMenuBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   ChannelType,
 } from 'discord.js';
 import { ObjectId } from 'mongodb';
@@ -74,26 +79,83 @@ async function isLoanManager(interaction) {
   return MANAGER_GUILD_RANKS.includes(linked?.guildRank);
 }
 
-/** Texto do acordo, postado dentro do tópico. */
-function agreementEmbed(borrowerId, dueAt) {
+const PLACEHOLDER_ITEMS = 'A definir';
+const ITEMS_FIELD_LIMIT = 1024; // limite de um campo de embed
+
+const STATUS_COLOR = {
+  open: 0xf1c40f,
+  overdue: 0xe74c3c,
+  repaid: 0x2ecc71,
+  cancelled: 0x95a5a6,
+};
+
+/**
+ * A mensagem viva do acordo, dentro do tópico. É reeditada a cada mudança, em
+ * vez de virar uma pilha de mensagens de "atualizei o prazo".
+ * @param {object} loan
+ * @returns {import('discord.js').APIEmbed}
+ */
+function agreementEmbed(loan) {
+  const due = Math.floor(new Date(loan.dueAt).getTime() / 1000);
+  const confirmado = loan.confirmedAt
+    ? `✅ Confirmado por <@${loan.borrowerDiscordId}> <t:${Math.floor(new Date(loan.confirmedAt).getTime() / 1000)}:R>`
+    : '⏳ Aguardando o devedor clicar em **Confirmar recebimento**';
+
   return {
     title: '📄 Acordo de Empréstimo',
-    color: 0xf1c40f,
-    description:
-`Devedor: <@${borrowerId}>
-Devolução até <t:${Math.floor(dueAt.getTime() / 1000)}:F> (<t:${Math.floor(dueAt.getTime() / 1000)}:R>)
-
-**Itens incluídos**
-A staff lista abaixo os itens (ou o código do trade). Todos devem estar protegidos com \`/itemlock\`.
-
-**Valor estimado**
-A combinar.
-
-**Confirmação**
-Anexe as prints do trade. O devedor precisa **responder neste tópico** confirmando que recebeu.
-
--# Devoluções antecipadas são livres. Para estender o prazo, formalize um novo acordo.`,
+    color: STATUS_COLOR[loan.status] ?? 0xf1c40f,
+    fields: [
+      { name: 'Devedor', value: `<@${loan.borrowerDiscordId}>`, inline: true },
+      { name: 'Situação', value: STATUS_LABEL[loan.status] ?? loan.status, inline: true },
+      { name: 'Devolução', value: `<t:${due}:D> · <t:${due}:R>`, inline: true },
+      {
+        name: '📦 Itens emprestados',
+        value: (loan.itemDesc || PLACEHOLDER_ITEMS).slice(0, ITEMS_FIELD_LIMIT),
+      },
+      { name: 'Confirmação', value: confirmado },
+    ],
+    footer: { text: `ID ${loan._id} · devolução antecipada é sempre livre` },
   };
+}
+
+/** @param {object} loan @returns {ActionRowBuilder[]} */
+function agreementRows(loan) {
+  if (!ACTIVE_STATUSES.includes(loan.status)) return []; // fechado: sem botões
+  const id = loan._id.toString();
+
+  const btn = (action, label, emoji, style, disabled = false) =>
+    new ButtonBuilder()
+      .setCustomId(`loan:${action}:${id}`)
+      .setLabel(label)
+      .setEmoji(emoji)
+      .setStyle(style)
+      .setDisabled(disabled);
+
+  return [
+    new ActionRowBuilder().addComponents(
+      btn('confirm', 'Confirmar recebimento', '✅', ButtonStyle.Success, !!loan.confirmedAt),
+      btn('items', 'Editar itens', '📦', ButtonStyle.Secondary),
+      btn('due', 'Alterar prazo', '📅', ButtonStyle.Secondary),
+      btn('close', 'Devolvido', '🔒', ButtonStyle.Danger),
+    ),
+  ];
+}
+
+/**
+ * Reescreve a mensagem do acordo com o estado atual do empréstimo.
+ * Modais não trazem `interaction.message`, por isso guardamos o messageId.
+ */
+async function refreshAgreement(client, loan) {
+  if (!loan.threadId || !loan.messageId) return;
+  const thread = await client.channels.fetch(loan.threadId).catch(() => null);
+  const msg = await thread?.messages.fetch(loan.messageId).catch(() => null);
+  await msg?.edit({ embeds: [agreementEmbed(loan)], components: agreementRows(loan) }).catch(() => {});
+}
+
+/** @param {string} id @returns {Promise<object|null>} */
+function findLoan(id) {
+  const _id = toObjectId(id);
+  return _id ? collections.loans().findOne({ _id }) : null;
 }
 
 /** Passo 1 do botão: escolher o devedor. */
@@ -145,33 +207,172 @@ async function openLoanThread(interaction) {
   await thread.members.add(borrowerId).catch(() => {});
 
   const linked = await collections.members().findOne({ discordId: borrowerId });
-  const { insertedId } = await collections.loans().insertOne({
+  const loan = {
     borrowerDiscordId: borrowerId,
     borrowerUuid: linked?.uuid ?? null,
     type: 'item',
     amount: null,
-    itemDesc: 'A definir no tópico',
+    itemDesc: PLACEHOLDER_ITEMS,
     createdAt: new Date(),
     dueAt,
     status: 'open',
     createdBy: interaction.user.id,
     threadId: thread.id,
+    messageId: null,
+    confirmedAt: null,
     dueSoonNotified: false,
     overdueReminders: 0,
     lastReminderAt: null,
-  });
+  };
+  const { insertedId } = await collections.loans().insertOne(loan);
+  loan._id = insertedId;
 
-  await thread.send({
+  // A mensagem do acordo é o painel de controle do empréstimo; guardamos o id
+  // dela porque um modal não devolve `interaction.message`.
+  const msg = await thread.send({
     content: `<@${borrowerId}>`,
-    embeds: [agreementEmbed(borrowerId, dueAt)],
+    embeds: [agreementEmbed(loan)],
+    components: agreementRows(loan),
     allowedMentions: { users: [borrowerId] },
   });
+  await collections.loans().updateOne({ _id: insertedId }, { $set: { messageId: msg.id } });
 
   audit(interaction.client, interaction.guildId, `💰 <@${interaction.user.id}> abriu empréstimo para <@${borrowerId}> em <#${thread.id}>.`);
   return interaction.editReply({
-    content: `Tópico criado: <#${thread.id}> · ID \`${insertedId}\`. Liste os itens por lá.`,
+    content: `Tópico criado: <#${thread.id}> · ID \`${insertedId}\`. Use os botões de lá para listar os itens.`,
     components: [],
   });
+}
+
+/** Só a staff mexe no acordo; o devedor só confirma. */
+async function requireManager(interaction) {
+  if (await isLoanManager(interaction)) return true;
+  await interaction.reply({ content: 'Apenas **Chief ou superior** pode fazer isso.', ephemeral: true });
+  return false;
+}
+
+/** Modal com os itens atuais já preenchidos, para editar em vez de redigitar. */
+async function promptItems(interaction, id) {
+  if (!(await requireManager(interaction))) return;
+  const loan = await findLoan(id);
+  if (!loan) return interaction.reply({ content: 'Empréstimo não encontrado.', ephemeral: true });
+
+  const atual = loan.itemDesc === PLACEHOLDER_ITEMS ? '' : loan.itemDesc ?? '';
+  const input = new TextInputBuilder()
+    .setCustomId('itens')
+    .setLabel('Itens emprestados (um por linha)')
+    .setPlaceholder('Bloodmoon (itemlock)\nBreezehands\nCódigo do trade: ABC123')
+    .setStyle(TextInputStyle.Paragraph)
+    .setMaxLength(ITEMS_FIELD_LIMIT)
+    .setRequired(true)
+    .setValue(atual.slice(0, ITEMS_FIELD_LIMIT));
+
+  return interaction.showModal(
+    new ModalBuilder()
+      .setCustomId(`loan:itemsModal:${id}`)
+      .setTitle('Itens do empréstimo')
+      .addComponents(new ActionRowBuilder().addComponents(input)),
+  );
+}
+
+async function saveItems(interaction, id) {
+  await interaction.deferReply({ ephemeral: true });
+  const itens = interaction.fields.getTextInputValue('itens').trim();
+
+  const loan = await collections.loans().findOneAndUpdate(
+    { _id: toObjectId(id) },
+    { $set: { itemDesc: itens } },
+    { returnDocument: 'after' },
+  );
+  if (!loan) return interaction.editReply('Empréstimo não encontrado.');
+
+  await refreshAgreement(interaction.client, loan);
+  return interaction.editReply('Itens atualizados no acordo.');
+}
+
+/** Modal de prazo: dias a partir de hoje. */
+async function promptDue(interaction, id) {
+  if (!(await requireManager(interaction))) return;
+
+  const input = new TextInputBuilder()
+    .setCustomId('dias')
+    .setLabel('Novo prazo, em dias a partir de hoje')
+    .setPlaceholder(String(DEFAULT_LOAN_DAYS))
+    .setStyle(TextInputStyle.Short)
+    .setMaxLength(3)
+    .setRequired(true);
+
+  return interaction.showModal(
+    new ModalBuilder()
+      .setCustomId(`loan:dueModal:${id}`)
+      .setTitle('Alterar prazo')
+      .addComponents(new ActionRowBuilder().addComponents(input)),
+  );
+}
+
+async function saveDue(interaction, id) {
+  await interaction.deferReply({ ephemeral: true });
+  const dias = Number.parseInt(interaction.fields.getTextInputValue('dias'), 10);
+  if (!Number.isInteger(dias) || dias < 1 || dias > 365) {
+    return interaction.editReply('Informe um número inteiro de dias, entre 1 e 365.');
+  }
+
+  const dueAt = new Date(Date.now() + dias * DAY_MS);
+  const loan = await collections.loans().findOneAndUpdate(
+    { _id: toObjectId(id), status: { $in: ACTIVE_STATUSES } },
+    {
+      // Prazo novo zera o ciclo de cobrança: um atrasado volta a ficar em dia,
+      // e os lembretes recomeçam do zero.
+      $set: { dueAt, status: 'open', dueSoonNotified: false, overdueReminders: 0, lastReminderAt: null },
+    },
+    { returnDocument: 'after' },
+  );
+  if (!loan) return interaction.editReply('Empréstimo não encontrado ou já fechado.');
+
+  await refreshAgreement(interaction.client, loan);
+  audit(interaction.client, interaction.guildId, `💰 <@${interaction.user.id}> alterou o prazo do empréstimo \`${id}\` para ${dias}d.`);
+  return interaction.editReply(`Prazo atualizado para **${dias} dias**. Os lembretes recomeçam.`);
+}
+
+/** Só o devedor confirma que recebeu. */
+async function confirmReceipt(interaction, id) {
+  const loan = await findLoan(id);
+  if (!loan) return interaction.reply({ content: 'Empréstimo não encontrado.', ephemeral: true });
+  if (loan.borrowerDiscordId !== interaction.user.id) {
+    return interaction.reply({ content: 'Só o devedor pode confirmar o recebimento.', ephemeral: true });
+  }
+  if (loan.confirmedAt) {
+    return interaction.reply({ content: 'Você já confirmou.', ephemeral: true });
+  }
+
+  await interaction.deferUpdate();
+  const atualizado = await collections.loans().findOneAndUpdate(
+    { _id: loan._id },
+    { $set: { confirmedAt: new Date() } },
+    { returnDocument: 'after' },
+  );
+  await refreshAgreement(interaction.client, atualizado);
+  audit(interaction.client, interaction.guildId, `💰 <@${interaction.user.id}> confirmou o recebimento do empréstimo \`${id}\`.`);
+}
+
+/** Fecha o empréstimo e arquiva o tópico. */
+async function closeLoan(interaction, id) {
+  if (!(await requireManager(interaction))) return;
+  await interaction.deferUpdate();
+
+  const loan = await collections.loans().findOneAndUpdate(
+    { _id: toObjectId(id), status: { $in: ACTIVE_STATUSES } },
+    { $set: { status: 'repaid', closedAt: new Date(), closedBy: interaction.user.id } },
+    { returnDocument: 'after' },
+  );
+  if (!loan) return;
+
+  await refreshAgreement(interaction.client, loan);
+  audit(interaction.client, interaction.guildId, `💰 <@${interaction.user.id}> encerrou o empréstimo \`${id}\` (devolvido).`);
+
+  const thread = await interaction.client.channels.fetch(loan.threadId).catch(() => null);
+  await thread?.send('🔒 Empréstimo devolvido. Tópico arquivado.').catch(() => {});
+  await thread?.setArchived(true).catch(() => {});
 }
 
 /** Botão "Meus empréstimos". */
@@ -218,10 +419,19 @@ export default {
   },
 
   async handleComponent(interaction) {
-    const action = interaction.customId.split(':')[1];
+    const [, action, id] = interaction.customId.split(':');
+
     if (action === 'mine') return myLoans(interaction);
     if (action === 'new') return promptBorrower(interaction);
     if (action === 'borrower') return openLoanThread(interaction);
+
+    // Ações dentro do tópico, todas carregando o id do empréstimo.
+    if (action === 'items') return promptItems(interaction, id);
+    if (action === 'itemsModal') return saveItems(interaction, id);
+    if (action === 'due') return promptDue(interaction, id);
+    if (action === 'dueModal') return saveDue(interaction, id);
+    if (action === 'confirm') return confirmReceipt(interaction, id);
+    if (action === 'close') return closeLoan(interaction, id);
   },
 
   async execute(interaction) {
@@ -275,10 +485,12 @@ export default {
     const res = await loans.findOneAndUpdate(
       { _id, status: { $in: ACTIVE_STATUSES } }, // um atrasado também pode ser quitado
       { $set: { status, closedAt: new Date(), closedBy: interaction.user.id } },
+      { returnDocument: 'after' },
     );
     if (!res) return interaction.editReply('Empréstimo não encontrado ou já fechado.');
 
-    // Fecha o tópico junto, se houver.
+    // Mantém o acordo no tópico coerente com o estado final, e arquiva.
+    await refreshAgreement(interaction.client, res);
     if (res.threadId) {
       const thread = await interaction.client.channels.fetch(res.threadId).catch(() => null);
       await thread?.setArchived(true).catch(() => {});
