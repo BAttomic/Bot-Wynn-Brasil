@@ -60,7 +60,22 @@ export async function takeSnapshots() {
     let dGuildRaids = 0;
     let dContrib = 0;
     let dWeekly = 0;
-    if (last?.metrics) {
+
+    // Primeiro snapshot de um membro: não há delta, mas há passado.
+    //
+    // `contributed` e `currentGuildRaids` são absolutos e JÁ escopados à nossa
+    // guilda pela API — são literalmente o que a pessoa contribuiu aqui. Entram
+    // inteiros como linha de base, senão um veterano com bilhões de XP começaria
+    // empatado com quem entrou ontem, e ainda perderia a margem de inatividade.
+    //
+    // `wars` NÃO entra: o contador da API é da conta inteira, somando guerras de
+    // outras guildas. E `weekly` não tem histórico nenhum na API. Esses dois só
+    // passam a contar do primeiro snapshot em diante.
+    const baseline = !last?.metrics;
+    if (baseline) {
+      dContrib = metrics.contributed;
+      dGuildRaids = metrics.guildRaids;
+    } else {
       dWars = safeDelta(metrics.wars, last.metrics.wars, 2000);
       dRaids = safeDelta(metrics.raids, last.metrics.raids, 2000);
       dGuildRaids = safeDelta(metrics.guildRaids, last.metrics.guildRaids ?? 0, 500);
@@ -73,7 +88,7 @@ export async function takeSnapshots() {
     }
 
     // Quantidades brutas viram eventos. `snapshotAt` torna a gravação idempotente.
-    const meta = { snapshotAt: now };
+    const meta = { snapshotAt: now, ...(baseline && { baseline: true }) };
     await recordEvent({ uuid: m.uuid, username: m.username, type: 'war', qty: dWars, meta, at: now });
     await recordEvent({ uuid: m.uuid, username: m.username, type: 'raid', qty: dRaids, meta, at: now });
     await recordEvent({ uuid: m.uuid, username: m.username, type: 'guildRaid', qty: dGuildRaids, meta, at: now });

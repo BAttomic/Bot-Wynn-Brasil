@@ -311,8 +311,38 @@ async function main() {
     check('4 guerras no off-season = 80 pts', await bucket('OFF-99'), 80);
     check('acumulado soma os dois = 100 pts', await pts('uuid-c'), 100);
 
+    // ------------------------------------ Linha de base do primeiro snapshot
+    section('12. Primeira apuração dá linha de base aos veteranos');
+    const { takeSnapshots } = await import('../src/services/progress.js');
+
+    await collections.pointsEvents().deleteMany({});
+    await collections.progressSnapshots().deleteMany({});
+    await collections.guildStats().deleteMany({});
+    await setParam(gid, 'pointsWeights', base);
+
+    await takeSnapshots(); // primeiro: baseline
+    const baseEv = await collections.pointsEvents().find({ 'meta.baseline': true }).toArray();
+    const tipos = [...new Set(baseEv.map((e) => e.type))].sort();
+    check('baseline só cria contribuição e guild raid', tipos, ['contribution', 'guildRaid']);
+    check('nenhuma guerra na linha de base', baseEv.filter((e) => e.type === 'war').length, 0);
+
+    await P.recomputePoints();
+    const comPontos = await collections.guildStats().countDocuments({ points: { $gt: 0 } });
+    check('membros já entram com pontos', comPontos > 0, true);
+
+    const topo = await collections.guildStats().find({}).sort({ points: -1 }).limit(1).next();
+    console.log(`       (topo: ${topo.username} = ${topo.points} pts de ${(topo.contributed / 1e6).toFixed(0)}M de XP)`);
+    check('pontos do topo batem com XP + guild raids', topo.points, Math.round(topo.contributed / 1e6) + topo.guildRaids * 10);
+
+    // Rodar de novo não pode duplicar: o segundo snapshot só tem deltas (zero).
+    await takeSnapshots();
+    await P.recomputePoints();
+    const topo2 = await collections.guildStats().findOne({ uuid: topo.uuid });
+    check('segunda apuração não duplica a linha de base', topo2.points, topo.points);
+    check('e não gera novo evento de baseline', await collections.pointsEvents().countDocuments({ 'meta.baseline': true }), baseEv.length);
+
     // -------------------------------------------------- Empréstimo vencido
-    section('12. Empréstimo vencido continua ativo e pode ser quitado');
+    section('13. Empréstimo vencido continua ativo e pode ser quitado');
     const { ACTIVE_STATUSES } = await import('../src/discord/commands/loan.js');
     const loans = collections.loans();
     const ontem = new Date(Date.now() - 86_400_000);

@@ -8,6 +8,7 @@ import {
   rebuildLeaderboards,
 } from '../../services/points.js';
 import { ensureLeaderboardPanel } from '../../services/leaderboardPanel.js';
+import { runProgressSnapshot } from '../../jobs/progressSnapshot.js';
 import { audit } from '../../services/audit.js';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
@@ -38,11 +39,30 @@ export default {
         .setName('recalcular')
         .setDescription('(Staff) Recalcula todo o histórico com os pesos atuais e refaz o ranking'),
     )
+    .addSubcommand((s) =>
+      s
+        .setName('apurar')
+        .setDescription('(Staff) Roda a apuração agora, sem esperar o horário diário'),
+    )
     .toJSON(),
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
-    await interaction.deferReply({ ephemeral: sub === 'add' || sub === 'recalcular' });
+    await interaction.deferReply({ ephemeral: sub !== 'show' && sub !== 'leaderboard' });
+
+    if (sub === 'apurar') {
+      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+        return interaction.editReply('Apenas staff pode apurar.');
+      }
+      // Snapshot + eventos + recompute + tabelas, exatamente o que o job diário faz.
+      await runProgressSnapshot();
+      await ensureLeaderboardPanel(interaction.client, interaction.guildId);
+      const total = await collections.guildStats().countDocuments({ points: { $gt: 0 } });
+      audit(interaction.client, interaction.guildId, `📸 <@${interaction.user.id}> forçou a apuração.`);
+      return interaction.editReply(
+        `Apuração concluída. **${total}** membro(s) com pontos.\n-# A primeira apuração cria a linha de base: XP contribuído e guild raids entram por inteiro. Guerras e objetivos semanais só contam daqui em diante.`,
+      );
+    }
 
     if (sub === 'recalcular') {
       if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
