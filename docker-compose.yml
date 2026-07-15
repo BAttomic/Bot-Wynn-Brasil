@@ -1,0 +1,46 @@
+# Bot_Wynncraft — bot de Discord (guilda WynnCraft). Sem domínio: conecta pra fora
+# (Discord + API WynnCraft). Buildado do repo pelo Dokploy (projeto "outros", branch main).
+# bot-mongo dedicado e isolado em net-bot-data; egress do bot via dokploy-network.
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # Discord (obrigatórios) — copie do seu .env local
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      # MongoDB (obrigatório) — aponta pro bot-mongo abaixo
+      MONGO_URI: ${MONGO_URI}
+      MONGO_DB: ${MONGO_DB}
+      # WynnCraft — informe ao menos o prefixo OU o UUID da guilda
+      WYNN_GUILD_PREFIX: ${WYNN_GUILD_PREFIX}
+      WYNN_GUILD_UUID: ${WYNN_GUILD_UUID}
+      WYNN_API_KEY: ${WYNN_API_KEY}
+      PORT: 8080
+    networks:
+      - net-bot-data
+      - dokploy-network
+
+  bot-mongo:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${BOT_MONGO_ROOT_PASSWORD}
+    volumes:
+      - vol-bot-mongo:/data/db
+    networks:
+      - net-bot-data
+
+volumes:
+  vol-bot-mongo:
+
+networks:
+  net-bot-data:
+    external: true
+  dokploy-network:
+    external: true
