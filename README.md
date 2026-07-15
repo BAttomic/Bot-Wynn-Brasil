@@ -30,6 +30,7 @@ Todos os módulos do roadmap. Comandos:
 | `/loan new\|list\|repay\|cancel` | (Staff) Livro-razão de empréstimos |
 | `/points show\|leaderboard\|add` | Sistema de pontos unificado |
 | `/calc` | Conversor de esmeraldas (stx/le/eb/em) |
+| `/uniforme` | Baixa o uniforme e a capa oficiais da Wynn Brasil |
 
 Automático (jobs):
 - **Sync de cargos**: cargo "Membro da Guilda" + "Top Contribuidor" (ranks são manuais) + reconciliação de ingresso/saída
