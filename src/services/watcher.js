@@ -241,13 +241,12 @@ async function updatePanel(client, cfg, guild) {
   if (saved?.messageId) {
     const msg = await channel.messages.fetch(saved.messageId).catch(() => null);
     if (msg) {
-      // Anexo do logo só vai na criação; edições o preservam. Mensagem antiga
-      // sem anexo é recriada uma vez, senão o attachment:// ficaria quebrado.
-      if (msg.attachments.size > 0) {
-        await msg.edit(payload).catch(() => {});
-        return;
-      }
-      await msg.delete().catch(() => {});
+      // SEMPRE edita no lugar — nunca reenvia (o painel perderia a posição no
+      // canal). Se a mensagem ainda não tem o logo, anexamos NESTA edição; as
+      // seguintes omitem o arquivo e o Discord preserva o anexo.
+      const needsFiles = msg.attachments.size === 0;
+      await msg.edit(needsFiles ? { ...payload, files: [logoAttachment()] } : payload).catch(() => {});
+      return;
     }
   }
   const msg = await channel.send({ ...payload, files: [logoAttachment()] });

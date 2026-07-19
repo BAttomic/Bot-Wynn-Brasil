@@ -21,16 +21,13 @@ export async function ensurePanel(client, channelId, stateId, payload, label, fi
   if (saved?.messageId && saved.channelId === channel.id) {
     const msg = await channel.messages.fetch(saved.messageId).catch(() => null);
     if (msg) {
-      // Só reenviamos o arquivo na CRIAÇÃO: em edições o Discord preserva o
-      // anexo, então o attachment:// do embed continua resolvendo de graça. A
-      // exceção é uma mensagem antiga que ainda não tem o anexo — aí recriamos
-      // uma vez, senão o embed apontaria para um attachment inexistente.
-      if (files.length && msg.attachments.size === 0) {
-        await msg.delete().catch(() => {});
-      } else {
-        await msg.edit(payload).catch(() => {});
-        return msg.id;
-      }
+      // SEMPRE edita no lugar — nunca reenvia (reenviar jogaria o painel para o
+      // fim do canal). Se a mensagem antiga ainda não tem o anexo do logo,
+      // incluímos o arquivo NESTA edição (o Discord anexa). As edições seguintes
+      // omitem o arquivo e o Discord preserva o anexo, sem reenviar nada.
+      const needsFiles = files.length && msg.attachments.size === 0;
+      await msg.edit(needsFiles ? { ...payload, files } : payload).catch(() => {});
+      return msg.id;
     }
   }
 
