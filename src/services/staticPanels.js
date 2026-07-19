@@ -86,7 +86,7 @@ function rulesPayload(params) {
 ### Observações Importantes
 - Caso presencie comportamento inadequado, denuncie aos moderadores.
 - Violações podem resultar em advertências, suspensões ou banimentos, dependendo da gravidade.
-- Escolha seus cargos em <id:customize>. Isso ajuda na organização da guilda e na comunicação sobre eventos.
+- Escolha seus cargos de notificação no canal de pings, reagindo nas mensagens. Isso ajuda na organização da guilda e na comunicação sobre eventos.
 
 -# Divirta-se e boas aventuras em Wynncraft!`,
       },
@@ -133,152 +133,6 @@ Toda atividade abaixo vira ponto, e ponto vira margem de inatividade e prioridad
   };
 }
 
-/**
- * Cargos de auto-role, um grupo por assunto.
- *
- * Um cargo sem ID é simplesmente omitido do painel, em vez de virar uma menção
- * quebrada. É o que permite adicionar um cargo aqui antes de criá-lo no Discord.
- *
- * @typedef {object} PingGroup
- * @property {string}    title
- * @property {string}    [note]   linha de contexto acima da lista
- * @property {string[]}  roles    IDs; entradas vazias são ignoradas
- * @property {string}    [suffix] anotação repetida em CADA linha
- * @type {ReadonlyArray<PingGroup>}
- */
-const PING_GROUPS = Object.freeze([
-  {
-    title: '1. Pings de Experiência (XP)',
-    roles: [
-      '1268213746585698375',
-      '1268211113942847603',
-      '1268209833090486423',
-      '1268209831219560560',
-      '1268209827457400844',
-      '1268208726058205245',
-      '1268208320452235306',
-      '1268208320343445516',
-      // TODO: PING XP - BatCave (107+)
-      // TODO: PING XP - Fruma Lighthouse (115+)
-    ],
-  },
-  {
-    title: '2. Pings de Dungeon',
-    roles: [
-      '1268218114999586816',
-      '1268218115402109049',
-      '1268218120196325517',
-      '1268218114043019425',
-      '1268220280166420572',
-      '1268220287510384653',
-      '1268220291788574814',
-      '1268218121324462226',
-      '1268218113137311877',
-      '1268218101682405396',
-      '1268218112319291462',
-    ],
-  },
-  {
-    title: '3. Pings de Profissões',
-    note: 'Peça para alguém coletar um recurso ou craftar um item para você.',
-    roles: [
-      '1331682928979218462',
-      '1331682931940528188',
-      '1331682925401473095',
-      '1331682920431226892',
-      '1331682933265793096',
-      '1331682936629497907',
-      '1331682933655867472',
-      '1331682934901444649',
-      '1331682934259978445',
-      '1331682935937564692',
-      '1331682935627190283',
-      '1331682937309102191',
-    ],
-  },
-  {
-    title: '4. Pings de Quests e Raids',
-    note: 'Convide outros membros para participar com você.',
-    roles: [
-      '1271168738002997279',
-      '1269810703972171908',
-      '1269810688352718918',
-      '1268229834455253013',
-      '1268229845398327417',
-      '1268229846144647170',
-      '1268229847075786853',
-      // TODO: PING RAID - The Wartorn Palace (119+)
-    ],
-  },
-  {
-    title: '5. Pings de Classes e Eventos',
-    note: 'Encontre jogadores da mesma classe ou fique por dentro dos eventos.',
-    roles: [
-      '1269826644693221466',
-      '1269826646886584413',
-      '1269826649386385520',
-      '1269826651878068374',
-      '1269826654381805669',
-      '1273252381018165308',
-      '1295760021375815701',
-    ],
-  },
-]);
-
-/**
- * Bombas não têm mais cargo de ping. Quem tem Champion enxerga as bombas ativas
- * no jogo, então basta chamar um em vez de manter oito cargos de notificação.
- * @type {string}
- */
-const CHAMPION_ROLE = '';
-
-/** Um cargo por linha. `suffix` anota cada linha, não só a última. */
-function roleLines(ids, suffix = '') {
-  return ids
-    .filter(Boolean)
-    .map((id) => `<@&${id}>${suffix}`)
-    .join('\n');
-}
-
-/** @param {PingGroup} g @returns {string} */
-function renderGroup(g) {
-  const lines = roleLines(g.roles, g.suffix);
-  if (!lines) return '';
-  return [`**${g.title}**`, g.note, lines].filter(Boolean).join('\n');
-}
-
-function pingsPayload() {
-  const blocos = PING_GROUPS.map(renderGroup).filter(Boolean);
-
-  // Dois embeds de lista: o Discord corta descrição em 4096 caracteres.
-  const meio = Math.ceil(blocos.length / 2);
-  const bombas = CHAMPION_ROLE
-    ? `\n\n**Bombas ativas**\nNão existe mais cargo de ping para bombas. Chame um <@&${CHAMPION_ROLE}> — quem tem Champion vê no jogo quais bombas estão rodando.`
-    : '';
-
-  return {
-    ...SILENT,
-    embeds: [
-      {
-        title: '🔔 Auto-Role & Pings: Personalize Suas Notificações',
-        color: COLOR.pings,
-        description:
-`Selecione seus cargos para receber notificações apenas sobre o que interessa a você.
-
-### 📌 Objetivo
-> Melhorar a comunicação e a organização da comunidade. Marcando cargos, você recebe ping só dos assuntos que acompanha.
-
-### 📥 Como adquirir cargos?
-> Acesse <id:customize> e marque os cargos desejados. Para remover, é só desmarcar no mesmo lugar.
-
--# ⚠️ Mensagens enviadas neste canal são apagadas automaticamente após 48 horas.`,
-      },
-      { color: COLOR.pings, description: blocos.slice(0, meio).join('\n\n') },
-      { color: COLOR.pings, description: blocos.slice(meio).join('\n\n') + bombas },
-    ],
-  };
-}
-
 function recruitPayload() {
   return {
     ...SILENT,
@@ -299,7 +153,7 @@ function recruitPayload() {
 > Aprovado? Um recrutador te chama no jogo. Aceite digitando \`/guild join WnBR\` **dentro do Wynncraft**.
 
 **4️⃣ Escolha seus cargos**
-> Passe em <id:customize> e marque seus interesses. Isso ajuda na sua integração.
+> Passe no canal de pings e reaja nas mensagens para marcar seus interesses. Isso ajuda na sua integração.
 
 Assim que entrar na guilda, o bot te dá o cargo de membro sozinho — em até 10 minutos, sem precisar avisar ninguém.
 
@@ -452,7 +306,6 @@ Reservamo-nos o direito de negar empréstimo a jogadores desconhecidos ou inativ
  */
 export const PANELS = Object.freeze([
   { key: 'rules', stateId: 'rulesPanel', label: 'regras', build: rulesPayload },
-  { key: 'pings', stateId: 'pingsPanel', label: 'pings', build: pingsPayload },
   { key: 'recruiters', stateId: 'recruitPanel', label: 'recrutamento', build: recruitPayload },
   { key: 'warApplication', stateId: 'warApplicationPanel', label: 'aplicação war', build: warApplicationPayload },
   { key: 'tome', stateId: 'tomePanel', label: 'tomes', build: tomePayload },
@@ -467,5 +320,3 @@ export async function ensureStaticPanels(client, guildDiscordId) {
 }
 
 export const STATIC_PANEL_IDS = PANELS.map((p) => p.stateId);
-
-export const PINGS_STATE_ID = 'pingsPanel';

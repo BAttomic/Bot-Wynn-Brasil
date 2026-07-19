@@ -11,6 +11,7 @@ import { runVerificationReport } from './jobs/verificationReport.js';
 import { runGuildWatch } from './services/watcher.js';
 import { ensurePanels, attachRegistrationGuard } from './services/registration.js';
 import { ensureStaticPanels } from './services/staticPanels.js';
+import { ensurePingRolePanels, attachPingRoleHandler } from './services/pingRoles.js';
 import { ensureLeaderboardPanel } from './services/leaderboardPanel.js';
 import { runPingsCleanup } from './jobs/pingsCleanup.js';
 import { ensureActiveSeason } from './services/seasons.js';
@@ -73,6 +74,7 @@ async function main() {
     ready = true;
     log.info(`Logado como ${client.user.tag}`);
     initErrorReport(client, guildId);
+    attachPingRoleHandler(client);
     const cfg = await getConfig(guildId);
     const minutes = Number(cfg.params?.roleSyncMinutes) || 10;
     const snapH = Number(cfg.params?.snapshotHourUTC) || 5;
@@ -84,6 +86,7 @@ async function main() {
     everyMinutes(5, 'panels', async () => {
       await ensurePanels(client, guildId);
       await ensureStaticPanels(client, guildId);
+      await ensurePingRolePanels(client, guildId);
       await ensureLeaderboardPanel(client, guildId);
     }, { runOnStart: true });
     everyMinutes(60, 'pingsCleanup', () => runPingsCleanup(client), { runOnStart: true });

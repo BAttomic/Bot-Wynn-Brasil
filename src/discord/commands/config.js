@@ -11,6 +11,7 @@ import {
 import { recomputePoints, rebuildLeaderboards } from '../../services/points.js';
 import { ensurePanels } from '../../services/registration.js';
 import { ensureStaticPanels } from '../../services/staticPanels.js';
+import { ensurePingRolePanels } from '../../services/pingRoles.js';
 import { ensureLeaderboardPanel } from '../../services/leaderboardPanel.js';
 
 // Canais que hospedam uma mensagem fixa mantida pelo bot.
@@ -82,6 +83,7 @@ export default {
       if (PANEL_CHANNEL_KEYS.has(key)) {
         await ensurePanels(interaction.client, gid);
         await ensureStaticPanels(interaction.client, gid);
+        await ensurePingRolePanels(interaction.client, gid);
         await ensureLeaderboardPanel(interaction.client, gid);
         return interaction.editReply(`Canal **${key}** definido para <#${ch.id}>. Painel publicado.`);
       }

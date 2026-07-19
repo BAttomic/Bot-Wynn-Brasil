@@ -1,6 +1,5 @@
 import { getConfig } from '../config/guildConfig.js';
-import { panelMessageId } from '../services/panels.js';
-import { PINGS_STATE_ID } from '../services/staticPanels.js';
+import { pingPanelMessageIds } from '../services/pingRoles.js';
 import { optional } from '../config/env.js';
 import { log } from '../util/log.js';
 
@@ -21,14 +20,17 @@ export async function runPingsCleanup(client) {
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel) return;
 
-  const panelId = await panelMessageId(PINGS_STATE_ID);
+  // Os painéis fixos (cabeçalho + um por grupo de reaction-role) são mensagens
+  // do próprio bot e envelhecem como qualquer outra: sem esta exclusão, a limpeza
+  // apagaria o painel inteiro depois de 48h.
+  const panelIds = await pingPanelMessageIds();
   const cutoff = Date.now() - MAX_AGE_MS;
 
   const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
   if (!messages) return;
 
   const expired = messages.filter(
-    (m) => m.id !== panelId && m.createdTimestamp < cutoff && !m.pinned,
+    (m) => !panelIds.has(m.id) && m.createdTimestamp < cutoff && !m.pinned,
   );
   if (!expired.size) return;
 
