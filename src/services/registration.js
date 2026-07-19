@@ -14,6 +14,7 @@ import { audit } from './audit.js';
 import { isHigherRank } from './guildData.js';
 import { findBan, recordBan, BAN_REASON_BLACKLIST_GUILD } from './bans.js';
 import { ensurePanel } from './panels.js';
+import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { log } from '../util/log.js';
 
 export const BUTTON_ID = 'registro:verificar';
@@ -367,7 +368,7 @@ export function nickModal() {
 
 export async function ensureRegistrationPanel(client, guildDiscordId) {
   const cfg = await getConfig(guildDiscordId);
-  return ensurePanel(client, cfg.channels?.registration, PANEL_STATE_ID, panelPayload(), 'registro');
+  return ensurePanel(client, cfg.channels?.registration, PANEL_STATE_ID, brandWithLogo(panelPayload()), 'registro', [logoAttachment()]);
 }
 
 // Garante o painel fixo do registro. Roda periodicamente e logo após /config.
@@ -376,7 +377,7 @@ export async function ensureRegistrationPanel(client, guildDiscordId) {
 // regra automática contra a GsW. O canal fica mudo de propósito.
 export async function ensurePanels(client, guildDiscordId) {
   const cfg = await getConfig(guildDiscordId);
-  await ensurePanel(client, cfg.channels?.registration, PANEL_STATE_ID, panelPayload(), 'registro');
+  await ensurePanel(client, cfg.channels?.registration, PANEL_STATE_ID, brandWithLogo(panelPayload()), 'registro', [logoAttachment()]);
 }
 
 // O canal de registro guarda só a mensagem do painel. Qualquer outra coisa

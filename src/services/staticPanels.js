@@ -1,6 +1,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { getConfig } from '../config/guildConfig.js';
 import { ensurePanel } from './panels.js';
+import { logoAttachment, brandWithLogo } from '../util/assets.js';
 
 /**
  * @param {Array<{id: string, label: string, emoji: string, style?: import('discord.js').ButtonStyle}>} buttons
@@ -317,7 +318,8 @@ export const PANELS = Object.freeze([
 export async function ensureStaticPanels(client, guildDiscordId) {
   const cfg = await getConfig(guildDiscordId);
   for (const p of PANELS) {
-    await ensurePanel(client, cfg.channels?.[p.key], p.stateId, p.build(cfg.params), p.label);
+    const payload = brandWithLogo(p.build(cfg.params));
+    await ensurePanel(client, cfg.channels?.[p.key], p.stateId, payload, p.label, [logoAttachment()]);
   }
 }
 

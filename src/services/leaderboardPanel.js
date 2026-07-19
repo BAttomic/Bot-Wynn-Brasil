@@ -7,6 +7,7 @@ import { allowanceDays, forgivenessDays, daysOffline } from './inactivity.js';
 import { wynn } from '../wynn/api.js';
 import { shortNumber } from '../util/format.js';
 import { PECAS, anexo } from '../discord/commands/uniforme.js';
+import { logoAttachment, brandWithLogo } from '../util/assets.js';
 
 export const SELECT_ID = 'lb:view';
 export const ME_ID = 'lb:me';
@@ -123,13 +124,13 @@ export function downloadsRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(SKIN_ID)
-      .setLabel('Skin da Seleção')
-      .setEmoji('👕')
+      .setLabel('Baixar Skin da Seleção')
+      .setEmoji('📥')
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(CAPE_ID)
-      .setLabel('Capa da Guilda')
-      .setEmoji('🧣')
+      .setLabel('Baixar Capa da Guilda')
+      .setEmoji('📥')
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setLabel('Grupo WhatsApp')
@@ -175,7 +176,7 @@ export async function buildLeaderboardPanel(view) {
     v === DEFAULT_VIEW
       ? renderPoints(await pointsLeaderboard('alltime'))
       : renderCategory(v, await categoryLeaderboard(v));
-  return { embeds: [embed], components: [selectRow(v), meRow()] };
+  return brandWithLogo({ embeds: [embed], components: [selectRow(v), meRow()] });
 }
 
 /**
@@ -238,8 +239,8 @@ export async function handleMyPoints(interaction) {
 // Segunda mensagem fixa do canal de status, separada do painel ao vivo da guilda.
 export async function ensureLeaderboardPanel(client, guildDiscordId) {
   const cfg = await getConfig(guildDiscordId);
-  const payload = await buildLeaderboardPanel();
-  return ensurePanel(client, cfg.channels?.panel, STATE_ID, payload, 'leaderboards');
+  const payload = brandWithLogo(await buildLeaderboardPanel());
+  return ensurePanel(client, cfg.channels?.panel, STATE_ID, payload, 'leaderboards', [logoAttachment()]);
 }
 
 /**

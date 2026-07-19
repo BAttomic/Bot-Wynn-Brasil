@@ -8,6 +8,7 @@ import { xpBarEmoji } from '../util/emojis.js';
 import { captureValue, recordCapture } from './territories.js';
 import { recordEvent, eventPoints } from './points.js';
 import { downloadsRow } from './leaderboardPanel.js';
+import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { log } from '../util/log.js';
 
 const territoryMap = JSON.parse(
@@ -208,7 +209,7 @@ function buildPanel(client, guild) {
   if (list.length > 3500) list = `${list.slice(0, 3500)}\n…`;
   if (!list) list = 'Ninguém online';
 
-  return {
+  return brandWithLogo({
     embeds: [
       {
         title: `${guild.name} [${guild.prefix}]`,
@@ -217,7 +218,7 @@ function buildPanel(client, guild) {
 `**🎉 Nível:** \`${guild.level} (${guild.xpPercent}%)\` — \`${shortNumber(Math.floor(currXp))}/${shortNumber(Math.floor(reqXp))}\`
 ${xpBarEmoji(guild.xpPercent)}
 **🚧 Territórios:** \`${guild.territories}\`
-**⚔️ Guerras:** \`${guild.wars}\`
+**🏹 Guerras:** \`${guild.wars}\`
 **🤙 Membros:** \`${guild.members.total}/${membersLimit(guild.level)}\`
 
 **Online (${online.length}/${guild.members.total}):**
@@ -228,7 +229,7 @@ ${list}
       },
     ],
     components: [downloadsRow()],
-  };
+  });
 }
 
 async function updatePanel(client, cfg, guild) {
@@ -240,11 +241,16 @@ async function updatePanel(client, cfg, guild) {
   if (saved?.messageId) {
     const msg = await channel.messages.fetch(saved.messageId).catch(() => null);
     if (msg) {
-      await msg.edit(payload).catch(() => {});
-      return;
+      // Anexo do logo só vai na criação; edições o preservam. Mensagem antiga
+      // sem anexo é recriada uma vez, senão o attachment:// ficaria quebrado.
+      if (msg.attachments.size > 0) {
+        await msg.edit(payload).catch(() => {});
+        return;
+      }
+      await msg.delete().catch(() => {});
     }
   }
-  const msg = await channel.send(payload);
+  const msg = await channel.send({ ...payload, files: [logoAttachment()] });
   await state.updateOne(
     { _id: 'panel' },
     { $set: { messageId: msg.id, channelId: channel.id } },

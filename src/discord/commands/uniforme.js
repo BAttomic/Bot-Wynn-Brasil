@@ -1,4 +1,5 @@
 import { SlashCommandBuilder, AttachmentBuilder } from 'discord.js';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Peças oficiais da Wynn Brasil disponíveis para download.
@@ -10,10 +11,15 @@ export const PECAS = Object.freeze({
   capa: { file: 'WnBR_Cape.png', label: 'Capa' },
 });
 
-/** Cria o anexo (baixável) de uma peça a partir de src/assets/. */
+/**
+ * Cria o anexo (baixável) de uma peça a partir de src/assets/.
+ * O discord.js 14 exige um CAMINHO (string), não um objeto URL — por isso o
+ * fileURLToPath; passar a URL crua lança "resource must be..." no envio.
+ */
 export function anexo(peca) {
   const { file } = PECAS[peca];
-  return new AttachmentBuilder(new URL(`../../assets/${file}`, import.meta.url), { name: file });
+  const filePath = fileURLToPath(new URL(`../../assets/${file}`, import.meta.url));
+  return new AttachmentBuilder(filePath, { name: file });
 }
 
 export default {

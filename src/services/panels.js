@@ -6,7 +6,7 @@ import { log } from '../util/log.js';
 //
 // Se a mensagem ainda existe, é editada no lugar — o texto fica sempre atual sem
 // duplicar nem empurrar a mensagem para baixo do canal.
-export async function ensurePanel(client, channelId, stateId, payload, label) {
+export async function ensurePanel(client, channelId, stateId, payload, label, files = []) {
   if (!channelId) return null;
 
   const channel = await client.channels.fetch(channelId).catch(() => null);
@@ -21,12 +21,20 @@ export async function ensurePanel(client, channelId, stateId, payload, label) {
   if (saved?.messageId && saved.channelId === channel.id) {
     const msg = await channel.messages.fetch(saved.messageId).catch(() => null);
     if (msg) {
-      await msg.edit(payload).catch(() => {});
-      return msg.id;
+      // Só reenviamos o arquivo na CRIAÇÃO: em edições o Discord preserva o
+      // anexo, então o attachment:// do embed continua resolvendo de graça. A
+      // exceção é uma mensagem antiga que ainda não tem o anexo — aí recriamos
+      // uma vez, senão o embed apontaria para um attachment inexistente.
+      if (files.length && msg.attachments.size === 0) {
+        await msg.delete().catch(() => {});
+      } else {
+        await msg.edit(payload).catch(() => {});
+        return msg.id;
+      }
     }
   }
 
-  const msg = await channel.send(payload);
+  const msg = await channel.send(files.length ? { ...payload, files } : payload);
   await state.updateOne(
     { _id: stateId },
     { $set: { messageId: msg.id, channelId: channel.id } },
