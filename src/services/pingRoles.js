@@ -125,7 +125,7 @@ export const PING_GROUPS = Object.freeze([
   {
     key: 'bombs',
     title: '6. Pings de Bombas',
-    note: 'Seja avisado quando uma bomba estiver ativa no servidor.',
+    note: 'Jogadores com rank Champion conseguem ver as bombas ativas, pingue-os e pergunte quais tem ativas.',
     roles: [
       { name: 'PING BOMBS - Champion' },
     ],
