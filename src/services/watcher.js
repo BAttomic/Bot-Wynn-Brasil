@@ -314,7 +314,6 @@ async function handleGuildChanges(client, cfg, guild, old, changes) {
 async function handleTerritoryChanges(client, cfg, prefix, terr, prevT, changes) {
   const terrChannel = await fetchChannel(client, cfg.channels?.territory);
   const warChannel = await fetchChannel(client, cfg.channels?.war);
-  const warRoleId = cfg.roles?.war;
 
   const changed = new Set(changes.map((p) => p.split('/')[1]).filter(Boolean));
   const ourCount = Object.values(terr).filter((t) => t?.guild?.prefix === prefix).length;
@@ -351,14 +350,13 @@ ${value ? `\n${captureSummary(value)}` : ''}
       timestamp: iso(),
     };
 
-    const alerta = `${warRoleId ? `<@&${warRoleId}> ` : ''}${lost ? '🚨 **Perdemos**' : '🟢 **Conquistamos**'} o território \`${name}\`!`;
-    const mentions = { roles: warRoleId ? [warRoleId] : [] };
+    const alerta = `${lost ? '🚨 **Perdemos**' : '🟢 **Conquistamos**'} o território \`${name}\`!`;
 
-    // Quando war e territory apontam para o mesmo canal, o ping e o detalhe
+    // Quando war e territory apontam para o mesmo canal, o aviso e o detalhe
     // viram UMA mensagem só — senão o canal recebe a mesma captura duas vezes.
     if (terrChannel && warChannel && terrChannel.id === warChannel.id) {
       await warChannel
-        .send({ content: alerta, embeds: [embed], allowedMentions: mentions })
+        .send({ content: alerta, embeds: [embed] })
         .catch(() => {});
       continue;
     }
@@ -369,7 +367,7 @@ ${value ? `\n${captureSummary(value)}` : ''}
         ? value.participants.map((p) => p.username).join(', ')
         : 'nenhum guerreiro detectado';
       const bonus = value ? ` — dificuldade \`x${value.multiplier.toFixed(2)}\`, vale \`~${value.points}\` pts para ${who}` : '';
-      await warChannel.send({ content: `${alerta}${bonus}`, allowedMentions: mentions }).catch(() => {});
+      await warChannel.send({ content: `${alerta}${bonus}` }).catch(() => {});
     }
   }
 }
