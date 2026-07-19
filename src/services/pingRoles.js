@@ -10,8 +10,10 @@ import { log } from '../util/log.js';
  * cargo; tirou a reação = perde. O menu nativo <id:customize> foi removido do
  * servidor, então é assim que o membro se auto-atribui agora.
  *
- * Um cargo SEM id é omitido (nem entra na lista, nem consome uma letra), o que
- * deixa o slot pronto para receber o id depois sem quebrar as posições.
+ * Cada cargo é identificado por `id` OU por `name`. Com `name`, o bot resolve o
+ * cargo pelo nome na guilda a cada boot — e o CRIA se ainda não existir. É assim
+ * que um ping novo entra sem ninguém precisar copiar id de cargo: basta o nome.
+ * Um slot que não resolve para cargo nenhum é omitido (não consome letra).
  */
 
 // Indicadores regionais A–T = 20, exatamente o teto de reações por mensagem do
@@ -26,8 +28,8 @@ const SILENT = { allowedMentions: { parse: [] } };
 
 /**
  * @typedef {object} PingRole
- * @property {string} id     id do cargo; '' = slot vazio, é ignorado
- * @property {string} [todo] nome legível, só para o slot que ainda espera id
+ * @property {string} [id]   id do cargo (tem prioridade sobre o nome)
+ * @property {string} [name] nome do cargo; resolvido/criado na guilda quando não há id
  *
  * @typedef {object} PingGroup
  * @property {string}     key    identificador estável (vira o stateId da mensagem)
@@ -50,9 +52,9 @@ export const PING_GROUPS = Object.freeze([
       { id: '1268208726058205245' },
       { id: '1268208320452235306' },
       { id: '1268208320343445516' },
-      { id: '', todo: 'PING GUILD XP' },
-      { id: '', todo: 'PING XP - Fruma Lighthouse (115+)' },
-      { id: '', todo: 'PING XP - Fruma BatCave (107+)' },
+      { name: 'PING GUILD XP' },
+      { name: 'PING XP - Fruma Lighthouse (115+)' },
+      { name: 'PING XP - Fruma BatCave (107+)' },
     ],
   },
   {
@@ -103,7 +105,7 @@ export const PING_GROUPS = Object.freeze([
       { id: '1268229845398327417' },
       { id: '1268229846144647170' },
       { id: '1268229847075786853' },
-      { id: '', todo: 'PING RAID - The Wartorn Palace (119+)' },
+      { name: 'PING RAID - The Wartorn Palace (119+)' },
     ],
   },
   {
@@ -125,7 +127,7 @@ export const PING_GROUPS = Object.freeze([
     title: '6. Pings de Bombas',
     note: 'Seja avisado quando uma bomba estiver ativa no servidor.',
     roles: [
-      { id: '', todo: 'PING BOMBS - Champion' },
+      { name: 'PING BOMBS - Champion' },
     ],
   },
 ]);
@@ -142,16 +144,48 @@ export const PING_STATE_IDS = Object.freeze([
 ]);
 
 /**
- * Cargos com id, na ordem, com a letra que cada um recebe. Slots vazios não
- * entram, então as letras ficam sempre contíguas.
- * @param {PingGroup} g
- * @returns {Array<{id: string, emoji: string}>}
+ * Resolve um slot para o id de um cargo real: usa o `id` se houver, senão procura
+ * pelo `name` na guilda e, não achando, cria o cargo. `null` se não der.
+ * @param {import('discord.js').Guild} guild
+ * @param {PingRole} slot
+ * @returns {Promise<string | null>}
  */
-function assign(g) {
-  return g.roles
-    .filter((r) => r.id)
-    .slice(0, LETTERS.length)
-    .map((r, i) => ({ id: r.id, emoji: LETTERS[i] }));
+async function resolveRoleId(guild, slot) {
+  if (slot.id) return slot.id;
+  if (!slot.name) return null;
+
+  const existing = guild.roles.cache.find((r) => r.name === slot.name);
+  if (existing) return existing.id;
+
+  try {
+    const created = await guild.roles.create({
+      name: slot.name,
+      mentionable: true,
+      reason: 'Cargo de ping criado automaticamente pelo bot',
+    });
+    log.info(`Cargo de ping criado: "${slot.name}" (${created.id}).`);
+    return created.id;
+  } catch (e) {
+    log.warn(`Não consegui criar o cargo de ping "${slot.name}": ${e.message}`);
+    return null;
+  }
+}
+
+/**
+ * Cargos resolvidos de um grupo, na ordem, com a letra de cada um. Slots que não
+ * resolvem são pulados, então as letras ficam sempre contíguas.
+ * @param {import('discord.js').Guild} guild
+ * @param {PingGroup} g
+ * @returns {Promise<Array<{id: string, emoji: string}>>}
+ */
+async function assign(guild, g) {
+  const out = [];
+  for (const slot of g.roles) {
+    if (out.length >= LETTERS.length) break;
+    const id = await resolveRoleId(guild, slot);
+    if (id) out.push({ id, emoji: LETTERS[out.length] });
+  }
+  return out;
 }
 
 /**
@@ -183,9 +217,11 @@ function headerPayload() {
   };
 }
 
-/** @param {PingGroup} g */
-function groupPayload(g) {
-  const items = assign(g);
+/**
+ * @param {PingGroup} g
+ * @param {Array<{id: string, emoji: string}>} items  cargos já resolvidos
+ */
+function groupPayload(g, items) {
   const lines = items.map((it) => `${it.emoji} <@&${it.id}>`).join('\n');
   const desc = [g.note, lines].filter(Boolean).join('\n\n') || '—';
   return {
@@ -258,14 +294,18 @@ export async function ensurePingRolePanels(client, guildDiscordId) {
     return;
   }
 
+  // Resolver/criar cargos por nome precisa do cache de cargos populado.
+  const guild = channel.guild;
+  await guild.roles.fetch().catch(() => {});
+
   await removeLegacyPanel(channel);
   await ensureMessage(channel, HEADER_STATE, headerPayload(), 'pings (cabeçalho)');
 
   const nextMap = new Map();
   for (const g of PING_GROUPS) {
-    const items = assign(g);
-    if (!items.length) continue; // grupo só com slots vazios: nem publica
-    const msg = await ensureMessage(channel, groupState(g.key), groupPayload(g), `pings (${g.key})`);
+    const items = await assign(guild, g);
+    if (!items.length) continue; // grupo sem nenhum cargo resolvido: nem publica
+    const msg = await ensureMessage(channel, groupState(g.key), groupPayload(g, items), `pings (${g.key})`);
     if (!msg) continue;
     await ensureReactions(msg, items.map((it) => it.emoji));
     nextMap.set(msg.id, new Map(items.map((it) => [it.emoji, it.id])));
