@@ -101,11 +101,11 @@ export const PING_GROUPS = Object.freeze([
       { id: '1271168738002997279' }, // QUEST - Qira's Hive (80+)
       { id: '1269810703972171908' }, // QUEST - ??? (80+)
       { id: '1269810688352718918' }, // QUEST - Tower of Ascension (75+)
+      { name: 'PING RAID - The Wartorn Palace (119+)' },
       { id: '1268229834455253013' }, // RAID - The Nameless Anomaly (103+)
       { id: '1268229845398327417' }, // RAID - The Canyon Colossus (95+)
       { id: '1268229846144647170' }, // RAID - Orphion's Nexus of Light (79+)
       { id: '1268229847075786853' }, // RAID - Nest of the Grootslangs (54+)
-      { name: 'PING RAID - The Wartorn Palace (119+)' },
     ],
   },
   {
