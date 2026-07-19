@@ -44,15 +44,15 @@ export const PING_GROUPS = Object.freeze([
     key: 'xp',
     title: '1. Pings de Experiência (XP)',
     roles: [
-      { id: '1268213746585698375' },
-      { id: '1268211113942847603' },
-      { id: '1268209833090486423' },
-      { id: '1268209831219560560' },
-      { id: '1268209827457400844' },
-      { id: '1268208726058205245' },
-      { id: '1268208320452235306' },
-      { id: '1268208320343445516' },
       { name: 'PING GUILD XP' },
+      { id: '1268213746585698375' }, // Lutho Witness Church (100+)
+      { id: '1268211113942847603' }, // Corkus Scrapyard (85+)
+      { id: '1268209833090486423' }, // Cinfras Waterfall (75-85)
+      { id: '1268209831219560560' }, // Geliboard Visceral Cave (65-75)
+      { id: '1268209827457400844' }, // Troms Idol Cave (60-75)
+      { id: '1268208726058205245' }, // Troms Herb Cave (50-65)
+      { id: '1268208320452235306' }, // Almuj Desert Altar (35-50)
+      { id: '1268208320343445516' }, // Nemract Saint's Row (20-35)
       { name: 'PING XP - Fruma Lighthouse (115+)' },
       { name: 'PING XP - Fruma BatCave (107+)' },
     ],
@@ -61,17 +61,17 @@ export const PING_GROUPS = Object.freeze([
     key: 'dungeon',
     title: '2. Pings de Dungeon',
     roles: [
-      { id: '1268218114999586816' },
-      { id: '1268218115402109049' },
-      { id: '1268218120196325517' },
-      { id: '1268218114043019425' },
-      { id: '1268220280166420572' },
-      { id: '1268220287510384653' },
-      { id: '1268220291788574814' },
-      { id: '1268218121324462226' },
-      { id: '1268218113137311877' },
-      { id: '1268218101682405396' },
-      { id: '1268218112319291462' },
+      { id: '1268218114999586816' }, // The Forgery (98+)
+      { id: '1268218115402109049' }, // Eldritch Outlook (101+)
+      { id: '1268218120196325517' }, // Fallen Factory (90+)
+      { id: '1268218114043019425' }, // Galleon's Graveyard (63+)
+      { id: '1268220280166420572' }, // Undergrowth Ruins (54+)
+      { id: '1268220287510384653' }, // Ice Barrows (45+)
+      { id: '1268220291788574814' }, // Sand-Swept Tomb (36+)
+      { id: '1268218121324462226' }, // Timelost Sanctum (27+)
+      { id: '1268218113137311877' }, // Underworld Crypt (24+)
+      { id: '1268218101682405396' }, // Infested Pit (18+)
+      { id: '1268218112319291462' }, // Decrepit Sewers (9+)
     ],
   },
   {
@@ -79,18 +79,18 @@ export const PING_GROUPS = Object.freeze([
     title: '3. Pings de Profissões',
     note: 'Peça para alguém coletar um recurso ou craftar um item para você.',
     roles: [
-      { id: '1331682928979218462' },
-      { id: '1331682931940528188' },
-      { id: '1331682925401473095' },
-      { id: '1331682920431226892' },
-      { id: '1331682933265793096' },
-      { id: '1331682936629497907' },
-      { id: '1331682933655867472' },
-      { id: '1331682934901444649' },
-      { id: '1331682934259978445' },
-      { id: '1331682935937564692' },
-      { id: '1331682935627190283' },
-      { id: '1331682937309102191' },
+      { id: '1331682928979218462' }, // Farming
+      { id: '1331682931940528188' }, // Fishing
+      { id: '1331682925401473095' }, // Mining
+      { id: '1331682920431226892' }, // Woodcutting
+      { id: '1331682933265793096' }, // Alchemism
+      { id: '1331682936629497907' }, // Armouring
+      { id: '1331682933655867472' }, // Cooking
+      { id: '1331682934901444649' }, // Jeweling
+      { id: '1331682934259978445' }, // Scribing
+      { id: '1331682935937564692' }, // Tailoring
+      { id: '1331682935627190283' }, // Weaponsmith
+      { id: '1331682937309102191' }, // Woodworking
     ],
   },
   {
@@ -98,33 +98,40 @@ export const PING_GROUPS = Object.freeze([
     title: '4. Pings de Quests e Raids',
     note: 'Convide outros membros para participar com você.',
     roles: [
-      { id: '1271168738002997279' },
-      { id: '1269810703972171908' },
-      { id: '1269810688352718918' },
-      { id: '1268229834455253013' },
-      { id: '1268229845398327417' },
-      { id: '1268229846144647170' },
-      { id: '1268229847075786853' },
+      { id: '1271168738002997279' }, // QUEST - Qira's Hive (80+)
+      { id: '1269810703972171908' }, // QUEST - ??? (80+)
+      { id: '1269810688352718918' }, // QUEST - Tower of Ascension (75+)
+      { id: '1268229834455253013' }, // RAID - The Nameless Anomaly (103+)
+      { id: '1268229845398327417' }, // RAID - The Canyon Colossus (95+)
+      { id: '1268229846144647170' }, // RAID - Orphion's Nexus of Light (79+)
+      { id: '1268229847075786853' }, // RAID - Nest of the Grootslangs (54+)
       { name: 'PING RAID - The Wartorn Palace (119+)' },
     ],
   },
   {
     key: 'classes',
-    title: '5. Pings de Classes e Eventos',
-    note: 'Encontre jogadores da mesma classe ou fique por dentro dos eventos.',
+    title: '5. Pings de Classes',
+    note: 'Encontre jogadores da mesma classe.',
     roles: [
-      { id: '1269826644693221466' },
-      { id: '1269826646886584413' },
-      { id: '1269826649386385520' },
-      { id: '1269826651878068374' },
-      { id: '1269826654381805669' },
-      { id: '1273252381018165308' },
-      { id: '1295760021375815701' },
+      { id: '1269826644693221466' }, // Archer 120+
+      { id: '1269826646886584413' }, // Assassin 120+
+      { id: '1269826649386385520' }, // Mage 120+
+      { id: '1269826651878068374' }, // Shaman 120+
+      { id: '1269826654381805669' }, // Warrior 120+
+    ],
+  },
+  {
+    key: 'events',
+    title: '6. Pings de Eventos',
+    note: 'Fique por dentro dos eventos.',
+    roles: [
+      { id: '1273252381018165308' }, // WORLD EVENT - Annihilation
+      { id: '1295760021375815701' }, // EVENT
     ],
   },
   {
     key: 'bombs',
-    title: '6. Pings de Bombas',
+    title: '7. Pings de Bombas',
     note: 'Jogadores com rank Champion conseguem ver as bombas ativas, pingue-os e pergunte quais tem ativas.',
     roles: [
       { name: 'PING BOMBS - Champion' },
@@ -257,12 +264,29 @@ async function ensureMessage(channel, stateId, payload, label) {
   return msg;
 }
 
-/** Garante que o bot reagiu com cada emoji, na ordem, sem duplicar. */
+/**
+ * Reconcilia as reações da mensagem com a lista desejada: adiciona as que faltam
+ * (na ordem) e remove as letras que o bot pôs e não valem mais — é o que evita
+ * uma letra órfã quando um grupo encolhe (ex.: Classes de 7 para 5 cargos).
+ */
 async function ensureReactions(msg, emojis) {
+  const want = new Set(emojis);
+
   for (const emoji of emojis) {
     const existing = msg.reactions.cache.get(emoji);
     if (existing?.me) continue;
     await msg.react(emoji).catch((e) => log.warn(`Falha ao reagir ${emoji}: ${e.message}`));
+  }
+
+  for (const reaction of msg.reactions.cache.values()) {
+    const name = reaction.emoji.name;
+    // Só mexe nas letras que ESTE sistema usa, e só nas que o próprio bot pôs.
+    if (want.has(name) || !LETTERS.includes(name) || !reaction.me) continue;
+    // reaction.remove() limpa a letra inteira (precisa de Gerenciar Mensagens);
+    // sem essa permissão, ao menos tira a reação do bot.
+    await reaction
+      .remove()
+      .catch(() => reaction.users.remove(msg.client.user.id).catch(() => {}));
   }
 }
 
