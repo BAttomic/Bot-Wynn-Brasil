@@ -7,7 +7,6 @@ import { shortNumber, membersLimit, calcExperience, getByPath, diffPaths } from 
 import { xpBarEmoji } from '../util/emojis.js';
 import { captureValue, recordCapture } from './territories.js';
 import { recordEvent, eventPoints } from './points.js';
-import { downloadsRow } from './leaderboardPanel.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { log } from '../util/log.js';
 
@@ -228,7 +227,9 @@ ${list}
         footer: { text: 'WnBR — Informações', iconURL: client.user.displayAvatarURL() },
       },
     ],
-    components: [downloadsRow()],
+    // Sem botões: skin, capa e modpack agora vivem no painel de downloads.
+    // `[]` (e não omitir) para LIMPAR os botões antigos ao editar no lugar.
+    components: [],
   });
 }
 

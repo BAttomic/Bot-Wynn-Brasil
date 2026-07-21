@@ -119,31 +119,6 @@ function meRow() {
 }
 
 /**
- * Segunda linha de botões do painel: baixar a skin da seleção (para sobrepor na
- * sua própria skin) e a capa da guilda, mais o link do grupo de WhatsApp.
- * O modpack fica em painel próprio (ver ensureModpackPanel).
- */
-export function downloadsRow() {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(SKIN_ID)
-      .setLabel('Baixar Skin da Seleção')
-      .setEmoji('📥')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(CAPE_ID)
-      .setLabel('Baixar Capa da Guilda')
-      .setEmoji('📥')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setLabel('Grupo WhatsApp')
-      .setEmoji('💬')
-      .setStyle(ButtonStyle.Link)
-      .setURL(WHATSAPP_URL),
-  );
-}
-
-/**
  * Responde só a quem clicou, com o PNG anexado (baixável). A skin da seleção é
  * uma skin transparente feita para ser sobreposta à sua no editor de skins.
  * @param {import('discord.js').ButtonInteraction} interaction
@@ -152,15 +127,21 @@ export function downloadsRow() {
 export async function handleAssetDownload(interaction, peca) {
   await interaction.deferReply({ ephemeral: true });
   const { file, label } = PECAS[peca];
-  const dica =
+  const description =
     peca === 'uniforme'
-      ? 'Baixe e **sobreponha na sua própria skin** num editor de skins (ex.: novaskin.me).'
-      : 'Capa oficial da guilda. Baixe e aplique no seu perfil.';
+      ? 'Baixe a imagem abaixo (clique nela) e **sobreponha na sua própria skin** ' +
+        'num editor de skins (ex.: novaskin.me).'
+      : 'Baixe a capa abaixo (clique na imagem) e aplique com o **Wynntils**:\n' +
+        '1. No jogo, com o **Wynntils** instalado, rode `/wynntils token`.\n' +
+        '2. Vai aparecer um **link no chat do jogo** — clique nele para abrir seu ' +
+        'cadastro em [account.wynntils.com](https://account.wynntils.com/profile.php).\n' +
+        '3. No seu perfil, clique em **Choose PNG** e envie o arquivo da capa.\n\n' +
+        '-# Não há versão para o modo elytra — se alguém quiser fazer uma, fique à vontade.';
   return interaction.editReply({
     embeds: [
       {
         title: `🇧🇷 ${label}`,
-        description: `${dica}\n\nÉ só clicar na imagem para baixar.`,
+        description,
         color: 0x2ecc71,
         image: { url: `attachment://${file}` },
       },
@@ -239,51 +220,73 @@ export async function handleMyPoints(interaction) {
   });
 }
 
-/** Documento de estado da mensagem fixa do modpack. @type {string} */
-const MODPACK_STATE_ID = 'modpackPanel';
+/** Documento de estado da mensagem fixa de downloads. @type {string} */
+const DOWNLOADS_STATE_ID = 'downloadsPanel';
 
-/** Mensagem fixa dedicada ao modpack: um botão que abre o link + Fabric. */
-function modpackPanelPayload() {
+/**
+ * Mensagem fixa com tudo que dá para baixar: skin da seleção, capa da guilda e
+ * o modpack — mais o atalho do grupo de WhatsApp. Os botões abrem uma resposta
+ * privada (só quem clicou vê) com o arquivo ou o link.
+ */
+function downloadsPanelPayload() {
   return brandWithLogo({
     embeds: [
       {
-        title: '📦 Modpack oficial — Wynn Brasil',
+        title: '📥 Downloads da Wynn Brasil',
         color: 0x2ecc71,
         description:
-          'Baixe o modpack recomendado da guilda. O botão abaixo entrega o link do ' +
-          '`mods.rar` e o do **Fabric Installer**, com as instruções de instalação.',
+          'Tudo que você precisa para entrar no clima da guilda:\n\n' +
+          '🎽 **Skin da Seleção** — camada transparente para sobrepor na sua skin.\n' +
+          '🧣 **Capa da Guilda** — a capa oficial da Wynn Brasil.\n' +
+          '📦 **Modpack** — os mods recomendados (`mods.rar`) + o **Fabric Installer**.\n\n' +
+          '-# Clique num botão abaixo — a resposta aparece só para você.',
       },
     ],
     components: [
       new ActionRowBuilder().addComponents(
         new ButtonBuilder()
+          .setCustomId(SKIN_ID)
+          .setLabel('Skin da Seleção')
+          .setEmoji('🎽')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(CAPE_ID)
+          .setLabel('Capa da Guilda')
+          .setEmoji('🧣')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
           .setCustomId(MODPACK_ID)
-          .setLabel('Baixar Modpack')
+          .setLabel('Modpack')
           .setEmoji('📦')
           .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setLabel('Grupo WhatsApp')
+          .setEmoji('💬')
+          .setStyle(ButtonStyle.Link)
+          .setURL(WHATSAPP_URL),
       ),
     ],
   });
 }
 
 /**
- * Mensagem fixa do modpack, entre o painel de info (ao vivo) e o de leaderboard.
- * Como o Discord não reordena mensagens, a POSIÇÃO depende da ordem de criação:
- * só publicamos o modpack depois que o painel de info (`panel`) já existe, para
- * ele nascer ABAIXO dele. Edições no lugar seguem sempre.
+ * Mensagem fixa de downloads, ENTRE o painel de info (ao vivo) e o de
+ * leaderboard. Como o Discord não reordena mensagens, a POSIÇÃO depende da ordem
+ * de criação: só publicamos depois que o painel de info (`panel`) já existe, para
+ * ela nascer ABAIXO dele. Edições no lugar seguem sempre.
  */
-export async function ensureModpackPanel(client, guildDiscordId) {
-  const already = await panelMessageId(MODPACK_STATE_ID);
+export async function ensureDownloadsPanel(client, guildDiscordId) {
+  const already = await panelMessageId(DOWNLOADS_STATE_ID);
   if (!already && !(await panelMessageId('panel'))) return null; // espera o info nascer
   const cfg = await getConfig(guildDiscordId);
-  return ensurePanel(client, cfg.channels?.panel, MODPACK_STATE_ID, modpackPanelPayload(), 'modpack', [logoAttachment()]);
+  return ensurePanel(client, cfg.channels?.panel, DOWNLOADS_STATE_ID, downloadsPanelPayload(), 'downloads', [logoAttachment()]);
 }
 
-// Terceira mensagem fixa do canal de status, ABAIXO do modpack. Mesma lógica de
-// ordem: só publica depois que o modpack já existe.
+// Terceira mensagem fixa do canal de status, ABAIXO da de downloads. Mesma lógica
+// de ordem: só publica depois que a de downloads já existe.
 export async function ensureLeaderboardPanel(client, guildDiscordId) {
   const already = await panelMessageId(STATE_ID);
-  if (!already && !(await panelMessageId(MODPACK_STATE_ID))) return null; // espera o modpack nascer
+  if (!already && !(await panelMessageId(DOWNLOADS_STATE_ID))) return null; // espera downloads nascer
   const cfg = await getConfig(guildDiscordId);
   const payload = brandWithLogo(await buildLeaderboardPanel());
   return ensurePanel(client, cfg.channels?.panel, STATE_ID, payload, 'leaderboards', [logoAttachment()]);
