@@ -27,6 +27,7 @@ export const CHANNEL_KEYS = Object.freeze([
   'raids', // guild raids e objetivos semanais (cai em activity se ausente)
   'territory', // detalhe de captura/perda de território
   'errors', // exceções do bot
+  'booth', // avisos de reset de booth (24h) para os donos
 ]);
 
 /**

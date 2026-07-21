@@ -32,6 +32,7 @@ Todos os módulos do roadmap. Comandos:
 | `/calc` | Conversor de esmeraldas (stx/le/eb/em) |
 | `/uniforme` | Baixa o uniforme e a capa oficiais da Wynn Brasil |
 | `/modpack` | Devolve o link de download do modpack oficial (`mods.rar`) |
+| `/booth registrar\|status\|cancelar` | Lembrete de reset do booth (24h): avisa o dono ~5 min antes, no canal `booth`, com botão de parar |
 
 Automático (jobs):
 - **Sync de cargos**: cargo "Membro da Guilda" + "Top Contribuidor" (ranks são manuais) + reconciliação de ingresso/saída

@@ -7,6 +7,7 @@ import { runRoleSync } from './jobs/roleSync.js';
 import { runApplicationExpiry } from './jobs/applicationExpiry.js';
 import { runProgressSnapshot } from './jobs/progressSnapshot.js';
 import { runLoanReminders } from './jobs/loanReminders.js';
+import { runBoothReminders } from './jobs/boothReminders.js';
 import { runVerificationReport } from './jobs/verificationReport.js';
 import { runGuildWatch } from './services/watcher.js';
 import { ensurePanels, attachRegistrationGuard } from './services/registration.js';
@@ -98,6 +99,7 @@ async function main() {
     everyMinutes(60, 'seasonSync', () => ensureActiveSeason(), { runOnStart: true });
     everyMinutes(minutes, 'roleSync', () => runRoleSync(client), { runOnStart: true });
     everyMinutes(1, 'applicationExpiry', () => runApplicationExpiry(client));
+    everyMinutes(1, 'boothReminders', () => runBoothReminders(client));
     everySeconds(watchS, 'guildWatch', () => runGuildWatch(client), { runOnStart: true });
     dailyAt(snapH, 0, 'progressSnapshot', () => runProgressSnapshot());
     dailyAt(loanH, 0, 'loanReminders', () => runLoanReminders(client));

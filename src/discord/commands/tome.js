@@ -6,7 +6,16 @@ import {
 } from 'discord.js';
 import { collections } from '../../db/mongo.js';
 import { rankedQueue } from '../../services/tomes.js';
-import { audit } from '../../services/audit.js';
+import { getConfig } from '../../config/guildConfig.js';
+
+/** Anuncia no canal de Tomes (junto da fila/painel), não no de auditoria. */
+async function announceTome(client, guildDiscordId, content) {
+  const cfg = await getConfig(guildDiscordId);
+  const channelId = cfg.channels?.tome;
+  if (!channelId) return;
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (channel) await channel.send({ content, allowedMentions: { parse: [] } });
+}
 
 /** Ações abertas a qualquer membro. @type {readonly string[]} */
 const BUTTON_ACTIONS = Object.freeze(['join', 'leave', 'queue']);
@@ -36,7 +45,7 @@ async function deliverTo(interaction, uuid) {
   if (!entry) return interaction.editReply({ content: 'Essa pessoa não está mais na fila.', components: [] });
 
   await collections.tomeQueue().deleteOne({ uuid });
-  audit(interaction.client, interaction.guildId, `📜 Tome entregue a **${entry.username}** por <@${interaction.user.id}>.`);
+  await announceTome(interaction.client, interaction.guildId, `📜 Tome entregue a **${entry.username}** por <@${interaction.user.id}>.`);
   return interaction.editReply({
     content: `Tome entregue a **${entry.username}**. Removido da fila.`,
     components: [],
@@ -181,7 +190,7 @@ export default {
       target = ranked[0];
     }
     await collections.tomeQueue().deleteOne({ uuid: target.uuid });
-    audit(interaction.client, interaction.guildId, `📜 Tome concedido a **${target.username}** por <@${interaction.user.id}>.`);
+    await announceTome(interaction.client, interaction.guildId, `📜 Tome concedido a **${target.username}** por <@${interaction.user.id}>.`);
     return interaction.editReply(`Tome concedido a **${target.username}** e removido da fila.`);
   },
 };

@@ -23,8 +23,9 @@ import ban from './commands/ban.js';
 import forcelink from './commands/forcelink.js';
 import uniforme from './commands/uniforme.js';
 import modpack from './commands/modpack.js';
+import booth from './commands/booth.js';
 
-const commands = [link, unlink, config, apply, season, leaderboard, profile, war, tome, loan, calc, points, verificar, membros, registro, missao, ban, forcelink, uniforme, modpack];
+const commands = [link, unlink, config, apply, season, leaderboard, profile, war, tome, loan, calc, points, verificar, membros, registro, missao, ban, forcelink, uniforme, modpack, booth];
 const byName = new Map(commands.map((c) => [c.data.name, c]));
 
 export async function registerCommands() {

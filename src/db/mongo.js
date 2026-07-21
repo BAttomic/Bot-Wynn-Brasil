@@ -37,6 +37,7 @@ export const collections = {
   leaderboardCache: () => getDb().collection('leaderboardCache'),
   watcherState: () => getDb().collection('watcherState'),
   config: () => getDb().collection('config'),
+  booths: () => getDb().collection('booths'),
 };
 
 async function ensureIndexes() {
@@ -66,6 +67,9 @@ async function ensureIndexes() {
       { unique: true, partialFilterExpression: { 'meta.snapshotAt': { $exists: true } } },
     );
   await collections.config().createIndex({ guildDiscordId: 1 }, { unique: true });
+  // Um booth ativo por usuário; o job de lembretes varre por reset mais próximo.
+  await collections.booths().createIndex({ discordId: 1 }, { unique: true });
+  await collections.booths().createIndex({ nextResetAt: 1 });
 }
 
 export async function closeMongo() {
