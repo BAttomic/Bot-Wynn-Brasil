@@ -21,6 +21,8 @@ services:
       WYNN_GUILD_UUID: ${WYNN_GUILD_UUID}
       WYNN_API_KEY: ${WYNN_API_KEY}
       PORT: 8080
+      # Domínio público (p/ o /modpack). Configure um domínio no Dokploy -> :8080.
+      PUBLIC_URL: ${PUBLIC_URL}
     networks:
       - net-bot-data
       - dokploy-network

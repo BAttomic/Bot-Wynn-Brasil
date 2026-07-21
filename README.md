@@ -31,6 +31,7 @@ Todos os módulos do roadmap. Comandos:
 | `/points show\|leaderboard\|add` | Sistema de pontos unificado |
 | `/calc` | Conversor de esmeraldas (stx/le/eb/em) |
 | `/uniforme` | Baixa o uniforme e a capa oficiais da Wynn Brasil |
+| `/modpack` | Devolve o link de download do modpack oficial (`mods.rar`) |
 
 Automático (jobs):
 - **Sync de cargos**: cargo "Membro da Guilda" + "Top Contribuidor" (ranks são manuais) + reconciliação de ingresso/saída
@@ -43,6 +44,9 @@ Automático (jobs):
 ## Ops (VPS / Easypanel)
 
 - **Healthcheck:** HTTP em `:$PORT/health` (use no health check do Easypanel).
+- **Download do modpack:** o mesmo servidor HTTP serve o `mods.rar` em
+  `:$PORT/modpack`. Exponha um domínio no Dokploy apontando para `:$PORT` e
+  informe-o em `PUBLIC_URL` — o `/modpack` monta o link `${PUBLIC_URL}/modpack`.
 - **Backup:** agende `scripts/backup.sh` (mongodump gzip, mantém 14 dias). Veja o
   cabeçalho do script para as variáveis.
 

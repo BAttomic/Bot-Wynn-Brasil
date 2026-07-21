@@ -12,6 +12,7 @@ import {
   ME_ID,
   SKIN_ID,
   CAPE_ID,
+  MODPACK_ID,
   handleLeaderboardSelect,
   handleMyPoints,
   handleAssetDownload,
@@ -19,6 +20,7 @@ import {
   renderPoints,
   renderCategory,
 } from '../../services/leaderboardPanel.js';
+import { modpackReply } from './modpack.js';
 
 // Resolve a season pedida. "atual" usa a ativa; vazio significa acumulado.
 async function resolveSeason(raw) {
@@ -63,13 +65,14 @@ export default {
 
   // Componentes do painel fixo no canal de status.
   owns(interaction) {
-    return [SELECT_ID, ME_ID, SKIN_ID, CAPE_ID].includes(interaction.customId);
+    return [SELECT_ID, ME_ID, SKIN_ID, CAPE_ID, MODPACK_ID].includes(interaction.customId);
   },
 
   handleComponent(interaction) {
     if (interaction.customId === ME_ID) return handleMyPoints(interaction);
     if (interaction.customId === SKIN_ID) return handleAssetDownload(interaction, 'uniforme');
     if (interaction.customId === CAPE_ID) return handleAssetDownload(interaction, 'capa');
+    if (interaction.customId === MODPACK_ID) return interaction.reply(modpackReply());
     return handleLeaderboardSelect(interaction);
   },
 

@@ -1,7 +1,7 @@
 import { ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { collections } from '../db/mongo.js';
 import { getConfig } from '../config/guildConfig.js';
-import { ensurePanel } from './panels.js';
+import { ensurePanel, panelMessageId } from './panels.js';
 import { pointsLeaderboard, categoryLeaderboard, CATEGORIES } from './points.js';
 import { allowanceDays, forgivenessDays, daysOffline } from './inactivity.js';
 import { wynn } from '../wynn/api.js';
@@ -14,6 +14,8 @@ export const ME_ID = 'lb:me';
 /** Botões de download das peças oficiais, no painel de status. */
 export const SKIN_ID = 'lb:skin';
 export const CAPE_ID = 'lb:cape';
+/** Botão de download do modpack (abre a mensagem com link + Fabric). */
+export const MODPACK_ID = 'lb:modpack';
 /** Convite do grupo de WhatsApp da comunidade (botão-link). */
 const WHATSAPP_URL = 'https://chat.whatsapp.com/DFwzI8rjMI02Akt5yLqTPj';
 const STATE_ID = 'leaderboardPanel';
@@ -119,6 +121,7 @@ function meRow() {
 /**
  * Segunda linha de botões do painel: baixar a skin da seleção (para sobrepor na
  * sua própria skin) e a capa da guilda, mais o link do grupo de WhatsApp.
+ * O modpack fica em painel próprio (ver ensureModpackPanel).
  */
 export function downloadsRow() {
   return new ActionRowBuilder().addComponents(
@@ -236,8 +239,51 @@ export async function handleMyPoints(interaction) {
   });
 }
 
-// Segunda mensagem fixa do canal de status, separada do painel ao vivo da guilda.
+/** Documento de estado da mensagem fixa do modpack. @type {string} */
+const MODPACK_STATE_ID = 'modpackPanel';
+
+/** Mensagem fixa dedicada ao modpack: um botão que abre o link + Fabric. */
+function modpackPanelPayload() {
+  return brandWithLogo({
+    embeds: [
+      {
+        title: '📦 Modpack oficial — Wynn Brasil',
+        color: 0x2ecc71,
+        description:
+          'Baixe o modpack recomendado da guilda. O botão abaixo entrega o link do ' +
+          '`mods.rar` e o do **Fabric Installer**, com as instruções de instalação.',
+      },
+    ],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(MODPACK_ID)
+          .setLabel('Baixar Modpack')
+          .setEmoji('📦')
+          .setStyle(ButtonStyle.Success),
+      ),
+    ],
+  });
+}
+
+/**
+ * Mensagem fixa do modpack, entre o painel de info (ao vivo) e o de leaderboard.
+ * Como o Discord não reordena mensagens, a POSIÇÃO depende da ordem de criação:
+ * só publicamos o modpack depois que o painel de info (`panel`) já existe, para
+ * ele nascer ABAIXO dele. Edições no lugar seguem sempre.
+ */
+export async function ensureModpackPanel(client, guildDiscordId) {
+  const already = await panelMessageId(MODPACK_STATE_ID);
+  if (!already && !(await panelMessageId('panel'))) return null; // espera o info nascer
+  const cfg = await getConfig(guildDiscordId);
+  return ensurePanel(client, cfg.channels?.panel, MODPACK_STATE_ID, modpackPanelPayload(), 'modpack', [logoAttachment()]);
+}
+
+// Terceira mensagem fixa do canal de status, ABAIXO do modpack. Mesma lógica de
+// ordem: só publica depois que o modpack já existe.
 export async function ensureLeaderboardPanel(client, guildDiscordId) {
+  const already = await panelMessageId(STATE_ID);
+  if (!already && !(await panelMessageId(MODPACK_STATE_ID))) return null; // espera o modpack nascer
   const cfg = await getConfig(guildDiscordId);
   const payload = brandWithLogo(await buildLeaderboardPanel());
   return ensurePanel(client, cfg.channels?.panel, STATE_ID, payload, 'leaderboards', [logoAttachment()]);

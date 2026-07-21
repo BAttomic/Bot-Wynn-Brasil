@@ -12,7 +12,7 @@ import { runGuildWatch } from './services/watcher.js';
 import { ensurePanels, attachRegistrationGuard } from './services/registration.js';
 import { ensureStaticPanels } from './services/staticPanels.js';
 import { ensurePingRolePanels, attachPingRoleHandler } from './services/pingRoles.js';
-import { ensureLeaderboardPanel } from './services/leaderboardPanel.js';
+import { ensureModpackPanel, ensureLeaderboardPanel } from './services/leaderboardPanel.js';
 import { runPingsCleanup } from './jobs/pingsCleanup.js';
 import { runRecruitCleanup } from './jobs/recruitCleanup.js';
 import { ensureActiveSeason } from './services/seasons.js';
@@ -88,6 +88,8 @@ async function main() {
       await ensurePanels(client, guildId);
       await ensureStaticPanels(client, guildId);
       await ensurePingRolePanels(client, guildId);
+      // Ordem no canal de status: info (ao vivo) → modpack → leaderboard.
+      await ensureModpackPanel(client, guildId);
       await ensureLeaderboardPanel(client, guildId);
     }, { runOnStart: true });
     everyMinutes(60, 'pingsCleanup', () => runPingsCleanup(client), { runOnStart: true });
