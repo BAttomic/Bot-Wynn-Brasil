@@ -1,6 +1,7 @@
 import { collections } from '../db/mongo.js';
 import { getConfig } from '../config/guildConfig.js';
 import { fetchGuildMembers } from './guildData.js';
+import { wynn } from '../wynn/api.js';
 import { optional } from '../config/env.js';
 
 // Elegibilidade por tempo de guilda, compartilhada por Tomes e Aspects: o jogo
@@ -34,4 +35,21 @@ export async function guildJoinDate(uuid) {
 /** Dias na guilda (null = não confirmado na guilda). */
 export async function guildTenureDays(uuid) {
   return daysSince(await guildJoinDate(uuid));
+}
+
+export async function tomeMinLevel(guildId) {
+  const { params } = await getConfig(guildId);
+  return Number(params?.tomeMinClassLevel) || 100;
+}
+
+/**
+ * Maior nível de combate entre as classes do jogador. null se a API não
+ * respondeu; 0 se não tem personagem. (Tome exige uma classe neste nível.)
+ * @returns {Promise<number|null>}
+ */
+export async function maxClassLevel(username) {
+  const p = await wynn.player(username).catch(() => null);
+  if (!p || !p.uuid) return null;
+  const chars = p.characters ? Object.values(p.characters) : [];
+  return Math.max(0, ...chars.map((c) => Number(c?.level ?? c?.combatLevel) || 0));
 }

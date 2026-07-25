@@ -73,6 +73,7 @@ export const PARAM_KEYS = Object.freeze([
   'territoryDigestMinutes',
   'aspectsPerGuildRaid',
   'rewardMinGuildDays',
+  'tomeMinClassLevel',
 ]);
 
 /**
@@ -116,6 +117,7 @@ export const PARAM_KEYS = Object.freeze([
  * @property {number}         territoryDigestMinutes intervalo do resumo de território (anti-spam)
  * @property {number}         aspectsPerGuildRaid   aspects que cada membro nosso rende por guild raid
  * @property {number}         rewardMinGuildDays    dias mínimos na guilda p/ fila de Tomes e receber aspects
+ * @property {number}         tomeMinClassLevel     nível mínimo de uma classe p/ entrar na fila de Tomes
  */
 
 /** @type {GuildParams} */
@@ -170,6 +172,8 @@ const DEFAULT_PARAMS = Object.freeze({
   // Requisito do jogo para Tomes de guilda; aplicamos o mesmo à entrega de
   // aspects. Quem tem menos que isto de guilda não entra na fila nem recebe.
   rewardMinGuildDays: 7,
+  // Requisito do jogo para USAR um Tome: ter pelo menos uma classe neste nível.
+  tomeMinClassLevel: 100,
 });
 
 /**

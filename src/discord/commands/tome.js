@@ -10,7 +10,7 @@ import {
 import { collections } from '../../db/mongo.js';
 import { rankedQueue, ensureTomePanel } from '../../services/tomes.js';
 import { pendingAspects, deliverAspects } from '../../services/aspects.js';
-import { guildTenureDays, minGuildDays } from '../../services/eligibility.js';
+import { guildTenureDays, minGuildDays, maxClassLevel, tomeMinLevel } from '../../services/eligibility.js';
 import { getConfig } from '../../config/guildConfig.js';
 
 const fmtAsp = (n) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
@@ -160,7 +160,8 @@ async function joinQueue(interaction) {
   const member = await collections.members().findOne({ discordId: interaction.user.id });
   if (!member) return interaction.editReply('Você precisa se registrar antes (canal de registro).');
 
-  // Requisito do jogo: pelo menos ~1 semana na guilda para receber um Tome.
+  // Requisitos do jogo para receber/usar um Tome: ~1 semana na guilda E ter
+  // pelo menos uma classe no nível mínimo.
   const min = await minGuildDays(interaction.guildId);
   const days = await guildTenureDays(member.uuid);
   if (days === null || days < min) {
@@ -169,6 +170,15 @@ async function joinQueue(interaction) {
         ? `A fila de Tomes é só para membros da guilda — não confirmei sua entrada na **Wynn Brasil**.`
         : `A fila de Tomes exige **${min} dias** na guilda. Você está há **${days} dia(s)** — aguarde mais **${min - days}**.`,
     );
+  }
+
+  const minLvl = await tomeMinLevel(interaction.guildId);
+  const lvl = await maxClassLevel(member.username);
+  if (lvl === null) {
+    return interaction.editReply('Não consegui checar seu nível na API do Wynncraft agora. Tente de novo em instantes.');
+  }
+  if (lvl < minLvl) {
+    return interaction.editReply(`A fila de Tomes exige uma classe **nível ${minLvl}**. Sua classe mais alta é **${lvl}**.`);
   }
 
   await collections.tomeQueue().updateOne(

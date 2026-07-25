@@ -33,6 +33,9 @@ function btn(id, label, emoji, style) {
 // gerados em guild raids ainda a entregar. Republicado pelo job de painéis e
 // logo após cada ação (entrar/sair da fila, entregar tome/aspect).
 export async function buildTomePanel(guildId) {
+  const { params } = await getConfig(guildId);
+  const minDays = Number(params?.rewardMinGuildDays) || 7;
+  const minLvl = Number(params?.tomeMinClassLevel) || 100;
   const queue = await rankedQueue();
   const aspects = await listAspects(guildId);
   const pending = aspects.filter((a) => a.eligible && a.pending > 0).sort((a, b) => b.pending - a.pending);
@@ -51,7 +54,8 @@ export async function buildTomePanel(guildId) {
     title: '📜 Tomes & ✨ Aspects — Wynn Brasil',
     color: 0x9b59b6,
     description:
-      'Entre na **fila de Tomes** (ordenada por pontos de contribuição) e acompanhe os **aspects** que você gerou em guild raids, a serem entregues pela staff.',
+      'Entre na **fila de Tomes** (ordenada por pontos de contribuição) e acompanhe os **aspects** que você gerou em guild raids, a serem entregues pela staff.\n' +
+      `-# Para a fila de Tomes: **${minDays} dias** na guilda e uma classe **nível ${minLvl}**.`,
     fields: [
       {
         name: `📜 Fila de Tomes (${queue.length})`,
