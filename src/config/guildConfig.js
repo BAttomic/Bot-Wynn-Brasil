@@ -72,6 +72,7 @@ export const PARAM_KEYS = Object.freeze([
   'verifyHourUTC',
   'territoryDigestMinutes',
   'aspectsPerGuildRaid',
+  'rewardMinGuildDays',
 ]);
 
 /**
@@ -114,6 +115,7 @@ export const PARAM_KEYS = Object.freeze([
  * @property {number}         verifyHourUTC         hora do relatório de verificação
  * @property {number}         territoryDigestMinutes intervalo do resumo de território (anti-spam)
  * @property {number}         aspectsPerGuildRaid   aspects que cada membro nosso rende por guild raid
+ * @property {number}         rewardMinGuildDays    dias mínimos na guilda p/ fila de Tomes e receber aspects
  */
 
 /** @type {GuildParams} */
@@ -165,6 +167,9 @@ const DEFAULT_PARAMS = Object.freeze({
   // ganha proporcional aos seus. currentGuildRaids já é escopado à guilda, então
   // aspects do player = aspectsPerGuildRaid × guild raids dele.
   aspectsPerGuildRaid: 0.5,
+  // Requisito do jogo para Tomes de guilda; aplicamos o mesmo à entrega de
+  // aspects. Quem tem menos que isto de guilda não entra na fila nem recebe.
+  rewardMinGuildDays: 7,
 });
 
 /**

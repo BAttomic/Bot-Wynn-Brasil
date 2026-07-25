@@ -116,10 +116,15 @@ export async function takeSnapshots() {
           // Absoluto e já escopado à guilda pela API — não precisa acumular.
           guildRaids: metrics.guildRaids,
           weeklyStreak: metrics.weeklyStreak,
+          // Data REAL de entrada na guilda (API), usada na regra dos 7 dias de
+          // Tomes/aspects. Só grava quando a API traz a data.
+          ...(m.joined && { joinedGuildAt: m.joined }),
           updatedAt: now,
         },
         $inc: { guildWars: dWars, raidsInGuild: dRaids, weeklyObjectives: dWeekly },
-        $setOnInsert: { firstSeenAt: now },
+        // Aspects contam do ZERO: a baseline de um membro novo é o guildRaids que
+        // ele já tinha ao aparecer, então só os raids futuros geram aspect.
+        $setOnInsert: { firstSeenAt: now, aspectBaseRaids: metrics.guildRaids },
       },
       { upsert: true },
     );

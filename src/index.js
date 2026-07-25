@@ -15,6 +15,7 @@ import { ensureStaticPanels } from './services/staticPanels.js';
 import { ensurePingRolePanels, attachPingRoleHandler } from './services/pingRoles.js';
 import { ensureDownloadsPanel, ensureLeaderboardPanel } from './services/leaderboardPanel.js';
 import { ensureTomePanel } from './services/tomes.js';
+import { ensureAspectBaselines } from './services/aspects.js';
 import { runPingsCleanup } from './jobs/pingsCleanup.js';
 import { runRecruitCleanup } from './jobs/recruitCleanup.js';
 import { ensureActiveSeason } from './services/seasons.js';
@@ -58,6 +59,9 @@ async function main() {
   startHealthServer(() => ready);
 
   await connectMongo();
+  // Fixa a baseline dos aspects no valor atual de guild raids: todo mundo passa
+  // a contar do ZERO a partir de agora. Idempotente (só mexe em quem falta).
+  await ensureAspectBaselines();
   await registerCommands();
 
   const client = createClient();

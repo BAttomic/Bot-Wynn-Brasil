@@ -2,7 +2,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { collections } from '../db/mongo.js';
 import { getConfig } from '../config/guildConfig.js';
 import { ensurePanel } from './panels.js';
-import { pendingAspects } from './aspects.js';
+import { listAspects } from './aspects.js';
 import { brandWithLogo, logoAttachment } from '../util/assets.js';
 
 const STATE_ID = 'tomePanel';
@@ -34,7 +34,10 @@ function btn(id, label, emoji, style) {
 // logo após cada ação (entrar/sair da fila, entregar tome/aspect).
 export async function buildTomePanel(guildId) {
   const queue = await rankedQueue();
-  const pending = await pendingAspects(guildId);
+  const aspects = await listAspects(guildId);
+  const pending = aspects.filter((a) => a.eligible && a.pending > 0).sort((a, b) => b.pending - a.pending);
+  // Já têm aspect acumulado, mas ainda não completaram os 7 dias de guilda.
+  const waiting = aspects.filter((a) => !a.eligible && a.pending > 0).length;
 
   const queueLines = queue
     .slice(0, TOP)
@@ -42,6 +45,7 @@ export async function buildTomePanel(guildId) {
   const aspectLines = pending
     .slice(0, TOP)
     .map((a) => `**${a.username}** — ${fmtAsp(a.pending)} a entregar · gerou ${fmtAsp(a.earned)} (${a.raids} raids)`);
+  if (waiting) aspectLines.push(`-# +${waiting} aguardando completar 7 dias na guilda`);
 
   const embed = {
     title: '📜 Tomes & ✨ Aspects — Wynn Brasil',
