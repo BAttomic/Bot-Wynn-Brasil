@@ -1,0 +1,315 @@
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { getConfig } from '../config/guildConfig.js';
+import { ensurePanel } from './panels.js';
+import { logoAttachment, brandWithLogo } from '../util/assets.js';
+
+/**
+ * @param {Array<{id: string, label: string, emoji: string, style?: import('discord.js').ButtonStyle}>} buttons
+ * @returns {ActionRowBuilder}
+ */
+function row(buttons) {
+  return new ActionRowBuilder().addComponents(
+    buttons.map((b) =>
+      new ButtonBuilder()
+        .setCustomId(b.id)
+        .setLabel(b.label)
+        .setEmoji(b.emoji)
+        .setStyle(b.style ?? ButtonStyle.Secondary),
+    ),
+  );
+}
+
+// Painéis de texto fixo, um por canal. O bot mantém UMA mensagem em cada um,
+// editando no lugar. Se alguém apagar, o job `panels` republica em até 5 min.
+//
+// Os textos vieram da staff; só foram ajustados onde o contexto mudou (fila de
+// tomes por pontos, empréstimos sem lista de itens, registro pelo botão).
+
+const COLOR = { rules: 0x5865f2, guild: 0x2ecc71, pings: 0xe67e22, recruit: 0x3498db, war: 0xe74c3c, tome: 0x9b59b6, loan: 0xf1c40f, appeal: 0x1abc9c };
+
+/** IDs fixos referenciados nos textos da staff. @type {string} */
+const STAFF_ROLE = '1262574400587169863';
+const RECRUIT_CHANNEL = '1309848293278486578';
+const BOT_ID = '1285402380648583199';
+// Canal de pings (reaction-role). Substituiu o antigo menu nativo <id:customize>.
+const PINGS_CHANNEL = '1524986783694065736';
+
+// Menções cruas nunca pingam ninguém num painel fixo.
+const SILENT = { allowedMentions: { parse: [] } };
+
+/** @param {import('../config/guildConfig.js').GuildParams} params */
+function rulesPayload(params) {
+  const w = params.pointsWeights;
+  const base = params.inactivityDays;
+  const per = params.inactivityForgivenessPerPoints;
+  const maxDays = params.inactivityForgivenessMaxDays;
+  const streakPct = Math.round(params.weeklyStreakBonusPerWeek * 100);
+  // Exemplo de 10 dias de perdão, escrito a partir do divisor real.
+  const exemploPts = per * 10;
+  const exemploDias = Math.min(maxDays, 10);
+  const exemploTotal = base + exemploDias;
+  const fmt = (n) => n.toLocaleString('pt-BR');
+
+  return {
+    ...SILENT,
+    embeds: [
+      {
+        title: '📜 Regras da Comunidade Wynn Brasil',
+        color: COLOR.rules,
+        description:
+`Bem-vindo à Wynn Brasil! Aqui, nosso foco é criar um espaço amigável para jogadores de Wynncraft compartilharem informações, dicas e experiências. Para manter esse ambiente saudável, pedimos que todos sigam as regras abaixo:
+
+## 1. Respeito Mútuo
+> - Trate todos com respeito. Comportamentos abusivos, discriminatórios ou ofensivos não serão tolerados.
+> - Respeite opiniões diferentes e mantenha um diálogo saudável.
+
+## 2. Proibido Conteúdo Ofensivo
+> - Não publique ou compartilhe conteúdo inapropriado, incluindo violência gráfica, pornografia ou material discriminatório.
+> - Evite linguagem vulgar ou ofensiva.
+
+## 3. Uso Adequado dos Canais e Sem Spam
+> - Use os canais para os propósitos definidos.
+> - Não envie mensagens repetitivas, desnecessárias ou links externos irrelevantes.
+> - Promoção de outros servidores ou autopromoção só é permitida com autorização prévia.
+> - Nos canais de voz, mantenha um comportamento respeitoso e evite interrupções.
+
+## 4. Privacidade
+> - Respeite a privacidade de outros membros.
+> - Não compartilhe ou solicite informações pessoais sem consentimento.
+
+## 5. Comportamento no Jogo
+> - Siga as regras oficiais do Wynncraft.
+> - Não promova ou participe de trapaças ou exploração de bugs.
+> - Seja um bom representante da comunidade dentro e fora do jogo.
+
+## 6. Colaboração e Diversão
+> - Participe de forma colaborativa e ajude a manter um ambiente positivo.
+> - Lembre-se: estamos aqui para nos divertir e crescer juntos!
+
+### Observações Importantes
+- Caso presencie comportamento inadequado, denuncie aos moderadores.
+- Violações podem resultar em advertências, suspensões ou banimentos, dependendo da gravidade.
+- Escolha seus cargos de notificação em <#${PINGS_CHANNEL}>, reagindo nas mensagens. Isso ajuda na organização da guilda e na comunicação sobre eventos.
+
+-# Divirta-se e boas aventuras em Wynncraft!`,
+      },
+      {
+        title: '🛡️ Avisos e Regras da Guilda Wynn Brasil',
+        color: COLOR.guild,
+        description:
+`Nossa guilda segue uma dinâmica simples e inclusiva. Aqui estão os pontos principais para mantermos organização e harmonia:
+
+## 1. Pontos de Contribuição
+Tudo que você faz pela guilda vira ponto. Os pontos definem a **fila de Tomes** e a sua **margem de inatividade**.
+
+> \`1.000.000\` de Guild XP → **${w.contribPerMillion} ponto**
+> \`1\` Guild Raid → **${w.guildRaid} pontos**, para cada membro do grupo
+> \`1\` Guerra → **${w.war} pontos**, multiplicados pelas fronteiras que o defensor tinha
+> \`1\` Objetivo Semanal → **${w.weekly} pontos**, +${streakPct}% por semana seguida (até o dobro)
+
+No canal de status da guilda, o botão **Meus pontos** mostra os seus, sua posição e quantos dias de tolerância eles te dão.
+
+## 2. Inatividade e Expulsão
+> Membros que ficarem **${base} dias offline** podem ser removidos.
+> **Quem contribui ganha margem:** a cada **${fmt(per)} pontos**, você ganha **+1 dia** de perdão, até **+${maxDays} dias**.
+> Exemplo: ${fmt(exemploPts)} pontos = ${base} + ${exemploDias} = **${exemploTotal} dias** de tolerância.
+> O bot <@${BOT_ID}> calcula isso sozinho. Ninguém precisa pedir: o botão **Meus pontos** te diz quantos dias ainda restam.
+
+**Expulsão por inatividade não é banimento.** Você pode voltar quando quiser, refazendo o processo em <#${RECRUIT_CHANNEL}>.
+
+## 3. Guild Bank
+> O Guild Bank é público e aberto para todos. Pegue o que precisar.
+> **Scrolls** e **Ferramentas** devem ser devolvidos após o uso. Pegou? Devolva!
+
+## 4. Participação em Atividades da Guilda
+Toda atividade abaixo vira ponto, e ponto vira margem de inatividade e prioridade na fila de Tomes.
+
+> **Objetivos Semanais** — a forma mais barata de pontuar. Um objetivo por semana dá \`${w.weekly}\` pontos, e manter a sequência aumenta o valor em ${streakPct}% a cada semana. É o que mais rende por tempo gasto.
+> **Guild XP** (\`/guild xp 100\`) — cada \`1.000.000\` vira \`${w.contribPerMillion}\` ponto. Sobe o nível da guilda, o que libera mais membros e slots de baú.
+> **Guild Raids** — \`${w.guildRaid}\` pontos para **cada um** dos participantes. Geram buffs e recompensas coletivas.
+> **Guerras** — \`${w.war}\` pontos, multiplicados pelas fronteiras que o defensor tinha. Território dá bônus para a guilda inteira.
+> **Farm em Grupo** — não pontua, mas rende amizade, dicas e progresso mais rápido.
+
+**Dúvidas ou sugestões?** Procure um membro da <@&${STAFF_ROLE}>. Estamos aqui para ajudar!`,
+      },
+    ],
+  };
+}
+
+function recruitPayload() {
+  return {
+    ...SILENT,
+    embeds: [
+      {
+        title: '🛡️ Como Entrar na Guilda Wynn Brasil',
+        color: COLOR.recruit,
+        description:
+`Você já está verificado: seu nick foi confirmado na API oficial quando você se registrou. Agora é só se candidatar.
+
+**1️⃣ Sem requisitos obrigatórios**
+> Nossa guilda é aberta para toda a comunidade, focada na língua portuguesa. Portugueses, angolanos e latinos em geral também são bem-vindos!
+
+**2️⃣ Clique em Enviar candidatura**
+> Ela aparece **neste canal**, com uma votação aberta. O placar é público, mas **o voto é anônimo**: ninguém vê quem votou o quê.
+
+**3️⃣ Aceite o convite**
+> Aprovado? Um recrutador te chama no jogo. Aceite digitando \`/guild join WnBR\` **dentro do Wynncraft**.
+
+**4️⃣ Escolha seus cargos**
+> Passe em <#${PINGS_CHANNEL}> e reaja nas mensagens para marcar seus interesses. Isso ajuda na sua integração.
+
+Assim que entrar na guilda, o bot te dá o cargo de membro sozinho — em até 10 minutos, sem precisar avisar ninguém.
+
+Dúvidas? Mencione um <@&${STAFF_ROLE}>. Estamos prontos para ajudar.`,
+      },
+    ],
+    components: [
+      row([
+        { id: 'apply:submit', label: 'Enviar candidatura', emoji: '📨', style: ButtonStyle.Success },
+        { id: 'apply:status', label: 'Ver minha candidatura', emoji: '🔍' },
+      ]),
+    ],
+  };
+}
+
+function warApplicationPayload() {
+  return {
+    ...SILENT,
+    embeds: [
+      {
+        title: '🛡️ Processo de Aplicação para Guerra',
+        color: COLOR.war,
+        description:
+`Se você deseja se juntar ao nosso time de guerra, siga as diretrizes abaixo.
+
+## 🎖️ Cargo de Guerreiro \`WAR\`
+> Para fazer parte do exército geral:
+> - Ter pelo menos uma classe **nível 120**.
+> - Estar disposto a receber PINGs sobre as guerras.
+
+**Os requisitos são simples e servem para garantir um time base ativo!**
+
+## 🏆 Cargo de \`MAIN WAR\`
+> Papel mais sério, critérios mais exigentes:
+
+**Atividade e Confiança**
+> Seja ativo e conquiste nossa confiança. Builds, estratégias e consumíveis são informação privada. Vazamento resulta em **banimento permanente** da guilda e da comunidade.
+
+**Classe Exclusiva para Guerra**
+> Uma classe dedicada só à guerra, pronta a qualquer momento. Trocar de build antes de cada guerra não será bem visto.
+
+**Avaliação da Classe**
+> Sua build será avaliada pelo time e pode passar por ajustes. Se você é de confiança e não tem build, nós te passamos uma.
+
+**Acesso Total ao Mapa**
+> Sua classe de guerra precisa ter todas as regiões desbloqueadas (quests completas), para atuar em qualquer lugar.
+
+**Função na Guerra**
+> Após a aprovação você será designado a uma ou mais funções: \`DPS\`, \`HEALER\` ou \`TANK\`.
+
+## 📩 Como se candidatar?
+> Clique em **Candidatar-se** abaixo e preencha classe, interesse e função. Sua aplicação vai direto para a staff.
+
+-# 🔔 Não atingiu os critérios do cargo principal? Você ainda pode entrar no exército geral.`,
+      },
+    ],
+    components: [
+      row([{ id: 'war:apply', label: 'Candidatar-se', emoji: '⚔️', style: ButtonStyle.Danger }]),
+    ],
+  };
+}
+
+// O painel de Tomes é AO VIVO (fila + aspects a entregar) e vive em services/
+// tomes.js — não entra na lista de painéis estáticos abaixo.
+
+function loanPayload() {
+  return {
+    ...SILENT,
+    embeds: [
+      {
+        title: '💰 Empréstimo de Itens',
+        color: COLOR.loan,
+        description:
+`Nosso objetivo é apoiar novos membros, emprestando itens de \`XP Bonus\` e \`Gathering XP\`. São itens caros e difíceis de obter, e disponibilizamos parte dos nossos próprios recursos. Pedimos apenas que sejam devolvidos conforme o combinado.
+
+**Não** emprestamos **Mythics** nem **builds** para lootrun, raid, dungeon ou guerra. O foco é exclusivamente ganho de experiência.
+
+Reservamo-nos o direito de negar empréstimo a jogadores desconhecidos ou inativos. Não leve a mal se ninguém puder confiar em você ainda.
+
+## Regras e Condições
+**Solicitação:** peça a qualquer **Chief** ou superior da guilda.
+
+**Responsabilidade:** roubar é passível de banimento no Wynncraft. Ao retirar um item, você se compromete a devolvê-lo no prazo ou pagar o valor acordado.
+
+**Condição:** os itens devem voltar exatamente como saíram.
+
+**Prazo:** todo empréstimo vale **1 semana** por padrão. Devolver antes é sempre bem-vindo.
+
+**Transparência:** seu nome fica na lista de empréstimos até a devolução. O não cumprimento é registrado publicamente, independentemente do motivo.
+
+[**Wynncraft Rules**](https://forums.wynncraft.com/threads/game-forum-rules.111874/#post-3525357) — Seção 7 + Spoiler: *Information about loaning*
+
+-# Cada empréstimo vira um tópico próprio, onde a staff registra os itens. Lembretes automáticos são enviados perto do vencimento.`,
+      },
+    ],
+    components: [
+      row([
+        { id: 'loan:mine', label: 'Meus empréstimos', emoji: '💰', style: ButtonStyle.Primary },
+        { id: 'loan:new', label: 'Novo empréstimo', emoji: '📄', style: ButtonStyle.Success },
+      ]),
+    ],
+  };
+}
+
+function appealPayload() {
+  return {
+    ...SILENT,
+    embeds: [
+      {
+        title: '🕊️ Central de Apelações',
+        color: COLOR.appeal,
+        description:
+`Levou uma advertência, suspensão ou expulsão e acha que houve engano? Aqui você pede uma revisão.
+
+**Como funciona**
+> **1.** Clique em **Fazer apelação** abaixo.
+> **2.** Explique o seu caso na janela que abrir — o mais claro possível.
+> **3.** O bot abre um **tópico próprio** para você, onde a staff analisa e responde.
+
+**Bom saber**
+> Cada apelação vira um tópico separado, para não se misturar com as outras.
+> Traga fatos e contexto. Ofensa ou spam encerram o pedido.
+> A decisão final é da <@&${STAFF_ROLE}>.
+
+-# Abrir uma apelação não garante reversão — garante que o seu caso será ouvido.`,
+      },
+    ],
+    components: [
+      row([{ id: 'appeal:new', label: 'Fazer apelação', emoji: '🕊️', style: ButtonStyle.Primary }]),
+    ],
+  };
+}
+
+/**
+ * key = chave de canal em CHANNEL_KEYS; stateId = documento em watcherState.
+ * `build` recebe os parâmetros vigentes, para que nenhum número do texto
+ * divirja do que o bot realmente aplica.
+ * @type {ReadonlyArray<{key: string, stateId: string, label: string, build: (params: object) => object}>}
+ */
+export const PANELS = Object.freeze([
+  { key: 'rules', stateId: 'rulesPanel', label: 'regras', build: rulesPayload },
+  { key: 'recruiters', stateId: 'recruitPanel', label: 'recrutamento', build: recruitPayload },
+  { key: 'warApplication', stateId: 'warApplicationPanel', label: 'aplicação war', build: warApplicationPayload },
+  { key: 'loans', stateId: 'loanPanel', label: 'empréstimos', build: loanPayload },
+  { key: 'appeals', stateId: 'appealPanel', label: 'apelações', build: appealPayload },
+]);
+
+export async function ensureStaticPanels(client, guildDiscordId) {
+  const cfg = await getConfig(guildDiscordId);
+  for (const p of PANELS) {
+    const payload = brandWithLogo(p.build(cfg.params));
+    await ensurePanel(client, cfg.channels?.[p.key], p.stateId, payload, p.label, [logoAttachment()]);
+  }
+}
+
+export const STATIC_PANEL_IDS = PANELS.map((p) => p.stateId);
