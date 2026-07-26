@@ -164,7 +164,7 @@ async function announceGuildRaids(client, cfg, guild, raids) {
     const roster = members.map((n, i) => `\`${i + 1}.\` ${n}`).join('\n');
     await channel.send({ embeds: [{
       title: raid,
-      description: `**⚔️ Guild Raid concluída**\n\n${roster}`,
+      description: `**:crossed_swords: Guild Raid concluída**\n\n${roster}`,
       color: 0x9b59b6,
       thumbnail: { url: `https://visage.surgeplay.com/bust/350/${members[0]}` },
       footer: { text: `${guild.name} [${guild.prefix}]${server ? ` — ${server}` : ''}` },
@@ -316,7 +316,7 @@ async function handleGuildChanges(client, cfg, guild, old, changes) {
     } else if (path === '/territories') {
       await channel.send({ embeds: [{ title: '🗺️ Mudança no Número de Territórios', description: `\`${getByPath(old, path)}\` → \`${getByPath(guild, path)}\``, color: 0x00ff00, timestamp: iso() }] }).catch(() => {});
     } else if (path === '/wars') {
-      await channel.send({ embeds: [{ title: '⚔️ Mudança no Número de Guerras', description: `\`${getByPath(old, path)}\` → \`${getByPath(guild, path)}\``, color: 0xff4500, timestamp: iso() }] }).catch(() => {});
+      await channel.send({ embeds: [{ title: ':crossed_swords: Mudança no Número de Guerras', description: `\`${getByPath(old, path)}\` → \`${getByPath(guild, path)}\``, color: 0xff4500, timestamp: iso() }] }).catch(() => {});
     } else if (path === '/level') {
       await channel.send({ embeds: [{ title: '🏆 Mudança no Nível da Guilda', description: `\`${getByPath(old, path)}\` → \`${getByPath(guild, path)}\``, color: 0xffd700, timestamp: iso() }] }).catch(() => {});
     } else if (path.startsWith('/seasonRanks/')) {
@@ -373,7 +373,7 @@ function digestPayload({ gains, losses, warriorCaps, totalPoints, ourCount, minu
   }
   const warriors = [...warriorCaps.entries()].sort((a, b) => b[1] - a[1]);
   fields.push({
-    name: '⚔️ Guerreiros',
+    name: ':crossed_swords: Guerreiros',
     value: warriors.length
       ? truncate(warriors.map(([n, c]) => `**${n}** — ${c} captura${c > 1 ? 's' : ''}`).join('\n'))
       : 'Nenhum guerreiro detectado na janela.',

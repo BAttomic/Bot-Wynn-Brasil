@@ -31,6 +31,7 @@ export const collections = {
   tomeQueue: () => getDb().collection('tomeQueue'),
   loans: () => getDb().collection('loans'),
   warCalls: () => getDb().collection('warCalls'),
+  warQueue: () => getDb().collection('warQueue'),
   territoryCaptures: () => getDb().collection('territoryCaptures'),
   bans: () => getDb().collection('bans'),
   pointsEvents: () => getDb().collection('pointsEvents'),
@@ -52,6 +53,9 @@ async function ensureIndexes() {
   await collections.tomeQueue().createIndex({ uuid: 1 }, { unique: true });
   await collections.loans().createIndex({ borrowerDiscordId: 1, status: 1 });
   await collections.warCalls().createIndex({ messageId: 1 }, { unique: true });
+  // Uma espera de cargo WAR por pessoa; o job varre por servidor.
+  await collections.warQueue().createIndex({ discordId: 1 }, { unique: true });
+  await collections.warQueue().createIndex({ guildDiscordId: 1, queuedAt: 1 });
   await collections.territoryCaptures().createIndex({ at: -1 });
   await collections.territoryCaptures().createIndex({ territory: 1, at: -1 });
   // Banimento pega pelos dois lados da identidade.

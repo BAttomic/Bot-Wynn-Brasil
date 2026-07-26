@@ -29,6 +29,8 @@ export const EVENT_TYPES = ['war', 'raid', 'guildRaid', 'weekly', 'contribution'
  * @typedef {object} Category
  * @property {string}  label
  * @property {string}  emoji
+ * @property {string}  [menuEmoji] emoji do select menu; a API só aceita Unicode
+ *                                 ou <:nome:id> ali, nunca shortcode
  * @property {string}  unit     unidade exibida ao lado do número
  * @property {string}  alltime  campo em guildStats
  * @property {string}  season   campo em seasonParticipation
@@ -36,7 +38,7 @@ export const EVENT_TYPES = ['war', 'raid', 'guildRaid', 'weekly', 'contribution'
  * @type {Readonly<Record<string, Category>>}
  */
 export const CATEGORIES = Object.freeze({
-  war: { label: 'Guerras', emoji: '⚔️', unit: 'guerras', alltime: 'guildWars', season: 'warsFought' },
+  war: { label: 'Guerras', emoji: ':crossed_swords:', menuEmoji: '🗡️', unit: 'guerras', alltime: 'guildWars', season: 'warsFought' },
   guildraid: { label: 'Guild Raids', emoji: '🛡️', unit: 'guild raids', alltime: 'guildRaids', season: 'guildRaidsDelta' },
   xp: { label: 'XP contribuído', emoji: '📈', unit: 'XP', alltime: 'contributed', season: 'contributedDelta', short: true },
   weekly: { label: 'Objetivos semanais', emoji: '📅', unit: 'objetivos', alltime: 'weeklyObjectives', season: 'weeklyDelta' },

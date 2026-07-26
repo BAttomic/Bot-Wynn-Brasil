@@ -4,6 +4,7 @@ import { createClient } from './discord/client.js';
 import { registerCommands, attachHandlers } from './discord/commandLoader.js';
 import { everySeconds, everyMinutes, dailyAt, clearJobs } from './jobs/scheduler.js';
 import { runRoleSync } from './jobs/roleSync.js';
+import { runWarQueue } from './jobs/warQueue.js';
 import { runApplicationExpiry } from './jobs/applicationExpiry.js';
 import { runProgressSnapshot } from './jobs/progressSnapshot.js';
 import { runLoanReminders } from './jobs/loanReminders.js';
@@ -104,6 +105,8 @@ async function main() {
     // Vira a season (ou entra em off-season) assim que o jogo virar.
     everyMinutes(60, 'seasonSync', () => ensureActiveSeason(), { runOnStart: true });
     everyMinutes(minutes, 'roleSync', () => runRoleSync(client), { runOnStart: true });
+    // Depende do `inGuild` que o roleSync mantém, então roda com folga sobre ele.
+    everyMinutes(30, 'warQueue', () => runWarQueue(client), { runOnStart: true });
     everyMinutes(1, 'applicationExpiry', () => runApplicationExpiry(client));
     everyMinutes(1, 'boothReminders', () => runBoothReminders(client));
     everySeconds(watchS, 'guildWatch', () => runGuildWatch(client), { runOnStart: true });

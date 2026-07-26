@@ -74,6 +74,7 @@ export const PARAM_KEYS = Object.freeze([
   'aspectsPerGuildRaid',
   'rewardMinGuildDays',
   'tomeMinClassLevel',
+  'warMinGuildDays',
 ]);
 
 /**
@@ -118,6 +119,7 @@ export const PARAM_KEYS = Object.freeze([
  * @property {number}         aspectsPerGuildRaid   aspects que cada membro nosso rende por guild raid
  * @property {number}         rewardMinGuildDays    dias mínimos na guilda p/ fila de Tomes e receber aspects
  * @property {number}         tomeMinClassLevel     nível mínimo de uma classe p/ entrar na fila de Tomes
+ * @property {number}         warMinGuildDays       dias mínimos na guilda p/ o cargo WAR automático
  */
 
 /** @type {GuildParams} */
@@ -174,6 +176,10 @@ const DEFAULT_PARAMS = Object.freeze({
   rewardMinGuildDays: 7,
   // Requisito do jogo para USAR um Tome: ter pelo menos uma classe neste nível.
   tomeMinClassLevel: 100,
+  // O cargo WAR é automático: quem aplica recebe na hora se já tiver este tempo
+  // de guilda, e senão espera na fila até completar. Bem menor que os 7 dias das
+  // recompensas — aqui o objetivo é só filtrar quem acabou de chegar.
+  warMinGuildDays: 3,
 });
 
 /**

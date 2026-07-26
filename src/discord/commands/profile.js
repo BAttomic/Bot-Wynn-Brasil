@@ -43,13 +43,13 @@ export default {
     }
     lines.push('');
     lines.push('**Estatísticas globais:**');
-    lines.push(`- ⚔ Guerras: \`${g.wars ?? 0}\` · 📈 Nível total: \`${g.totalLevel ?? 0}\``);
+    lines.push(`- :crossed_swords: Guerras: \`${g.wars ?? 0}\` · 📈 Nível total: \`${g.totalLevel ?? 0}\``);
     lines.push(`- 🏰 Dungeons: \`${g.dungeons?.total ?? 0}\` · 🚀 Raids: \`${g.raids?.total ?? 0}\``);
     lines.push(`- 🏆 Quests: \`${g.completedQuests ?? 0}\` · ⏳ \`${Number(p.playtime || 0).toFixed(1)}h\``);
     if (g.pvp) lines.push(`- 🗡️ PvP: \`${g.pvp.kills ?? 0}\` kills / \`${g.pvp.deaths ?? 0}\` mortes`);
     lines.push('');
     lines.push('**Na nossa guilda (rastreado):**');
-    lines.push(`- ⭐ Pontos: \`${stats?.points ?? 0}\` · ⚔ Guerras: \`${stats?.guildWars ?? 0}\` · 🛡️ Guild Raids: \`${stats?.guildRaids ?? 0}\``);
+    lines.push(`- ⭐ Pontos: \`${stats?.points ?? 0}\` · :crossed_swords: Guerras: \`${stats?.guildWars ?? 0}\` · 🛡️ Guild Raids: \`${stats?.guildRaids ?? 0}\``);
     if (link?.peakRank) {
       const peak = RANK_LABEL[link.peakRank] ?? link.peakRank;
       const back = link.guildRank && link.guildRank !== link.peakRank ? ' — pode ser restaurado' : '';

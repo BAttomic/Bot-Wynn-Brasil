@@ -19,7 +19,9 @@ const DEFAULTS = {
   EMERALD: '<:Emerald:1328487728765079555>',
   // Emote de guerra do servidor. Defina EMOJI_WAR=<:nome:id> (ou <a:nome:id> se
   // animado). Fallback Unicode enquanto não configurado.
-  WAR: '⚔️',
+  // Shortcode em vez do Unicode cru (U+2694): renderiza em estilo texto e
+  // destoa dos demais emojis do embed.
+  WAR: ':crossed_swords:',
   // A barra de XP não tem emoji customizado; quadrados Unicode sempre renderizam.
   BAR_FULL: '🟩',
   BAR_EMPTY: '⬛',
@@ -40,7 +42,7 @@ export const EMOJI = {
       em: e('EMERALD', DEFAULTS.EMERALD),
     };
   },
-  /** @returns {string} emote de guerra (customizado via EMOJI_WAR, ou ⚔️). */
+  /** @returns {string} emote de guerra (customizado via EMOJI_WAR, ou :crossed_swords:). */
   get war() {
     return e('WAR', DEFAULTS.WAR);
   },

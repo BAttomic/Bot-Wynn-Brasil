@@ -8,6 +8,7 @@ import {
 import { collections } from '../../db/mongo.js';
 import { getConfig } from '../../config/guildConfig.js';
 import { audit } from '../../services/audit.js';
+import { checkWarEligibility, grantWarRole, enqueueWar } from '../../services/warRole.js';
 
 /**
  * Formulário de aplicação para guerra: três escolhas, nenhuma digitação.
@@ -76,7 +77,41 @@ function formPayload(userId) {
   return { content: 'Preencha os três campos e envie.', components: rows, ephemeral: true };
 }
 
-/** Publica a aplicação no canal de aplicação de guerra, para a staff avaliar. */
+/** Texto do resultado, do ponto de vista de quem aplicou. */
+function outcomeText({ outcome, state, days, min, interesse }) {
+  const mainWarNote =
+    interesse === 'MAIN WAR'
+      ? '\nSeu interesse em **MAIN WAR** foi enviado para a staff — esse cargo continua sendo avaliado à mão.'
+      : '';
+
+  if (outcome === 'granted') {
+    return `Cargo de guerra aplicado! Você já recebe os pings de convocação.${mainWarNote}`;
+  }
+  if (outcome === 'failed') {
+    return `Sua aplicação foi registrada, mas não consegui aplicar o cargo agora (provavelmente permissão do bot). A staff foi avisada e resolve.${mainWarNote}`;
+  }
+  // Enfileirado: a espera é pelos dias de guilda.
+  if (state === 'notMember') {
+    return `Aplicação guardada! O cargo de guerra é para membros da **Wynn Brasil** — assim que você entrar na guilda e completar **${min} dias**, ele cai sozinho, sem precisar aplicar de novo.${mainWarNote}`;
+  }
+  if (days === null) {
+    return `Aplicação guardada! Ainda não consegui confirmar sua data de entrada na guilda. Assim que você tiver **${min} dias**, o cargo cai sozinho.${mainWarNote}`;
+  }
+  const faltam = min - days;
+  return `Aplicação guardada! O cargo de guerra exige **${min} dias** de guilda e você está há **${days}**. Falta${faltam === 1 ? '' : 'm'} **${faltam} dia${faltam === 1 ? '' : 's'}** — o cargo cai sozinho, sem precisar aplicar de novo.${mainWarNote}`;
+}
+
+const OUTCOME_LABEL = {
+  granted: '✅ Cargo aplicado automaticamente',
+  queued: '⏳ Na fila (tempo de guilda)',
+  failed: '⚠️ Falha ao aplicar o cargo',
+};
+
+/**
+ * Aplica o cargo WAR na hora (ou enfileira até a pessoa completar o tempo de
+ * guilda) e publica a aplicação no canal da staff — que ainda decide o MAIN WAR
+ * e acompanha quem entrou.
+ */
 async function sendWarApplication(interaction) {
   const chosen = draftOf(interaction.user.id);
   const missing = FIELD_KEYS.filter((k) => !chosen[k]);
@@ -86,29 +121,70 @@ async function sendWarApplication(interaction) {
   await interaction.deferUpdate();
 
   const cfg = await getConfig(interaction.guildId);
+  const { state, days, min, linked } = await checkWarEligibility(
+    interaction.guildId,
+    interaction.user.id,
+  );
+
+  // Sem vínculo não há uuid para acompanhar o tempo de guilda: não dá nem para
+  // conceder nem para enfileirar.
+  if (state === 'unlinked') {
+    return interaction.editReply({
+      content: 'Antes de aplicar para guerra, registre seu nick do WynnCraft no canal de registro.',
+      components: [],
+    });
+  }
+  if (state === 'banned') {
+    return interaction.editReply({
+      content: 'Não consegui processar sua aplicação. Fale com a staff.',
+      components: [],
+    });
+  }
+
+  const application = { classe: chosen.classe, interesse: chosen.interesse, funcao: chosen.funcao };
+
+  let outcome;
+  if (state === 'ok') {
+    outcome = (await grantWarRole(interaction.member, cfg)) ? 'granted' : 'failed';
+  } else {
+    await enqueueWar({
+      guildDiscordId: interaction.guildId,
+      discordId: interaction.user.id,
+      uuid: linked.uuid,
+      username: linked.username,
+      application,
+    });
+    outcome = 'queued';
+  }
+
   const channel = await interaction.client.channels
     .fetch(cfg.channels?.warApplication ?? interaction.channelId)
     .catch(() => null);
-  if (!channel) {
-    return interaction.editReply({ content: 'Canal de aplicação inacessível.', components: [] });
+  if (channel) {
+    await channel.send({
+      embeds: [
+        {
+          title: '📩 Nova aplicação para guerra',
+          color: 0xe74c3c,
+          description: `**Jogador:** <@${interaction.user.id}>\n**Classe:** \`${chosen.classe}\`\n**Interesse:** \`${chosen.interesse}\`\n**Função:** \`${chosen.funcao}\`\n**Cargo WAR:** ${OUTCOME_LABEL[outcome]}`,
+          thumbnail: { url: interaction.user.displayAvatarURL() },
+          timestamp: new Date().toISOString(),
+        },
+      ],
+      allowedMentions: { parse: [] },
+    });
   }
 
-  await channel.send({
-    embeds: [
-      {
-        title: '📩 Nova aplicação para guerra',
-        color: 0xe74c3c,
-        description: `**Jogador:** <@${interaction.user.id}>\n**Classe:** \`${chosen.classe}\`\n**Interesse:** \`${chosen.interesse}\`\n**Função:** \`${chosen.funcao}\``,
-        thumbnail: { url: interaction.user.displayAvatarURL() },
-        timestamp: new Date().toISOString(),
-      },
-    ],
-    allowedMentions: { parse: [] },
-  });
-
   drafts.delete(interaction.user.id);
-  audit(interaction.client, interaction.guildId, `⚔️ <@${interaction.user.id}> aplicou para guerra (${chosen.interesse}).`);
-  return interaction.editReply({ content: 'Aplicação enviada! A staff vai avaliar e te retornar.', components: [] });
+  audit(
+    interaction.client,
+    interaction.guildId,
+    `:crossed_swords: <@${interaction.user.id}> aplicou para guerra (${chosen.interesse}) — ${OUTCOME_LABEL[outcome]}.`,
+  );
+  return interaction.editReply({
+    content: outcomeText({ outcome, state, days, min, interesse: chosen.interesse }),
+    components: [],
+  });
 }
 
 function hasWarRole(member, cfg) {
@@ -127,7 +203,7 @@ function callEmbed(call) {
   const going = call.going.map((id) => `<@${id}>`).join(', ') || '—';
   const not = call.notGoing.map((id) => `<@${id}>`).join(', ') || '—';
   return {
-    title: '⚔️ Convocação de Guerra!',
+    title: ':crossed_swords: Convocação de Guerra!',
     description: call.note || 'Reúnam-se para a guerra!',
     color: 0xe67e22,
     fields: [
@@ -221,7 +297,7 @@ export default {
       createdAt: new Date(),
       ...call,
     });
-    audit(interaction.client, interaction.guildId, `⚔️ <@${interaction.user.id}> convocou guerra.`);
+    audit(interaction.client, interaction.guildId, `:crossed_swords: <@${interaction.user.id}> convocou guerra.`);
     return interaction.editReply('Convocação enviada!');
   },
 };

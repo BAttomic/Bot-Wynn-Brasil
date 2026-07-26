@@ -41,7 +41,7 @@ export function renderPoints(doc, seasonId = null) {
     return { title: '🏆 Pontos de contribuição', color: 0xf1c40f, description: 'Ainda não há pontos apurados.' };
   }
   const lines = rows.map(
-    (r, i) => `${badge(i)} **${r.username}** — ${r.points} pts · ⚔ ${r.guildWars} · 🛡️ ${r.guildRaids}`,
+    (r, i) => `${badge(i)} **${r.username}** — ${r.points} pts · :crossed_swords: ${r.guildWars} · 🛡️ ${r.guildRaids}`,
   );
   return { title: '🏆 Pontos de contribuição', color: 0xf1c40f, description: lines.join('\n'), ...stamp(doc, seasonId) };
 }
@@ -100,7 +100,7 @@ function selectRow(view = DEFAULT_VIEW) {
       ...Object.entries(CATEGORIES).map(([value, c]) => ({
         label: c.label,
         value,
-        emoji: c.emoji,
+        emoji: c.menuEmoji || c.emoji,
         description: `Números crus de ${c.unit}`,
         default: view === value,
       })),
@@ -192,7 +192,7 @@ export async function handleMyPoints(interaction) {
 
   const linhas = [
     `**Pontos:** \`${points}\` · **Posição:** \`#${acima + 1}\``,
-    `⚔ Guerras \`${stats?.guildWars ?? 0}\` · 🛡️ Guild Raids \`${stats?.guildRaids ?? 0}\` · 📅 Semanais \`${stats?.weeklyObjectives ?? 0}\``,
+    `:crossed_swords: Guerras \`${stats?.guildWars ?? 0}\` · 🛡️ Guild Raids \`${stats?.guildRaids ?? 0}\` · 📅 Semanais \`${stats?.weeklyObjectives ?? 0}\``,
     `📈 Guild XP contribuído: \`${shortNumber(stats?.contributed ?? 0)}\``,
     '',
     `**Margem de inatividade:** \`${limite} dias\` (${params.inactivityDays} base + ${perdao} de perdão)`,

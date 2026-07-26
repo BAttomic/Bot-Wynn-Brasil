@@ -172,7 +172,9 @@ Dúvidas? Mencione um <@&${STAFF_ROLE}>. Estamos prontos para ajudar.`,
   };
 }
 
-function warApplicationPayload() {
+/** @param {import('../config/guildConfig.js').GuildParams} params */
+function warApplicationPayload(params) {
+  const minDias = params.warMinGuildDays;
   return {
     ...SILENT,
     embeds: [
@@ -186,8 +188,9 @@ function warApplicationPayload() {
 > Para fazer parte do exército geral:
 > - Ter pelo menos uma classe **nível 120**.
 > - Estar disposto a receber PINGs sobre as guerras.
+> - Estar na guilda há **${minDias} dias**.
 
-**Os requisitos são simples e servem para garantir um time base ativo!**
+**Sem avaliação:** clique em candidatar-se e o bot aplica o cargo na hora. Se você ainda não tem os **${minDias} dias** de guilda, sua aplicação fica guardada e o cargo cai sozinho quando você completar — não precisa aplicar de novo.
 
 ## 🏆 Cargo de \`MAIN WAR\`
 > Papel mais sério, critérios mais exigentes:
@@ -208,13 +211,15 @@ function warApplicationPayload() {
 > Após a aprovação você será designado a uma ou mais funções: \`DPS\`, \`HEALER\` ou \`TANK\`.
 
 ## 📩 Como se candidatar?
-> Clique em **Candidatar-se** abaixo e preencha classe, interesse e função. Sua aplicação vai direto para a staff.
+> Clique em **Candidatar-se** abaixo e preencha classe, interesse e função. O cargo \`WAR\` é aplicado automaticamente; o \`MAIN WAR\` vai para a staff avaliar.
 
--# 🔔 Não atingiu os critérios do cargo principal? Você ainda pode entrar no exército geral.`,
+-# 🔔 Não atingiu os critérios do cargo principal? Você ainda pode entrar no exército geral.
+-# Precisa ter o nick registrado no canal de registro — é assim que o bot confere seu tempo de guilda.`,
       },
     ],
     components: [
-      row([{ id: 'war:apply', label: 'Candidatar-se', emoji: '⚔️', style: ButtonStyle.Danger }]),
+      // Emoji de botão: a API só aceita Unicode ou <:nome:id>, shortcode não resolve.
+      row([{ id: 'war:apply', label: 'Candidatar-se', emoji: '🗡️', style: ButtonStyle.Danger }]),
     ],
   };
 }
