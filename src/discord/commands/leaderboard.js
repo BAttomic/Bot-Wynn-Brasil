@@ -8,12 +8,11 @@ import {
   CATEGORIES,
 } from '../../services/points.js';
 import {
-  SELECT_ID,
   ME_ID,
   SKIN_ID,
   CAPE_ID,
   MODPACK_ID,
-  handleLeaderboardSelect,
+  handleLeaderboardControl,
   handleMyPoints,
   handleAssetDownload,
   ensureLeaderboardPanel,
@@ -63,9 +62,11 @@ export default {
     )
     .toJSON(),
 
-  // Componentes do painel fixo no canal de status.
+  // Componentes do painel fixo no canal de status. Os botões de ranking e escopo
+  // carregam a visão no próprio customId (`lb:v:*`, `lb:s:*`), então o prefixo é
+  // o que define a dona da interação.
   owns(interaction) {
-    return [SELECT_ID, ME_ID, SKIN_ID, CAPE_ID, MODPACK_ID].includes(interaction.customId);
+    return typeof interaction.customId === 'string' && interaction.customId.startsWith('lb:');
   },
 
   handleComponent(interaction) {
@@ -73,7 +74,7 @@ export default {
     if (interaction.customId === SKIN_ID) return handleAssetDownload(interaction, 'uniforme');
     if (interaction.customId === CAPE_ID) return handleAssetDownload(interaction, 'capa');
     if (interaction.customId === MODPACK_ID) return interaction.reply(modpackReply());
-    return handleLeaderboardSelect(interaction);
+    return handleLeaderboardControl(interaction);
   },
 
   async execute(interaction) {

@@ -59,7 +59,6 @@ export async function takeSnapshots() {
     let dRaids = 0;
     let dGuildRaids = 0;
     let dContrib = 0;
-    let dWeekly = 0;
 
     // Primeiro snapshot de um membro: não há delta, mas há passado.
     //
@@ -80,11 +79,6 @@ export async function takeSnapshots() {
       dRaids = safeDelta(metrics.raids, last.metrics.raids, 2000);
       dGuildRaids = safeDelta(metrics.guildRaids, last.metrics.guildRaids ?? 0, 500);
       dContrib = Math.max(0, metrics.contributed - (last.metrics.contributed ?? 0));
-      // A API só diz se o objetivo desta semana está feito, não quantos já foram.
-      // Contamos a virada de "não fez" para "fez"; como o snapshot é diário e o
-      // objetivo é semanal, cada semana concluída é contada uma vez só.
-      // `weeklyCompleted` é null sem WYNN_API_KEY — aí não contamos nada.
-      if (metrics.weeklyCompleted === true && last.metrics.weeklyCompleted === false) dWeekly = 1;
     }
 
     // Quantidades brutas viram eventos. `snapshotAt` torna a gravação idempotente.
@@ -93,16 +87,9 @@ export async function takeSnapshots() {
     await recordEvent({ uuid: m.uuid, username: m.username, type: 'raid', qty: dRaids, meta, at: now });
     await recordEvent({ uuid: m.uuid, username: m.username, type: 'guildRaid', qty: dGuildRaids, meta, at: now });
     await recordEvent({ uuid: m.uuid, username: m.username, type: 'contribution', qty: dContrib, meta, at: now });
-    // A sequência viaja no evento: o bônus de streak é recalculado a partir dela
-    // sempre que os pesos mudarem, como todo o resto do histórico.
-    await recordEvent({
-      uuid: m.uuid,
-      username: m.username,
-      type: 'weekly',
-      qty: dWeekly,
-      meta: { ...meta, streak: metrics.weeklyStreak },
-      at: now,
-    });
+    // Objetivo semanal NÃO entra aqui: a janela diária não enxerga a virada de
+    // quem refaz o objetivo logo após o reset semanal. Quem grava é o watcher,
+    // que roda a cada 60s (ver recordWeeklyCompletion em services/points.js).
 
     await stats.updateOne(
       { uuid: m.uuid },
@@ -121,7 +108,8 @@ export async function takeSnapshots() {
           ...(m.joined && { joinedGuildAt: m.joined }),
           updatedAt: now,
         },
-        $inc: { guildWars: dWars, raidsInGuild: dRaids, weeklyObjectives: dWeekly },
+        // weeklyObjectives não entra: é derivado do livro-razão pelo recompute.
+        $inc: { guildWars: dWars, raidsInGuild: dRaids },
         // Aspects contam do ZERO: a baseline de um membro novo é o guildRaids que
         // ele já tinha ao aparecer, então só os raids futuros geram aspect.
         $setOnInsert: { firstSeenAt: now, aspectBaseRaids: metrics.guildRaids },
@@ -129,17 +117,17 @@ export async function takeSnapshots() {
       { upsert: true },
     );
 
-    if (season && (dWars > 0 || dRaids > 0 || dGuildRaids > 0 || dContrib > 0 || dWeekly > 0)) {
+    if (season && (dWars > 0 || dRaids > 0 || dGuildRaids > 0 || dContrib > 0)) {
       await part.updateOne(
         { seasonId: season.seasonId, uuid: m.uuid },
         {
           $set: { username: m.username, lastUpdatedAt: now },
+          // weeklyDelta idem: derivado do livro-razão pelo recompute.
           $inc: {
             warsFought: dWars,
             raidsDelta: dRaids,
             guildRaidsDelta: dGuildRaids,
             contributedDelta: dContrib,
-            weeklyDelta: dWeekly,
           },
         },
         { upsert: true },

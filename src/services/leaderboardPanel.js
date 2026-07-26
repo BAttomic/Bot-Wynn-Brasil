@@ -1,15 +1,21 @@
-import { ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { collections } from '../db/mongo.js';
 import { getConfig } from '../config/guildConfig.js';
 import { ensurePanel, panelMessageId } from './panels.js';
 import { pointsLeaderboard, categoryLeaderboard, CATEGORIES } from './points.js';
+import { getActiveSeason } from './seasons.js';
 import { allowanceDays, forgivenessDays, daysOffline } from './inactivity.js';
 import { wynn } from '../wynn/api.js';
 import { shortNumber } from '../util/format.js';
 import { PECAS, anexo } from '../discord/commands/uniforme.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
 
+/** Select antigo do painel. Mantido só para não quebrar mensagens ainda não reeditadas. */
 export const SELECT_ID = 'lb:view';
+/** Botão por ranking: `lb:v:<view>`. */
+export const VIEW_PREFIX = 'lb:v:';
+/** Botão de escopo: `lb:s:alltime` | `lb:s:season`. */
+export const SCOPE_PREFIX = 'lb:s:';
 export const ME_ID = 'lb:me';
 /** Botões de download das peças oficiais, no painel de status. */
 export const SKIN_ID = 'lb:skin';
@@ -67,54 +73,80 @@ export function renderCategory(key, doc, seasonId = null) {
 
 /** Visão padrão do painel. @type {string} */
 export const DEFAULT_VIEW = 'pontos';
+/** Escopo padrão: o placar de sempre. @type {string} */
+export const DEFAULT_SCOPE = 'alltime';
+
+/** @param {string} v */
+function validView(v) {
+  return v === DEFAULT_VIEW || CATEGORIES[v] ? v : DEFAULT_VIEW;
+}
+
+/** @param {string} s */
+function validScope(s) {
+  return s === 'season' ? 'season' : DEFAULT_SCOPE;
+}
 
 /**
- * A visão escolhida vale para TODO MUNDO, então precisa sobreviver ao job que
- * republica o painel a cada 5 minutos. Fica no mesmo documento do messageId.
- * @returns {Promise<string>}
+ * Ranking e escopo exibidos valem para TODO MUNDO, então precisam sobreviver ao
+ * job que republica o painel a cada 5 minutos. Ficam no mesmo documento do
+ * messageId.
+ * @returns {Promise<{view: string, scope: string}>}
  */
-async function currentView() {
+async function currentState() {
   const doc = await collections.watcherState().findOne({ _id: STATE_ID });
-  const view = doc?.view;
-  return view === DEFAULT_VIEW || CATEGORIES[view] ? view : DEFAULT_VIEW;
+  return { view: validView(doc?.view), scope: validScope(doc?.scope) };
 }
 
-/** @param {string} view */
-function saveView(view) {
-  return collections.watcherState().updateOne({ _id: STATE_ID }, { $set: { view } }, { upsert: true });
+/** @param {{view: string, scope: string}} state */
+function saveState({ view, scope }) {
+  return collections
+    .watcherState()
+    .updateOne({ _id: STATE_ID }, { $set: { view, scope } }, { upsert: true });
 }
 
-/** @param {string} view marca a opção atual como selecionada */
-function selectRow(view = DEFAULT_VIEW) {
-  const menu = new StringSelectMenuBuilder()
-    .setCustomId(SELECT_ID)
-    .setPlaceholder('Trocar o ranking exibido…')
-    .addOptions(
-      {
-        label: 'Pontos de contribuição',
-        value: DEFAULT_VIEW,
-        emoji: '🏆',
-        description: 'O ranking geral (padrão)',
-        default: view === DEFAULT_VIEW,
-      },
-      ...Object.entries(CATEGORIES).map(([value, c]) => ({
-        label: c.label,
-        value,
-        emoji: c.menuEmoji || c.emoji,
-        description: `Números crus de ${c.unit}`,
-        default: view === value,
-      })),
-    );
-  return new ActionRowBuilder().addComponents(menu);
-}
+/**
+ * Uma linha com os cinco rankings. O ativo fica azul; os outros, cinza — assim
+ * dá para ver o que está na tela sem abrir menu nenhum.
+ * @param {string} view
+ */
+function viewRow(view) {
+  const btn = (id, label, emoji) =>
+    new ButtonBuilder()
+      .setCustomId(`${VIEW_PREFIX}${id}`)
+      .setLabel(label)
+      .setEmoji(emoji)
+      .setStyle(id === view ? ButtonStyle.Primary : ButtonStyle.Secondary);
 
-function meRow() {
   return new ActionRowBuilder().addComponents(
+    btn(DEFAULT_VIEW, 'Pontos', '🏆'),
+    // O Discord só aceita Unicode (ou <:nome:id>) no emoji de um botão.
+    ...Object.entries(CATEGORIES).map(([id, c]) => btn(id, c.btn, c.menuEmoji || c.emoji)),
+  );
+}
+
+/**
+ * Escopo + atalho pessoal. Sem season ativa o botão aparece desativado, em vez
+ * de sumir: o lugar dele no painel não muda de uma hora para a outra.
+ * @param {string} scope
+ * @param {{seasonId: string, offSeason?: boolean}|null} season
+ */
+function scopeRow(scope, season) {
+  const scopeBtn = (id, label, emoji, disabled = false) =>
+    new ButtonBuilder()
+      .setCustomId(`${SCOPE_PREFIX}${id}`)
+      .setLabel(label)
+      .setEmoji(emoji)
+      .setDisabled(disabled)
+      .setStyle(id === scope ? ButtonStyle.Primary : ButtonStyle.Secondary);
+
+  return new ActionRowBuilder().addComponents(
+    scopeBtn(DEFAULT_SCOPE, 'Acumulado', '📊'),
+    scopeBtn('season', season ? season.seasonId : 'Season', '🗓️', !season),
     new ButtonBuilder()
       .setCustomId(ME_ID)
       .setLabel('Meus pontos')
       .setEmoji('⭐')
-      .setStyle(ButtonStyle.Primary),
+      .setStyle(ButtonStyle.Success),
   );
 }
 
@@ -152,16 +184,27 @@ export async function handleAssetDownload(interaction, peca) {
 }
 
 /**
- * Monta o painel na visão pedida (ou na última escolhida).
+ * Monta o painel na visão/escopo pedidos (ou nos últimos escolhidos).
  * @param {string} [view]
+ * @param {string} [scope]  'alltime' | 'season'
  */
-export async function buildLeaderboardPanel(view) {
-  const v = view ?? (await currentView());
+export async function buildLeaderboardPanel(view, scope) {
+  const saved = view === undefined || scope === undefined ? await currentState() : null;
+  const v = validView(view ?? saved.view);
+  const s = validScope(scope ?? saved.scope);
+
+  // A season é lida sempre: o botão precisa mostrar o ID vigente mesmo quando o
+  // escopo exibido é o acumulado.
+  const season = await getActiveSeason();
+  // Escopo de season sem season ativa cai no acumulado, em vez de mostrar vazio.
+  const seasonId = s === 'season' && season ? season.seasonId : null;
+
   const embed =
     v === DEFAULT_VIEW
-      ? renderPoints(await pointsLeaderboard('alltime'))
-      : renderCategory(v, await categoryLeaderboard(v));
-  return brandWithLogo({ embeds: [embed], components: [selectRow(v), meRow()] });
+      ? renderPoints(await pointsLeaderboard(seasonId ? 'season' : 'alltime', seasonId), seasonId)
+      : renderCategory(v, await categoryLeaderboard(v, seasonId), seasonId);
+
+  return brandWithLogo({ embeds: [embed], components: [viewRow(v), scopeRow(s, season)] });
 }
 
 /**
@@ -300,17 +343,28 @@ export async function ensureLeaderboardPanel(client, guildDiscordId) {
 }
 
 /**
- * Troca o ranking exibido no painel PÚBLICO — todo mundo passa a ver a mesma
+ * Troca o ranking ou o escopo do painel PÚBLICO — todo mundo passa a ver a mesma
  * coisa. A escolha é persistida, senão o job de 5 minutos a desfaria.
- * @param {import('discord.js').StringSelectMenuInteraction} interaction
+ *
+ * Atende os botões novos (`lb:v:*`, `lb:s:*`) e também o select antigo, que pode
+ * sobreviver alguns minutos numa mensagem ainda não reeditada após o deploy.
+ * @param {import('discord.js').MessageComponentInteraction} interaction
  */
-export async function handleLeaderboardSelect(interaction) {
-  const view = interaction.values?.[0];
-  if (view !== DEFAULT_VIEW && !CATEGORIES[view]) {
+export async function handleLeaderboardControl(interaction) {
+  const id = interaction.customId;
+  const state = await currentState();
+
+  if (id.startsWith(VIEW_PREFIX)) state.view = id.slice(VIEW_PREFIX.length);
+  else if (id.startsWith(SCOPE_PREFIX)) state.scope = id.slice(SCOPE_PREFIX.length);
+  else if (id === SELECT_ID) state.view = interaction.values?.[0];
+  else return interaction.reply({ content: 'Controle desconhecido.', ephemeral: true });
+
+  if (state.view !== DEFAULT_VIEW && !CATEGORIES[state.view]) {
     return interaction.reply({ content: 'Ranking desconhecido.', ephemeral: true });
   }
 
+  const next = { view: validView(state.view), scope: validScope(state.scope) };
   await interaction.deferUpdate();
-  await saveView(view);
-  await interaction.editReply(await buildLeaderboardPanel(view));
+  await saveState(next);
+  await interaction.editReply(await buildLeaderboardPanel(next.view, next.scope));
 }

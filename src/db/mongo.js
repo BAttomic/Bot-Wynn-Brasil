@@ -70,6 +70,15 @@ async function ensureIndexes() {
       { uuid: 1, type: 1, 'meta.snapshotAt': 1 },
       { unique: true, partialFilterExpression: { 'meta.snapshotAt': { $exists: true } } },
     );
+  // Idempotência do objetivo semanal visto ao vivo: um por membro/tipo/dia.
+  // Ninguém conclui dois objetivos semanais no mesmo dia, então uma segunda
+  // inserção só pode ser oscilação da API (ou o watcher reiniciando).
+  await collections
+    .pointsEvents()
+    .createIndex(
+      { uuid: 1, type: 1, 'meta.day': 1 },
+      { unique: true, partialFilterExpression: { 'meta.day': { $exists: true } } },
+    );
   await collections.config().createIndex({ guildDiscordId: 1 }, { unique: true });
   // Um booth ativo por usuário; o job de lembretes varre por reset mais próximo.
   await collections.booths().createIndex({ discordId: 1 }, { unique: true });

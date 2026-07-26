@@ -29,8 +29,9 @@ export const EVENT_TYPES = ['war', 'raid', 'guildRaid', 'weekly', 'contribution'
  * @typedef {object} Category
  * @property {string}  label
  * @property {string}  emoji
- * @property {string}  [menuEmoji] emoji do select menu; a API só aceita Unicode
- *                                 ou <:nome:id> ali, nunca shortcode
+ * @property {string}  [menuEmoji] emoji de componente (botão/menu); a API só
+ *                                 aceita Unicode ou <:nome:id> ali, nunca shortcode
+ * @property {string}  btn      rótulo curto, para caber num botão do painel
  * @property {string}  unit     unidade exibida ao lado do número
  * @property {string}  alltime  campo em guildStats
  * @property {string}  season   campo em seasonParticipation
@@ -38,10 +39,10 @@ export const EVENT_TYPES = ['war', 'raid', 'guildRaid', 'weekly', 'contribution'
  * @type {Readonly<Record<string, Category>>}
  */
 export const CATEGORIES = Object.freeze({
-  war: { label: 'Guerras', emoji: ':crossed_swords:', menuEmoji: '🗡️', unit: 'guerras', alltime: 'guildWars', season: 'warsFought' },
-  guildraid: { label: 'Guild Raids', emoji: '🛡️', unit: 'guild raids', alltime: 'guildRaids', season: 'guildRaidsDelta' },
-  xp: { label: 'XP contribuído', emoji: '📈', unit: 'XP', alltime: 'contributed', season: 'contributedDelta', short: true },
-  weekly: { label: 'Objetivos semanais', emoji: '📅', unit: 'objetivos', alltime: 'weeklyObjectives', season: 'weeklyDelta' },
+  war: { label: 'Guerras', btn: 'Guerras', emoji: ':crossed_swords:', menuEmoji: '🗡️', unit: 'guerras', alltime: 'guildWars', season: 'warsFought' },
+  guildraid: { label: 'Guild Raids', btn: 'Raids', emoji: '🛡️', unit: 'guild raids', alltime: 'guildRaids', season: 'guildRaidsDelta' },
+  xp: { label: 'XP contribuído', btn: 'XP', emoji: '📈', unit: 'XP', alltime: 'contributed', season: 'contributedDelta', short: true },
+  weekly: { label: 'Objetivos semanais', btn: 'Semanais', emoji: '📅', unit: 'objetivos', alltime: 'weeklyObjectives', season: 'weeklyDelta' },
 });
 
 export async function recordEvent({ uuid, username, type, qty, meta = null, at = new Date() }) {
@@ -129,14 +130,19 @@ export async function recomputePoints({ uuid = null } = {}) {
   const params = await currentParams();
   const filter = uuid ? { uuid } : {};
 
-  const totals = new Map(); // uuid -> { username, points }
-  const seasons = new Map(); // `${seasonId}|${uuid}` -> { seasonId, uuid, username, points }
+  const totals = new Map(); // uuid -> { username, points, weekly }
+  const seasons = new Map(); // `${seasonId}|${uuid}` -> { seasonId, uuid, username, points, weekly }
 
   for await (const ev of collections.pointsEvents().find(filter)) {
     const pts = eventPoints(ev, params);
+    // Objetivos semanais são CONTADOS aqui, não incrementados na hora: o
+    // contador vira derivada do livro-razão, como os pontos, e reprocessar
+    // conserta sozinho qualquer divergência.
+    const wk = ev.type === 'weekly' ? Number(ev.qty) || 0 : 0;
 
-    const t = totals.get(ev.uuid) || { username: ev.username, points: 0 };
+    const t = totals.get(ev.uuid) || { username: ev.username, points: 0, weekly: 0 };
     t.points += pts;
+    t.weekly += wk;
     if (ev.username) t.username = ev.username;
     totals.set(ev.uuid, t);
 
@@ -147,8 +153,10 @@ export async function recomputePoints({ uuid = null } = {}) {
       uuid: ev.uuid,
       username: ev.username,
       points: 0,
+      weekly: 0,
     };
     s.points += pts;
+    s.weekly += wk;
     if (ev.username) s.username = ev.username;
     seasons.set(key, s);
   }
@@ -156,15 +164,20 @@ export async function recomputePoints({ uuid = null } = {}) {
   // Quem não tem mais nenhum evento precisa voltar a zero, senão sobra lixo do
   // cache anterior. Só faz sentido numa recomputação global.
   if (!uuid) {
-    await collections.guildStats().updateMany({}, { $set: { points: 0 } });
-    await collections.seasonParticipation().updateMany({}, { $set: { points: 0 } });
+    await collections.guildStats().updateMany({}, { $set: { points: 0, weeklyObjectives: 0 } });
+    await collections.seasonParticipation().updateMany({}, { $set: { points: 0, weeklyDelta: 0 } });
   }
 
   for (const [id, t] of totals) {
     await collections.guildStats().updateOne(
       { uuid: id },
       {
-        $set: { username: t.username, points: Math.round(t.points), updatedAt: new Date() },
+        $set: {
+          username: t.username,
+          points: Math.round(t.points),
+          weeklyObjectives: t.weekly,
+          updatedAt: new Date(),
+        },
         $setOnInsert: { firstSeenAt: new Date() },
       },
       { upsert: true },
@@ -174,7 +187,14 @@ export async function recomputePoints({ uuid = null } = {}) {
   for (const s of seasons.values()) {
     await collections.seasonParticipation().updateOne(
       { seasonId: s.seasonId, uuid: s.uuid },
-      { $set: { username: s.username, points: Math.round(s.points), lastUpdatedAt: new Date() } },
+      {
+        $set: {
+          username: s.username,
+          points: Math.round(s.points),
+          weeklyDelta: s.weekly,
+          lastUpdatedAt: new Date(),
+        },
+      },
       { upsert: true },
     );
   }
@@ -183,6 +203,37 @@ export async function recomputePoints({ uuid = null } = {}) {
     `Pontos recomputados (${totals.size} membro(s), ${seasons.size} linha(s) de season)${uuid ? ' [parcial]' : ''}.`,
   );
   return { members: totals.size, seasonRows: seasons.size };
+}
+
+/**
+ * Objetivo semanal concluído, detectado AO VIVO pelo watcher.
+ *
+ * Não dá para contar isso no snapshot diário. A API só diz se o objetivo DESTA
+ * semana está feito, então o snapshot precisa ver a virada de `false` para
+ * `true` entre dois dias — e quem refaz o objetivo logo depois do reset semanal
+ * aparece `true` em ambos. A virada nunca acontece na janela diária e a pessoa
+ * nunca pontua, por ser rápida. O poller de 60s vê a virada de verdade.
+ *
+ * `meta.day` deixa a gravação idempotente: ninguém conclui dois objetivos
+ * semanais no mesmo dia, então uma segunda inserção só pode ser oscilação da API.
+ *
+ * @param {{uuid: string, username: string, streak?: number, at?: Date}} completion
+ * @returns {Promise<boolean>} false = já estava registrado
+ */
+export async function recordWeeklyCompletion({ uuid, username, streak = 0, at = new Date() }) {
+  const inserted = await recordEvent({
+    uuid,
+    username,
+    type: 'weekly',
+    qty: 1,
+    meta: { day: at.toISOString().slice(0, 10), streak },
+    at,
+  });
+  if (!inserted) return false;
+  // Materializa já: o contador e os pontos da pessoa não esperam a apuração
+  // diária. O leaderboard, esse sim, só muda na virada do dia.
+  await recomputePoints({ uuid });
+  return true;
 }
 
 // Concessão manual da staff. Vira um evento como qualquer outro; o efeito é

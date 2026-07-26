@@ -5,7 +5,7 @@ import { optional } from '../config/env.js';
 import { shortNumber, membersLimit, calcExperience, getByPath, diffPaths } from '../util/format.js';
 import { xpBarEmoji, EMOJI } from '../util/emojis.js';
 import { captureValue, recordCapture } from './territories.js';
-import { recordEvent, eventPoints } from './points.js';
+import { recordEvent, eventPoints, recordWeeklyCompletion } from './points.js';
 import { communityRow } from './leaderboardPanel.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { log } from '../util/log.js';
@@ -131,7 +131,7 @@ export function detectWeeklyCompletions(prev, curr) {
   for (const rank of RANKS) {
     for (const [username, m] of Object.entries(curr.members[rank] || {})) {
       if (m.weekly?.completed === true && before.get(m.uuid) === false) {
-        done.push({ username, streak: Number(m.weekly.streak ?? 0) });
+        done.push({ uuid: m.uuid, username, streak: Number(m.weekly.streak ?? 0) });
       }
     }
   }
@@ -189,7 +189,14 @@ export async function runGuildWatch(client) {
     const raids = detectGuildRaids(prevGuild, guild);
     if (raids.length) await announceGuildRaids(client, cfg, guild, raids);
     const weekly = detectWeeklyCompletions(prevGuild, guild);
-    if (weekly.length) await announceWeekly(client, cfg, guild, weekly);
+    if (weekly.length) {
+      // Pontuar vem primeiro e não depende de canal configurado: o anúncio é
+      // enfeite, o evento é o que conta.
+      for (const w of weekly) {
+        await recordWeeklyCompletion({ uuid: w.uuid, username: w.username, streak: w.streak });
+      }
+      await announceWeekly(client, cfg, guild, weekly);
+    }
     await updatePanel(client, cfg, guild);
     prevGuild = guild;
   }
