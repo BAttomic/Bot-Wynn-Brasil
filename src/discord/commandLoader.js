@@ -27,8 +27,10 @@ import modpack from './commands/modpack.js';
 import booth from './commands/booth.js';
 import apelacao from './commands/apelacao.js';
 import aspects from './commands/aspects.js';
+import evento from './commands/evento.js';
+import giveaway from './commands/giveaway.js';
 
-const commands = [link, unlink, config, apply, season, leaderboard, profile, war, tome, loan, calc, points, verificar, reconciliar, membros, registro, missao, ban, forcelink, uniforme, modpack, booth, apelacao, aspects];
+const commands = [link, unlink, config, apply, season, leaderboard, profile, war, tome, loan, calc, points, verificar, reconciliar, membros, registro, missao, ban, forcelink, uniforme, modpack, booth, apelacao, aspects, evento, giveaway];
 const byName = new Map(commands.map((c) => [c.data.name, c]));
 
 export async function registerCommands() {

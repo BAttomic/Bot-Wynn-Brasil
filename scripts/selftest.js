@@ -227,22 +227,28 @@ async function main() {
 
     const LP = await import('../src/services/leaderboardPanel.js');
     const painel = await LP.buildLeaderboardPanel();
-    const menu = painel.components[0].toJSON().components[0];
+    // A visão virou uma FILEIRA DE BOTÕES (o select saiu): o botão da visão
+    // ativa fica em Primary (style 1) e os demais em Secondary (style 2).
+    const botoes = (p) => p.components[0].toJSON().components;
+    const ativo = (p) => botoes(p).find((b) => b.style === 1)?.custom_id;
+    const linha = botoes(painel);
+
     check('painel mostra pontos por padrão', painel.embeds[0].title.includes('Pontos'), true);
-    check('seletor tem pontos + todas as categorias', menu.options.length, 1 + Object.keys(P.CATEGORIES).length);
-    check('seletor dentro do limite de 25 opções', menu.options.length <= 25, true);
-    check('descrições do seletor ≤ 100 chars', menu.options.every((o) => (o.description || '').length <= 100), true);
+    check('a fileira tem pontos + todas as categorias', linha.length, 1 + Object.keys(P.CATEGORIES).length);
+    check('cabe no limite de 5 botões por fileira', linha.length <= 5, true);
+    check('rótulos ≤ 80 chars', linha.every((b) => (b.label || '').length <= 80), true);
     check('nunca mais de 15 linhas', painel.embeds[0].description.split('\n').length <= 15, true);
-    check('botão Meus pontos presente', painel.components[1].toJSON().components[0].custom_id, LP.ME_ID);
-    check('opção "pontos" marcada como selecionada', menu.options.find((o) => o.value === 'pontos').default, true);
+    // "Meus pontos" fica na fileira de escopo, DEPOIS dos botões de escopo.
+    const escopo = painel.components[1].toJSON().components;
+    check('botão Meus pontos presente', escopo.some((b) => b.custom_id === LP.ME_ID), true);
+    check('botão "pontos" marcado como ativo', ativo(painel), `${LP.VIEW_PREFIX}pontos`);
 
     // A visão do painel é PÚBLICA: precisa sobreviver ao job que o republica.
     await collections.watcherState().updateOne({ _id: 'leaderboardPanel' }, { $set: { view: 'xp' } }, { upsert: true });
     const emXp = await LP.buildLeaderboardPanel();
     check('painel republicado respeita a visão salva', emXp.embeds[0].title.includes('XP'), true);
-    const menuXp = emXp.components[0].toJSON().components[0];
-    check('seletor marca a visão salva', menuXp.options.find((o) => o.value === 'xp').default, true);
-    check('e desmarca a anterior', menuXp.options.find((o) => o.value === 'pontos').default, false);
+    check('o botão da visão salva fica ativo', ativo(emXp), `${LP.VIEW_PREFIX}xp`);
+    check('e só um botão fica ativo por vez', botoes(emXp).filter((b) => b.style === 1).length, 1);
 
     await collections.watcherState().updateOne({ _id: 'leaderboardPanel' }, { $set: { view: 'inexistente' } });
     const invalida = await LP.buildLeaderboardPanel();
@@ -396,6 +402,235 @@ async function main() {
     check('devedor confirma o recebimento', !!conf.confirmedAt, true);
     const reconf = await loans.updateOne({ _id: insertedId, confirmedAt: null }, { $set: { confirmedAt: new Date() } });
     check('não dá para confirmar duas vezes', reconf.matchedCount, 0);
+
+    // ------------------------------------------------ Evento de competição
+    section('14. Data de início: o que a staff digita, no fuso de Brasília');
+    const E = await import('../src/services/events.js');
+    // Sem canal e com um client oco: painel e anúncio saem de cena, sobra a apuração.
+    const semDiscord = { channels: { fetch: async () => null } };
+    const h = (n) => new Date(Date.now() - n * 3_600_000);
+    const ev = (uuid, username, type, qty, at, meta = null) => ({ uuid, username, type, qty, meta, seasonId: 'S1', at });
+
+    // Brasília é UTC−3 o ano inteiro (o horário de verão acabou em 2019), então
+    // 00:00 do dia 29 é 03:00 UTC do dia 29.
+    const jul = new Date('2026-07-27T12:00:00Z');
+    const iso = (d) => d?.toISOString();
+    check('29/07 00:00 vira 03:00 UTC', iso(E.parseStart('29/07 00:00', jul)), '2026-07-29T03:00:00.000Z');
+    check('com ano explícito dá no mesmo', iso(E.parseStart('29/07/2026 00:00', jul)), '2026-07-29T03:00:00.000Z');
+    check('formato ISO também vale', iso(E.parseStart('2026-07-29 00:00', jul)), '2026-07-29T03:00:00.000Z');
+    check('sem hora, meia-noite', iso(E.parseStart('29/07', jul)), '2026-07-29T03:00:00.000Z');
+    check('hora do meio do dia', iso(E.parseStart('29/07 18:30', jul)), '2026-07-29T21:30:00.000Z');
+    // Sem ano, uma data que já passou neste ano só pode ser a do ano que vem.
+    check('05/01 em julho é o ano que vem', iso(E.parseStart('05/01', jul)), '2027-01-05T03:00:00.000Z');
+    check('data impossível é recusada', E.parseStart('31/02 00:00', jul), null);
+    check('hora impossível é recusada', E.parseStart('29/07 25:00', jul), null);
+    check('texto solto é recusado', E.parseStart('semana que vem', jul), null);
+
+    section('15. Guild raid: a tabela do evento anda no gatilho, não no dia seguinte');
+    // Um evento que só abre daqui a uma hora não pode receber crédito nenhum.
+    const agendado = await E.createEvent({
+      name: 'Corrida Agendada',
+      metricKey: 'guildraid',
+      days: 7,
+      prize: '5 LE',
+      startAt: new Date(Date.now() + 3_600_000),
+      guildDiscordId: gid,
+      createdBy: 'staff',
+      channelId: null,
+    });
+    check('evento agendado ainda não começou', E.hasStarted(agendado), false);
+    check('raid antes da abertura não é creditada', await E.creditGuildRaid({ uuid: 'gr-ana', username: 'Ana' }), 0);
+    check('e a tabela segue vazia', await E.scoreCount(agendado.eventId), 0);
+
+    // Agora um evento valendo. Guild raid é métrica de gatilho: `countFrom` é o
+    // próprio início, sem precisar de corte na contagem diária.
+    const corrida = await E.createEvent({
+      name: 'Corrida de Raids',
+      metricKey: 'guildraid',
+      days: 14,
+      prize: '3 LE',
+      podium: 2,
+      points: 100,
+      guildDiscordId: gid,
+      createdBy: 'staff',
+      channelId: null,
+    });
+    check('métrica de gatilho não espera corte', !!corrida.countFrom, true);
+    check('e já está valendo', E.hasStarted(corrida), true);
+
+    // O livro-razão do dia seguinte não pode ser lido por esta métrica: se fosse,
+    // estes lançamentos entrariam duas vezes.
+    await collections.pointsEvents().insertOne(ev('gr-ana', 'Ana', 'guildRaid', 99, new Date()));
+
+    const t0 = new Date();
+    const emT = (min) => new Date(t0.getTime() + min * 60_000);
+    // Ana e Beto terminam a mesma raid (mesmo grupo), depois Ana faz mais duas.
+    await E.creditGuildRaid({ uuid: 'gr-ana', username: 'Ana', at: emT(1) });
+    await E.creditGuildRaid({ uuid: 'gr-beto', username: 'Beto', at: emT(1) });
+    await E.creditGuildRaid({ uuid: 'gr-ana', username: 'Ana', at: emT(5) });
+    await E.creditGuildRaid({ uuid: 'gr-ana', username: 'Ana', at: emT(9) });
+    // Caio empata com Beto em 1, mas chegou depois.
+    await E.creditGuildRaid({ uuid: 'gr-caio', username: 'Caio', at: emT(30) });
+
+    const tabela = await E.scoreboard(corrida.eventId);
+    check('cada raid vale 1 para cada membro do grupo', tabela.map((r) => `${r.username}:${r.value}`), ['Ana:3', 'Beto:1', 'Caio:1']);
+    check('o livro-razão não entra em métrica de gatilho', tabela.every((r) => r.value < 99), true);
+    check('empate vai para quem chegou primeiro', [tabela[1].username, tabela[2].username], ['Beto', 'Caio']);
+    check('a posição é gravada na tabela', tabela.map((r) => r.rank), [1, 2, 3]);
+    check('e o instante da última raid também', (await E.memberScore(corrida.eventId, 'gr-ana')).reachedAt.getTime(), emT(9).getTime());
+
+    // Uma raid depois do prazo não conta: o evento já fechou a janela.
+    await collections.events().updateOne({ eventId: corrida.eventId }, { $set: { endAt: new Date(Date.now() - 1000) } });
+    check('raid depois do prazo não é creditada', await E.creditGuildRaid({ uuid: 'gr-zeta', username: 'Zeta' }), 0);
+    await collections.events().updateOne({ eventId: corrida.eventId }, { $set: { endAt: new Date(Date.now() + 86_400_000) } });
+
+    check('1º leva o prêmio cheio', E.podiumPoints(100, 1), 100);
+    check('2º leva metade', E.podiumPoints(100, 2), 50);
+    check('3º leva metade da metade', E.podiumPoints(100, 3), 25);
+    check('sem prêmio em pontos, ninguém recebe', E.podiumPoints(0, 1), 0);
+
+    const { winners } = await E.endEvent(semDiscord, await E.getEvent(corrida.eventId));
+    check('só o pódio (top 2) ganha', winners.map((w) => w.username), ['Ana', 'Beto']);
+    check('e cada um leva os pontos da sua posição', winners.map((w) => w.points), [100, 50]);
+    const manual = await collections.pointsEvents().findOne({ uuid: 'gr-ana', type: 'manual' });
+    check('o prêmio entra no livro-razão', manual?.qty, 100);
+    check('com o motivo registrado', manual?.meta?.reason?.includes('Corrida de Raids'), true);
+    check('evento marcado como encerrado', (await E.getEvent(corrida.eventId)).status, 'ended');
+
+    // Encerrar de novo não pode premiar de novo.
+    const dobrado = await E.endEvent(semDiscord, await E.getEvent(corrida.eventId));
+    check('encerrar duas vezes não repremia', dobrado.winners.length, 2);
+    check('e não gera segundo prêmio', await collections.pointsEvents().countDocuments({ uuid: 'gr-ana', type: 'manual' }), 1);
+    check('encerrado, o gatilho não credita mais', await E.creditGuildRaid({ uuid: 'gr-ana', username: 'Ana' }), 0);
+
+    section('16. Guerra e XP: janela do livro-razão, sem nada de antes');
+    // Estas métricas não têm gatilho — só existem como delta da contagem diária.
+    const inicio = h(24);
+    const depois = (n) => new Date(inicio.getTime() + n * 3_600_000);
+
+    await collections.pointsEvents().insertMany([
+      // Tudo o que veio ANTES do evento é passado: não conta, nem um segundo antes.
+      ev('ev-ana', 'Ana', 'war', 50, new Date(inicio.getTime() - 86_400_000)),
+      ev('ev-beto', 'Beto', 'war', 30, new Date(inicio.getTime() - 1000)),
+      // O corte é o próprio instante da abertura: o lançamento que o fecha é passado.
+      ev('ev-caio', 'Caio', 'war', 7, inicio),
+      // Depois. Ana e Beto empatam em 5; Beto chegou aos 5 antes.
+      ev('ev-ana', 'Ana', 'war', 2, depois(3)),
+      ev('ev-ana', 'Ana', 'war', 3, depois(14)),
+      ev('ev-beto', 'Beto', 'war', 5, depois(6)),
+      ev('ev-caio', 'Caio', 'war', 9, depois(19)),
+      // Outra métrica: não entra num evento de guerra.
+      ev('ev-ana', 'Ana', 'contribution', 100_000_000, depois(19)),
+      // Linha de base de quem entrou no meio do evento: a vida inteira dele.
+      ev('ev-novato', 'Novato', 'war', 999, depois(22), { baseline: true }),
+      // Empate TOTAL: mesma quantidade no mesmo instante (o caso comum, já que a
+      // contagem é diária e carimba todo mundo com a mesma hora).
+      ev('ev-zeta', 'Zeta', 'war', 1, depois(20)),
+      ev('ev-alfa', 'Alfa', 'war', 1, depois(20)),
+    ]);
+
+    const guerras = {
+      eventId: 'guerra-total',
+      name: 'Guerra Total',
+      metric: 'guerra',
+      prize: 'Cargo de Campeão',
+      podium: 2,
+      points: 0,
+      startAt: inicio,
+      countFrom: inicio,
+      endAt: new Date(Date.now() + 7 * 86_400_000),
+      status: 'active',
+      guildDiscordId: gid,
+      channelId: null,
+      messageId: null,
+      winners: [],
+    };
+    await collections.events().insertOne(guerras);
+
+    const tab = await E.refreshScores(guerras);
+    check('ranking do evento', tab.slice(0, 3).map((r) => `${r.username}:${r.value}`), ['Caio:9', 'Beto:5', 'Ana:5']);
+    check('o que veio antes do evento não conta', tab.find((r) => r.username === 'Ana').value, 5);
+    check('nem o que veio 1 segundo antes', tab.find((r) => r.username === 'Beto').value, 5);
+    check('nem o lançamento que fecha o passado', tab.find((r) => r.username === 'Caio').value, 9);
+    check('a linha de base do novato fica de fora', tab.some((r) => r.username === 'Novato'), false);
+    check('XP não entra num evento de guerra', tab.every((r) => r.value < 100), true);
+    // Ana só completou as 5 em depois(14); Beto já estava com 5 em depois(6).
+    check('empate vai para quem chegou ao número primeiro', tab[1].username, 'Beto');
+    check('e o retardatário fica atrás mesmo empatado', tab[2].username, 'Ana');
+    check('o instante da chegada fica registrado', tab[1].reachedAt.getTime(), depois(6).getTime());
+    // Empate total cai no nome: o critério não importa, mas TEM que ser sempre o
+    // mesmo — o painel reapura sozinho e não pode trocar as posições.
+    check('empate total desempata de forma estável', [tab[3].username, tab[4].username], ['Alfa', 'Zeta']);
+
+    const secundaria = await E.scoreboard('guerra-total');
+    check('a tabela secundária foi materializada', secundaria.length, 5);
+    check('e sai na mesma ordem da apuração', secundaria.map((r) => r.username), tab.map((r) => r.username));
+    check('e guarda a posição', (await E.memberScore('guerra-total', 'ev-caio')).rank, 1);
+
+    // Reapurar não pode duplicar nem inflar a tabela.
+    const reapurada = await E.refreshScores(guerras);
+    check('reapurar não duplica linhas', await E.scoreCount('guerra-total'), 5);
+    check('nem embaralha o ranking', reapurada.map((r) => r.username), tab.map((r) => r.username));
+    check('nem muda o valor', (await E.memberScore('guerra-total', 'ev-caio')).value, 9);
+
+    // O corte da abertura é `countFrom`, não `startAt`: é ele que a contagem
+    // diária fixa quando o evento agendado abre.
+    await collections.events().updateOne({ eventId: 'guerra-total' }, { $set: { countFrom: depois(15) } });
+    const cortada = await E.refreshScores(await E.getEvent('guerra-total'));
+    check('mover o corte reescreve a tabela', cortada.map((r) => `${r.username}:${r.value}`), ['Caio:9', 'Alfa:1', 'Zeta:1']);
+    check('e quem ficou sem lançamento sai da tabela', await E.scoreCount('guerra-total'), 3);
+
+    // ------------------------------------------------------------ Sorteio
+    section('17. Sorteio: uma inscrição por pessoa e vencedores distintos');
+    const G = await import('../src/services/giveaways.js');
+
+    const aberto = await G.createGiveaway({
+      prize: 'Mythic',
+      hours: 48,
+      winnersCount: 2,
+      guildDiscordId: gid,
+      createdBy: 'staff',
+      channelId: null,
+    });
+    check('id do sorteio sai do prêmio', aberto.giveawayId, 'mythic');
+
+    const entrou = await G.toggleEntry(aberto, 'discord-1');
+    check('entrou no sorteio', entrou.status, 'joined');
+    check('contador subiu', entrou.total, 1);
+    const denovo = await G.toggleEntry(aberto, 'discord-1');
+    check('clicar de novo sai', denovo.status, 'left');
+    check('contador desceu', denovo.total, 0);
+
+    for (const id of ['discord-1', 'discord-2', 'discord-3', 'discord-4', 'discord-5']) {
+      await G.toggleEntry(aberto, id);
+    }
+    check('cinco inscritos', await G.entryCount('mythic'), 5);
+
+    const restrito = await G.createGiveaway({
+      prize: 'Cargo VIP',
+      hours: 1,
+      requirement: 'pontos',
+      minPoints: 999_999,
+      guildDiscordId: gid,
+      createdBy: 'staff',
+      channelId: null,
+    });
+    const barrado = await G.toggleEntry(restrito, 'discord-1');
+    check('sem vínculo, o requisito barra', barrado.status, 'blocked');
+    check('e explica o porquê', barrado.reason.includes('/link'), true);
+
+    const sorteio = await G.endGiveaway({}, aberto);
+    check('sorteou o número de vagas', sorteio.winners.length, 2);
+    check('vencedores distintos', new Set(sorteio.winners.map((w) => w.discordId)).size, 2);
+    check('e saíram dos inscritos', sorteio.winners.every((w) => w.discordId.startsWith('discord-')), true);
+    check('sorteio fechado', (await G.getGiveaway('mythic')).status, 'ended');
+
+    const resorteio = await G.endGiveaway({}, await G.getGiveaway('mythic'));
+    check('sortear duas vezes devolve o mesmo resultado', resorteio.winners.map((w) => w.discordId).sort(), sorteio.winners.map((w) => w.discordId).sort());
+
+    const reroll = await G.rerollGiveaway({}, await G.getGiveaway('mythic'));
+    check('o reroll não repete quem já ganhou', reroll.winners.every((w) => !sorteio.winners.some((v) => v.discordId === w.discordId)), true);
+    check('e sorteia entre os 3 que sobraram', reroll.winners.length, 2);
   } finally {
     await getDb().dropDatabase();
     await closeMongo();

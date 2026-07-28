@@ -39,6 +39,10 @@ export const collections = {
   watcherState: () => getDb().collection('watcherState'),
   config: () => getDb().collection('config'),
   booths: () => getDb().collection('booths'),
+  events: () => getDb().collection('events'),
+  eventScores: () => getDb().collection('eventScores'),
+  giveaways: () => getDb().collection('giveaways'),
+  giveawayEntries: () => getDb().collection('giveawayEntries'),
 };
 
 async function ensureIndexes() {
@@ -83,6 +87,16 @@ async function ensureIndexes() {
   // Um booth ativo por usuário; o job de lembretes varre por reset mais próximo.
   await collections.booths().createIndex({ discordId: 1 }, { unique: true });
   await collections.booths().createIndex({ nextResetAt: 1 });
+  // Eventos de competição: o id é escolhido pela staff, o job varre por prazo.
+  await collections.events().createIndex({ eventId: 1 }, { unique: true });
+  await collections.events().createIndex({ status: 1, endAt: 1 });
+  // Tabela secundária do evento: uma linha por (evento, membro).
+  await collections.eventScores().createIndex({ eventId: 1, uuid: 1 }, { unique: true });
+  await collections.eventScores().createIndex({ eventId: 1, value: -1 });
+  await collections.giveaways().createIndex({ giveawayId: 1 }, { unique: true });
+  await collections.giveaways().createIndex({ status: 1, endAt: 1 });
+  // Uma participação por pessoa por sorteio — o índice é a própria regra.
+  await collections.giveawayEntries().createIndex({ giveawayId: 1, discordId: 1 }, { unique: true });
 }
 
 export async function closeMongo() {

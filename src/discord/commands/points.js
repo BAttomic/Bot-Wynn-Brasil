@@ -55,7 +55,7 @@ export default {
         return interaction.editReply('Apenas staff pode apurar.');
       }
       // Snapshot + eventos + recompute + tabelas, exatamente o que o job diário faz.
-      await runProgressSnapshot();
+      await runProgressSnapshot(interaction.client);
       await ensureLeaderboardPanel(interaction.client, interaction.guildId);
       const total = await collections.guildStats().countDocuments({ points: { $gt: 0 } });
       audit(interaction.client, interaction.guildId, `📸 <@${interaction.user.id}> forçou a apuração.`);

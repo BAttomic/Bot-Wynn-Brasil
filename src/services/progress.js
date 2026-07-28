@@ -17,12 +17,16 @@ function safeDelta(current, previous, cap) {
 // registra os deltas de guerras/raids/contribuição como eventos de pontos.
 // O snapshot NÃO calcula pontos: quem converte quantidade em ponto é o
 // recompute, usando os pesos vigentes na hora (ver services/points.js).
+//
+// Devolve um resumo, ou `null` se não deu para apurar (sem prefixo configurado
+// ou API fora do ar). Quem cria um evento precisa saber disso: o corte entre o
+// "antes" e o "depois" do evento é justamente este lançamento.
 export async function takeSnapshots() {
   const prefix = optional('WYNN_GUILD_PREFIX');
-  if (!prefix) return;
+  if (!prefix) return null;
 
   const res = await fetchGuildMembers(prefix);
-  if (!res) return;
+  if (!res) return null;
 
   const season = await ensureActiveSeason();
   const now = new Date();
@@ -136,4 +140,5 @@ export async function takeSnapshots() {
     }
   }
   log.info(`Snapshot concluído (${res.members.length} membros, +${counted} guerras na season ${season?.seasonId}).`);
+  return { members: res.members.length, wars: counted, takenAt: now };
 }

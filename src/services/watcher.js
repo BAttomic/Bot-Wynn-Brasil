@@ -6,6 +6,7 @@ import { shortNumber, membersLimit, calcExperience, getByPath, diffPaths } from 
 import { xpBarEmoji, EMOJI } from '../util/emojis.js';
 import { captureValue, recordCapture } from './territories.js';
 import { recordEvent, eventPoints, recordWeeklyCompletion } from './points.js';
+import { creditGuildRaid } from './events.js';
 import { communityRow } from './leaderboardPanel.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { log } from '../util/log.js';
@@ -109,7 +110,9 @@ export function detectGuildRaids(prev, curr) {
       const key = server ? `${raid}\u0000${server}` : `${raid}\u0000${uuid}`;
 
       if (!parties.has(key)) parties.set(key, { raid, server, members: [] });
-      parties.get(key).members.push(m.username);
+      // O uuid vai junto: quem credita a raid num evento precisa dele, e o nick
+      // do jogador pode mudar entre um poll e outro.
+      parties.get(key).members.push({ uuid, username: m.username });
     }
   }
   return [...parties.values()];
@@ -161,12 +164,12 @@ async function announceGuildRaids(client, cfg, guild, raids) {
   if (!channel) return;
 
   for (const { raid, server, members } of raids) {
-    const roster = members.map((n, i) => `\`${i + 1}.\` ${n}`).join('\n');
+    const roster = members.map((m, i) => `\`${i + 1}.\` ${m.username}`).join('\n');
     await channel.send({ embeds: [{
       title: raid,
       description: `**:crossed_swords: Guild Raid concluída**\n\n${roster}`,
       color: 0x9b59b6,
-      thumbnail: { url: `https://visage.surgeplay.com/bust/350/${members[0]}` },
+      thumbnail: { url: `https://visage.surgeplay.com/bust/350/${members[0].username}` },
       footer: { text: `${guild.name} [${guild.prefix}]${server ? ` — ${server}` : ''}` },
       timestamp: iso(),
     }] }).catch(() => {});
@@ -187,7 +190,18 @@ export async function runGuildWatch(client) {
     }
     trackWarParticipants(prevGuild, guild);
     const raids = detectGuildRaids(prevGuild, guild);
-    if (raids.length) await announceGuildRaids(client, cfg, guild, raids);
+    if (raids.length) {
+      // Creditar vem antes de anunciar: o evento é o que conta, o embed é
+      // enfeite e depende de um canal configurado. É AQUI que a tabela do
+      // evento anda — no instante da raid, não na apuração do dia seguinte.
+      const at = new Date();
+      for (const p of raids) {
+        for (const mem of p.members) {
+          await creditGuildRaid({ uuid: mem.uuid, username: mem.username, at });
+        }
+      }
+      await announceGuildRaids(client, cfg, guild, raids);
+    }
     const weekly = detectWeeklyCompletions(prevGuild, guild);
     if (weekly.length) {
       // Pontuar vem primeiro e não depende de canal configurado: o anúncio é

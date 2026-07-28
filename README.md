@@ -33,6 +33,8 @@ Todos os módulos do roadmap. Comandos:
 | `/uniforme` | Baixa o uniforme e a capa oficiais da Wynn Brasil |
 | `/modpack` | Devolve o link de download do modpack oficial (`mods.rar`) |
 | `/booth registrar\|status\|cancelar` | Lembrete de reset do booth (24h): avisa o dono ~5 min antes, no canal `booth`, com botão de parar |
+| `/evento criar\|ranking\|listar\|encerrar\|cancelar\|apurar` | Competição por período: quem mais fizer guild raids, guerras ou XP leva a recompensa |
+| `/giveaway criar\|encerrar\|reroll\|listar` | Sorteio com inscrição por botão |
 
 Automático (jobs):
 - **Sync de cargos**: cargo "Membro da Guilda" + "Top Contribuidor" (ranks são manuais) + reconciliação de ingresso/saída
@@ -40,7 +42,92 @@ Automático (jobs):
 - **Expiração de candidaturas** (fecha e apura no prazo)
 - **Snapshot diário**: progresso, placar de guerras e **pontos** (all-time + por season)
 - **Lembretes de empréstimo** (a vencer / atrasados)
+- **Eventos e sorteios**: painel do evento se atualiza sozinho, o evento fecha e
+  anuncia o pódio no prazo, e o sorteio é apurado no minuto do vencimento
 - **Auditoria** (`logs`) e **erros do bot** (`errors`)
+
+## Eventos de competição
+
+`/evento criar` abre uma disputa por um período: durante a janela, o bot
+contabiliza numa tabela secundária o quanto cada membro fez da métrica escolhida,
+e no fim premia o pódio.
+
+```
+/evento criar nome:Corrida de Raids metrica:Guild Raids dias:14 premio:3 LE podio:3 pontos:500
+/evento criar nome:Julho de Guerra metrica:Guerras dias:14 premio:2 LE inicio:29/07 00:00
+```
+
+| Opção | O que faz |
+|---|---|
+| `metrica` | `Guild Raids`, `Guerras` ou `XP contribuído` |
+| `dias` | Duração (14 = duas semanas). Aceita fração para testes |
+| `premio` | Texto livre, mostrado no painel e no anúncio |
+| `inicio` | (Opcional) quando abre, **horário de Brasília**. Padrão: agora |
+| `podio` | Quantos colocados são premiados (padrão: 1) |
+| `pontos` | (Opcional) pontos da guilda para o 1º; cada posição abaixo leva metade |
+| `canal` | Onde publicar o painel (padrão: o canal do comando) |
+
+`inicio` aceita `29/07 00:00`, `29/07/2026 00:00` e `2026-07-29 00:00` (sem hora
+vira meia-noite). Enquanto não abre, o painel mostra a contagem regressiva e a
+tabela fica vazia. Data no passado é recusada.
+
+**Todo mundo começa do zero:** o evento conta só o que for feito depois da
+abertura. Nada do que a pessoa já tinha entra.
+
+### Guild Raids: contam no gatilho
+
+O watcher já detecta cada guild raid no instante em que ela termina (poller de
+60s, o mesmo que anuncia a raid no canal). O evento é creditado **ali**, uma
+unidade para cada membro do grupo — não na apuração do dia seguinte.
+
+É isso que faz um evento marcado para as 00:00 do dia 29 ser exato: a raid que
+terminou às 23:58 do dia 28 simplesmente não é creditada.
+
+O preço: raid feita **com o bot fora do ar** não entra no evento. Os pontos
+dessa raid não se perdem (a contagem diária recupera pelo `guildRaids` da API),
+mas o placar do evento não a enxerga.
+
+### Guerras e XP: contam na janela diária
+
+Essas duas não têm gatilho — só existem como delta da contagem diária
+(`progressSnapshot`), então a granularidade é de um dia. A apuração lê a
+**janela** do livro-razão de pontos (`pointsEvents`), que já registra quantidade
+bruta com data. Por isso reapurar nunca duplica e `/evento apurar` pode rodar à
+vontade.
+
+Só que esse delta diário **atravessa a hora da abertura**: o lançamento do dia
+seguinte cobre desde a contagem anterior, incluindo horas em que o evento nem
+existia. Para não contar esse pedaço, o bot **apura no momento em que o evento
+abre** (na criação, ou pelo job de 5 em 5 minutos quando é agendado) e fixa o
+corte no instante real dessa apuração. Se a API do Wynncraft estiver fora do ar
+na hora, o comando avisa.
+
+### Regras comuns
+
+- A **linha de base** de quem entra na guilda no meio do evento fica de fora.
+  Sem isso, um veterano recém-chegado largaria com uma vida inteira de XP e
+  venceria sem jogar.
+- Empate vai para **quem chegou àquele número primeiro**. Se empatar até no
+  instante (comum na contagem diária, que carimba todo mundo com a mesma hora),
+  decide o nome — só para o ranking não trocar de posição sozinho entre duas
+  atualizações do painel.
+- `pontos` entra no livro-razão como concessão manual: aparece no `/profile`,
+  conta para a inatividade e é reversível como qualquer outro lançamento.
+
+O painel vive no canal `events` (ou no canal onde o comando foi usado) e se
+reconstrói sozinho se alguém apagar a mensagem.
+
+## Sorteios
+
+```
+/giveaway criar premio:Mythic horas:48 vagas:2 requisito:Membro da guilda
+```
+
+A inscrição é o botão **🎉 Participar** na própria mensagem — clicar de novo
+sai do sorteio. Requisitos possíveis: aberto a todos, conta vinculada, membro da
+guilda, ou pontos mínimos. O sorteio é apurado no minuto do vencimento; a staff
+pode antecipar com `/giveaway encerrar` ou refazer com `/giveaway reroll`
+(que exclui quem já ganhou).
 
 ## Ops (VPS / Easypanel)
 

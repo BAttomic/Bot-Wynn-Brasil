@@ -9,6 +9,8 @@ import { runApplicationExpiry } from './jobs/applicationExpiry.js';
 import { runProgressSnapshot } from './jobs/progressSnapshot.js';
 import { runLoanReminders } from './jobs/loanReminders.js';
 import { runBoothReminders } from './jobs/boothReminders.js';
+import { runEventTick } from './jobs/eventTick.js';
+import { runGiveawayDraw } from './jobs/giveawayDraw.js';
 import { runVerificationReport } from './jobs/verificationReport.js';
 import { runGuildWatch, flushTerritoryDigest } from './services/watcher.js';
 import { ensurePanels, attachRegistrationGuard } from './services/registration.js';
@@ -109,10 +111,16 @@ async function main() {
     everyMinutes(30, 'warQueue', () => runWarQueue(client), { runOnStart: true });
     everyMinutes(1, 'applicationExpiry', () => runApplicationExpiry(client));
     everyMinutes(1, 'boothReminders', () => runBoothReminders(client));
+    // O prazo de um sorteio é curto e público — precisa fechar no minuto certo.
+    everyMinutes(1, 'giveawayDraw', () => runGiveawayDraw(client));
+    // Um evento marcado para as 00:00 tem que abrir perto das 00:00, e o corte
+    // da contagem acontece na abertura — daí 5 min, não 1 hora. As guild raids
+    // não esperam por isto: o watcher credita cada uma na hora.
+    everyMinutes(5, 'eventTick', () => runEventTick(client), { runOnStart: true });
     everySeconds(watchS, 'guildWatch', () => runGuildWatch(client), { runOnStart: true });
     // O resumo agrupado de território decide sozinho quando é hora (anti-spam).
     everyMinutes(5, 'territoryDigest', () => flushTerritoryDigest(client));
-    dailyAt(snapH, 0, 'progressSnapshot', () => runProgressSnapshot());
+    dailyAt(snapH, 0, 'progressSnapshot', () => runProgressSnapshot(client));
     dailyAt(loanH, 0, 'loanReminders', () => runLoanReminders(client));
     dailyAt(verifyH, 0, 'verificationReport', () => runVerificationReport(client));
   });
