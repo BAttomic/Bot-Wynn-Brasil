@@ -116,10 +116,12 @@ async function main() {
     everyMinutes(1, 'boothReminders', () => runBoothReminders(client));
     // O prazo de um sorteio é curto e público — precisa fechar no minuto certo.
     everyMinutes(1, 'giveawayDraw', () => runGiveawayDraw(client));
-    // Um evento marcado para as 00:00 tem que abrir perto das 00:00, e o corte
-    // da contagem acontece na abertura — daí 5 min, não 1 hora. As guild raids
-    // não esperam por isto: o watcher credita cada uma na hora.
-    everyMinutes(5, 'eventTick', () => runEventTick(client), { runOnStart: true });
+    // Um evento marcado para as 00:00 tem que abrir às 00:00: o corte da
+    // contagem de guerra e XP acontece na abertura, e o que ficar entre o
+    // horário marcado e o corte não é contado para ninguém. De 1 em 1 minuto
+    // essa folga fica em no máximo 60s (era de até 5 min). As guild raids não
+    // esperam por isto: o watcher credita cada uma na hora.
+    everyMinutes(1, 'eventTick', () => runEventTick(client), { runOnStart: true });
     everySeconds(watchS, 'guildWatch', () => runGuildWatch(client), { runOnStart: true });
     // O resumo agrupado de território decide sozinho quando é hora (anti-spam).
     everyMinutes(5, 'territoryDigest', () => flushTerritoryDigest(client));

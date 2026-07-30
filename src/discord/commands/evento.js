@@ -91,10 +91,15 @@ async function criar(interaction) {
 
   // CORTE ENTRE O PASSADO E O EVENTO, para as métricas SEM gatilho.
   //
-  // Guerra e XP só existem como delta da contagem diária, e esse delta atravessa
-  // o momento em que o evento abre: o lançamento de amanhã cobre desde a
-  // contagem de hoje, incluindo horas em que o evento nem existia. Apurar no
+  // Guerra e XP só existem como delta entre duas apurações, e esse delta
+  // atravessa o momento em que o evento abre: o lançamento seguinte cobre desde
+  // a apuração anterior, incluindo tempo em que o evento nem existia. Apurar no
   // instante da abertura fecha esse pedaço no passado.
+  //
+  // O instante DESTA apuração é o corte, e vai para o evento em `countFrom`.
+  // Antes ele era descartado e o corte só saía no eventTick seguinte — o que
+  // engolia até 5 minutos de guerra e XP, porque essa atividade caía no delta
+  // pré-corte e era excluída pelo `at > countFrom` da apuração.
   //
   // Guild raid não precisa: o gatilho credita a tabela no instante da raid, e
   // uma raid terminada antes da abertura simplesmente não é creditada. Se o
@@ -109,6 +114,7 @@ async function criar(interaction) {
     prize: premio,
     description: descricao,
     startAt: inicio,
+    countFrom: snapshot?.takenAt ?? null,
     podium: podio,
     points: pontos,
     guildDiscordId: interaction.guildId,
@@ -148,8 +154,8 @@ async function criar(interaction) {
         ? `Painel publicado em <#${msg.channelId}> (atualiza sozinho).`
         : '⚠️ Não consegui publicar o painel — configure `/config channel key:events`.') +
       (precisaCorte && !snapshot
-        ? '\n⚠️ Não consegui apurar agora (API do Wynncraft fora do ar). A primeira contagem ' +
-          'pode incluir horas anteriores ao evento — rode `/points apurar` e recrie o evento se quiser um corte limpo.'
+        ? '\n⚠️ Não consegui apurar agora (API do Wynncraft fora do ar), então o corte da contagem ' +
+          'ficou para a próxima passagem (até 1 min). O que acontecer até lá não é contado.'
         : ''),
   );
 }

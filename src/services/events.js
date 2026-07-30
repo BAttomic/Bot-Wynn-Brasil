@@ -232,6 +232,8 @@ async function uniqueEventId(base) {
  * @param {string} args.prize         recompensas separadas por vírgula, uma por premiado
  * @param {string} [args.description] texto livre do evento, com `\n` para quebrar linha
  * @param {Date}   [args.startAt]     quando começa a valer (padrão: agora)
+ * @param {Date}   [args.countFrom]   instante da apuração que fechou o passado
+ *                                    (métricas sem gatilho; ver refreshScores)
  * @param {number} [args.podium]      quantos colocados premiados
  * @param {number} [args.points]      pontos para o 1º lugar (metade a cada posição)
  * @param {string} args.guildDiscordId
@@ -246,6 +248,7 @@ export async function createEvent({
   prize,
   description = '',
   startAt = null,
+  countFrom = null,
   podium = 1,
   points = 0,
   guildDiscordId,
@@ -264,10 +267,15 @@ export async function createEvent({
     points: Math.max(0, points),
     startAt: inicio,
     endAt: new Date(endAt),
-    // Só as métricas sem gatilho precisam de um corte próprio, feito quando o
-    // evento começa (ver jobs/eventTick.js). Guild raid é creditada ao vivo,
-    // então o corte é o próprio `startAt`.
-    countFrom: METRICS[metricKey]?.live ? inicio : null,
+    // Guild raid é creditada ao vivo, então o corte é o próprio `startAt`.
+    //
+    // Guerra e XP precisam de um corte próprio: o instante de uma apuração que
+    // fechou o passado. Quem cria um evento que começa AGORA já apurou e passa
+    // esse instante em `countFrom` — sem isso, o corte só sairia no eventTick
+    // seguinte e tudo que acontecesse até lá cairia no delta pré-corte, ou
+    // seja, sumia. Evento agendado nasce sem corte: quem fixa é o eventTick, na
+    // hora de abrir.
+    countFrom: METRICS[metricKey]?.live ? inicio : (countFrom ?? null),
     status: 'active',
     guildDiscordId,
     createdBy,
@@ -568,11 +576,11 @@ export function renderEvent(event, rows, { me = null, total = null } = {}) {
     description: (descricao ? `${descricao}\n\n` : '') + lines.join('\n'),
     color: encerrado ? 0x95a5a6 : comecou ? 0xe67e22 : 0x3498db,
     fields,
+    // O id não entra aqui: o painel é para os membros, e rodapé de embed nem
+    // renderiza markdown (o `id` saía com as crases à mostra). Quem precisa do
+    // id é a staff, e ele está no /evento listar.
     footer: {
-      text:
-        `Evento \`${event.eventId}\`` +
-        (total !== null ? ` — ${total} participante(s)` : '') +
-        ' — apurado de hora em hora',
+      text: (total !== null ? `${total} participante(s) — ` : '') + 'apurado de hora em hora',
     },
     timestamp: new Date().toISOString(),
   };

@@ -35,10 +35,27 @@ let prevTerritory = null;
 //
 // Guardamos um LOG de incrementos de guerra com horário, e no flush cada captura
 // leva os guerreiros cujo incremento caiu perto do horário dela.
-const WAR_LOG_RETENTION_MS = 90 * 60_000; // cobre o buffer de 1h + folga do cache
-const ATTRIB_WINDOW_MS = 15 * 60_000; // guerra ±15min da captura conta para ela
+// A JANELA É ASSIMÉTRICA, e isso é o ponto todo.
+//
+// O território vem de um endpoint quase em tempo real; o contador de guerra vem
+// do endpoint de guilda, que o Wynncraft cacheia pesado. Então o incremento é
+// SEMPRE visto depois da captura — nunca muito antes. Uma janela simétrica de
+// ±15 min (como era) descartava todo mundo sempre que o cache demorava mais que
+// isso: o incremento estava no log, só caía fora da janela, e o resumo saía com
+// "nenhum guerreiro detectado" mesmo com a guerra ganha.
+//
+// O `depois` acompanha o intervalo do resumo (que já espera justamente para o
+// contador alcançar) com um teto, para as duas esperas não saírem de sincronia
+// de novo. O `antes` é curto: só cobre a ordem entre dois polls vizinhos.
+const ATTRIB_BEFORE_MS = 5 * 60_000;
+const ATTRIB_AFTER_MAX_MS = 45 * 60_000;
 const FLUSH_GRACE_MS = 6 * 60_000; // idade mínima da captura antes de anunciar
 const warriorLog = []; // { uuid, username, at } — em ordem cronológica
+
+/** Retenção do log: tem que cobrir a espera do resumo + a janela depois + folga. */
+function warLogRetentionMs(digestMs = 60 * 60_000) {
+  return digestMs + ATTRIB_AFTER_MAX_MS + 15 * 60_000;
+}
 
 // Capturas/perdas acumuladas, soltas em UM aviso agrupado por hora (anti-spam).
 const pendingTerritory = []; // { name, gained, lost, newOwner, oldOwner, ...names, value, at }
@@ -55,23 +72,35 @@ function membersByUuid(guild) {
   return out;
 }
 
-function trackWarParticipants(prev, curr) {
+function trackWarParticipants(prev, curr, retentionMs = warLogRetentionMs()) {
   const now = Date.now();
   // Poda o log pela frente (sempre inserido em ordem cronológica).
-  while (warriorLog.length && now - warriorLog[0].at > WAR_LOG_RETENTION_MS) warriorLog.shift();
+  while (warriorLog.length && now - warriorLog[0].at > retentionMs) warriorLog.shift();
   if (!prev) return; // primeiro poll: só baseline
   const before = membersByUuid(prev);
+  let novos = 0;
   for (const [uuid, m] of membersByUuid(curr)) {
     const old = before.get(uuid);
-    if (old && m.wars > old.wars) warriorLog.push({ uuid, username: m.username, at: now });
+    if (old && m.wars > old.wars) {
+      warriorLog.push({ uuid, username: m.username, at: now });
+      novos += 1;
+    }
   }
+  // Sem isto, "nenhum guerreiro detectado" é indistinguível de "o contador nunca
+  // subiu" — foi o que dificultou achar o furo da janela na primeira vez.
+  if (novos) log.info(`Guerra: +${novos} incremento(s) de contador (log com ${warriorLog.length}).`);
 }
 
-// Guerreiros cujo contador subiu perto do horário da captura. Dedup por uuid.
-function attributeWarriors(capAt) {
+/**
+ * Guerreiros cujo contador subiu perto do horário da captura. Dedup por uuid.
+ * @param {number} capAt    horário da captura
+ * @param {number} afterMs  quanto tempo DEPOIS da captura ainda conta
+ */
+function attributeWarriors(capAt, afterMs = ATTRIB_AFTER_MAX_MS) {
   const seen = new Map();
   for (const w of warriorLog) {
-    if (Math.abs(w.at - capAt) <= ATTRIB_WINDOW_MS) seen.set(w.uuid, w.username);
+    const d = w.at - capAt;
+    if (d >= -ATTRIB_BEFORE_MS && d <= afterMs) seen.set(w.uuid, w.username);
   }
   return [...seen].map(([uuid, username]) => ({ uuid, username }));
 }
@@ -188,7 +217,14 @@ export async function runGuildWatch(client) {
       const changes = diffPaths(prevGuild, guild);
       if (changes.length) await handleGuildChanges(client, cfg, guild, prevGuild, changes);
     }
-    trackWarParticipants(prevGuild, guild);
+    // Retenção derivada do intervalo do resumo: se a staff aumentar o
+    // territoryDigestMinutes, o log tem que durar mais, senão a poda apaga o
+    // incremento antes de o resumo usá-lo.
+    trackWarParticipants(
+      prevGuild,
+      guild,
+      warLogRetentionMs((Number(cfg.params?.territoryDigestMinutes) || 60) * 60_000),
+    );
     const raids = detectGuildRaids(prevGuild, guild);
     if (raids.length) {
       // Creditar vem antes de anunciar: o evento é o que conta, o embed é
@@ -442,6 +478,10 @@ export async function flushTerritoryDigest(client) {
   }
   lastDigestAt = now;
 
+  // A janela de atribuição acompanha a espera do resumo: o motivo de esperar é
+  // exatamente dar tempo do contador cacheado alcançar.
+  const afterMs = Math.min(intervalMs, ATTRIB_AFTER_MAX_MS);
+
   const params = cfg.params || {};
   const base = Number(params.pointsWeights?.war) || 0;
   const gains = [];
@@ -455,7 +495,13 @@ export async function flushTerritoryDigest(client) {
       continue;
     }
     const raw = c.value || { multiplier: 1 };
-    const participants = attributeWarriors(c.at);
+    const participants = attributeWarriors(c.at, afterMs);
+    if (!participants.length) {
+      log.warn(
+        `Captura de ${c.name} sem guerreiro atribuído — ${warriorLog.length} incremento(s) no log, ` +
+          `janela de -${ATTRIB_BEFORE_MS / 60_000} a +${Math.round(afterMs / 60_000)} min.`,
+      );
+    }
     // O evento de território paga só o excedente; a base vem da guerra.
     const bonus = eventPoints({ type: 'territory', qty: raw.multiplier }, params);
     const points = Math.round(base + bonus);
