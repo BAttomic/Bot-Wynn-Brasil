@@ -8,9 +8,9 @@ import {
   TextInputStyle,
 } from 'discord.js';
 import { collections } from '../../db/mongo.js';
-import { rankedQueue, ensureTomePanel } from '../../services/tomes.js';
+import { queueView, deliverTome, tomeCredits, ensureTomePanel } from '../../services/tomes.js';
 import { pendingAspects, deliverAspects } from '../../services/aspects.js';
-import { guildTenureDays, minGuildDays, maxClassLevel, tomeMinLevel } from '../../services/eligibility.js';
+import { maxClassLevel, tomeMinLevel } from '../../services/eligibility.js';
 import { getConfig } from '../../config/guildConfig.js';
 
 const fmtAsp = (n) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
@@ -46,16 +46,20 @@ async function isTomeManager(interaction) {
   return MANAGER_GUILD_RANKS.includes(linked?.guildRank);
 }
 
-/** Remove alguém da fila e registra a entrega. */
+/**
+ * Registra a entrega, consumindo um crédito de missão semanal. Quem ainda tem
+ * semanais de sobra continua na fila; quem zerou sai.
+ */
 async function deliverTo(interaction, uuid) {
   const entry = await collections.tomeQueue().findOne({ uuid });
   if (!entry) return interaction.editReply({ content: 'Essa pessoa não está mais na fila.', components: [] });
 
-  await collections.tomeQueue().deleteOne({ uuid });
+  const { credits, stillQueued } = await deliverTome(uuid);
+  const resto = stillQueued ? ` Ainda tem direito a **${credits}**, segue na fila.` : ' Saiu da fila.';
   await announceTome(interaction.client, interaction.guildId, `📜 Tome entregue a **${entry.username}** por <@${interaction.user.id}>.`);
   await ensureTomePanel(interaction.client, interaction.guildId);
   return interaction.editReply({
-    content: `Tome entregue a **${entry.username}**. Removido da fila.`,
+    content: `Tome entregue a **${entry.username}**.${resto}`,
     components: [],
   });
 }
@@ -134,22 +138,24 @@ async function promptDelivery(interaction) {
     return interaction.reply({ content: 'Apenas **Chief ou superior** pode entregar Tomes.', ephemeral: true });
   }
 
-  const ranked = await rankedQueue();
-  if (!ranked.length) return interaction.reply({ content: 'A fila está vazia.', ephemeral: true });
+  // Só quem cumpriu os dias de guilda E tem semanal de crédito pode receber —
+  // os em espera nem aparecem no menu.
+  const { ready } = await queueView(interaction.guildId);
+  if (!ready.length) return interaction.reply({ content: 'Ninguém elegível na fila.', ephemeral: true });
 
   const menu = new StringSelectMenuBuilder()
     .setCustomId('tome:delivered')
     .setPlaceholder('Quem recebeu o Tome?')
     .addOptions(
-      ranked.slice(0, SELECT_LIMIT).map((r, i) => ({
+      ready.slice(0, SELECT_LIMIT).map((r, i) => ({
         label: r.username,
         value: r.uuid,
-        description: `${i + 1}º na fila · ${r.points} pts`,
+        description: `${i + 1}º na fila · ${r.points} pts · direito a ${r.credits}`,
       })),
     );
 
   return interaction.reply({
-    content: 'Selecione quem recebeu. Ele sai da fila na hora.',
+    content: 'Selecione quem recebeu. Consome um crédito de missão semanal.',
     components: [new ActionRowBuilder().addComponents(menu)],
     ephemeral: true,
   });
@@ -160,18 +166,8 @@ async function joinQueue(interaction) {
   const member = await collections.members().findOne({ discordId: interaction.user.id });
   if (!member) return interaction.editReply('Você precisa se registrar antes (canal de registro).');
 
-  // Requisitos do jogo para receber/usar um Tome: ~1 semana na guilda E ter
-  // pelo menos uma classe no nível mínimo.
-  const min = await minGuildDays(interaction.guildId);
-  const days = await guildTenureDays(member.uuid);
-  if (days === null || days < min) {
-    return interaction.editReply(
-      days === null
-        ? `A fila de Tomes é só para membros da guilda — não confirmei sua entrada na **Wynn Brasil**.`
-        : `A fila de Tomes exige **${min} dias** na guilda. Você está há **${days} dia(s)** — aguarde mais **${min - days}**.`,
-    );
-  }
-
+  // Nível de classe é requisito de ENTRADA. Os dias de guilda, não: como nos
+  // aspects, dá para entrar na fila antes e ela só passa a valer ao completar.
   const minLvl = await tomeMinLevel(interaction.guildId);
   const lvl = await maxClassLevel(member.username);
   if (lvl === null) {
@@ -190,11 +186,30 @@ async function joinQueue(interaction) {
     { upsert: true },
   );
 
-  const ranked = await rankedQueue();
-  const pos = ranked.findIndex((r) => r.uuid === member.uuid) + 1;
+  const { ready, waiting, minDays: min } = await queueView(interaction.guildId);
   await ensureTomePanel(interaction.client, interaction.guildId);
+
+  // Está na fila, mas em espera — só aparece de fato quando destravar. Os dados
+  // vêm da mesma fonte do painel, para a mensagem nunca discordar dele.
+  const own = waiting.find((r) => r.uuid === member.uuid);
+  if (own) {
+    if (own.blockedBy === 'weekly') {
+      return interaction.editReply(
+        'Você entrou na fila de Tomes! Mas ela só passa a valer quando você cumprir a **missão semanal da guilda** — cada semanal dá direito a **1 Tome**, e acumula.\n' +
+          '-# Até lá você não aparece na fila.',
+      );
+    }
+    return interaction.editReply(
+      own.days === null
+        ? `Você entrou na fila de Tomes, mas ela só passa a valer quando eu confirmar sua entrada na guilda **Wynn Brasil** e você completar **${min} dias** nela.`
+        : `Você entrou na fila de Tomes! Mas ela só passa a valer com **${min} dias** de guilda — você está há **${own.days}**, faltam **${min - own.days}**.\n-# Até lá você não aparece na fila, mas já pode ir acumulando pontos e missões semanais.`,
+    );
+  }
+
+  const entry = ready.find((r) => r.uuid === member.uuid);
+  const pos = ready.indexOf(entry) + 1;
   return interaction.editReply(
-    `Você entrou na fila de Tomes! Posição atual: **${pos}** de ${ranked.length}.\n-# A fila é ordenada por pontos de contribuição, não por ordem de chegada.`,
+    `Você entrou na fila de Tomes! Posição atual: **${pos}** de ${ready.length} — direito a **${entry.credits} Tome(s)**.\n-# A fila é ordenada por pontos de contribuição, não por ordem de chegada.`,
   );
 }
 
@@ -209,18 +224,35 @@ async function leaveQueue(interaction) {
 
 /** @param {import('discord.js').Interaction} interaction */
 async function showQueue(interaction) {
-  const ranked = await rankedQueue();
-  if (!ranked.length) return interaction.editReply('A fila de Tomes está vazia.');
-  const lines = ranked
+  const { ready, waiting, minDays } = await queueView(interaction.guildId);
+  if (!ready.length && !waiting.length) return interaction.editReply('A fila de Tomes está vazia.');
+  const lines = ready
     .slice(0, 15)
-    .map((r, i) => `\`${String(i + 1).padStart(2, ' ')}\` **${r.username}** — ${r.points} pts`);
+    .map((r, i) => `\`${String(i + 1).padStart(2, ' ')}\` **${r.username}** — ${r.points} pts · ${r.credits}× 📜`);
+  if (!ready.length) lines.push('_Ninguém elegível ainda._');
+  // Em espera aparecem à parte: estão na fila, mas ainda não valem.
+  if (waiting.length) {
+    lines.push(
+      '',
+      `**Em espera (${waiting.length})**`,
+      ...waiting.slice(0, 10).map((r) => {
+        const motivo =
+          r.blockedBy === 'weekly'
+            ? 'sem missão semanal'
+            : r.days === null
+              ? 'entrada na guilda não confirmada'
+              : `${r.days}/${minDays} dias de guilda`;
+        return `-# **${r.username}** — ${motivo}`;
+      }),
+    );
+  }
   return interaction.editReply({
     embeds: [
       {
         title: '📜 Fila de Tomes',
         description: lines.join('\n'),
         color: 0x9b59b6,
-        footer: { text: `${ranked.length} na fila · ordenada por pontos de contribuição` },
+        footer: { text: `${ready.length} na fila · por pontos · 1 tome por missão semanal` },
       },
     ],
   });
@@ -282,20 +314,34 @@ export default {
       return interaction.editReply('Apenas staff pode conceder Tomes.');
     }
     const user = interaction.options.getUser('user');
+    const { ready, minDays } = await queueView(interaction.guildId);
     let target;
     if (user) {
       const member = await collections.members().findOne({ discordId: user.id });
       if (!member) return interaction.editReply('Esse usuário não está vinculado.');
-      target = await collections.tomeQueue().findOne({ uuid: member.uuid });
-      if (!target) return interaction.editReply('Esse usuário não está na fila.');
+      target = ready.find((r) => r.uuid === member.uuid);
+      if (!target) {
+        const inQueue = await collections.tomeQueue().findOne({ uuid: member.uuid });
+        if (!inQueue) return interaction.editReply('Esse usuário não está na fila.');
+        const stat = await collections
+          .guildStats()
+          .findOne({ uuid: member.uuid }, { projection: { weeklyObjectives: 1, tomesDelivered: 1 } });
+        return interaction.editReply(
+          tomeCredits(stat) <= 0
+            ? 'Esse usuário está na fila, mas não tem missão semanal de crédito — cada semanal dá direito a 1 Tome.'
+            : `Esse usuário está na fila, mas ainda não completou **${minDays} dias** de guilda.`,
+        );
+      }
     } else {
-      const ranked = await rankedQueue();
-      if (!ranked.length) return interaction.editReply('A fila está vazia.');
-      target = ranked[0];
+      if (!ready.length) return interaction.editReply('Ninguém elegível na fila.');
+      target = ready[0];
     }
-    await collections.tomeQueue().deleteOne({ uuid: target.uuid });
+    const { credits, stillQueued } = await deliverTome(target.uuid);
     await announceTome(interaction.client, interaction.guildId, `📜 Tome concedido a **${target.username}** por <@${interaction.user.id}>.`);
     await ensureTomePanel(interaction.client, interaction.guildId);
-    return interaction.editReply(`Tome concedido a **${target.username}** e removido da fila.`);
+    return interaction.editReply(
+      `Tome concedido a **${target.username}**.` +
+        (stillQueued ? ` Ainda tem direito a **${credits}**, segue na fila.` : ' Saiu da fila.'),
+    );
   },
 };

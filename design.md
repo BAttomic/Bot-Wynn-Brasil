@@ -182,7 +182,7 @@ anterior e abre o novo.
 ## 10. Módulo: Fila de Tomes (prioridade por contribuição)
 
 - `/tome join` — entra na fila.
-- `/tome queue` — mostra ordenada por score.
+- `/tome queue` — mostra ordenada por score, mais os que estão **em espera**.
 - `/tome grant <player>` (staff) — retira o topo e registra a concessão.
 
 **Score de prioridade** (pesos em `tomeWeights`, configuráveis):
@@ -192,6 +192,20 @@ score = w_contrib · contribuição_na_guilda
       + w_raids   · raids_na_guilda
 ```
 Reflete "quem mais beneficiou a guilda". Métricas vêm do §8.
+
+**Entrar × valer.** Entrar na fila exige só uma classe no nível
+`tomeMinClassLevel` (requisito do jogo para usar um Tome). Os outros dois
+requisitos não barram a entrada — como nos aspects, dá para entrar antes e ficar
+em espera, aparecendo na fila (e podendo receber) só quando destravam:
+
+1. **`rewardMinGuildDays` (7) dias de guilda** — o jogo exige ~1 semana.
+2. **Crédito de missão semanal** — `weeklyObjectives − tomesDelivered > 0`.
+
+**1 Tome por missão semanal cumprida, e acumula:** quem tem 2 semanais e nunca
+pegou tome pode pegar 2. Cada entrega incrementa `guildStats.tomesDelivered`; se
+ainda sobrar crédito, a pessoa **continua na fila** — só sai quando zera.
+`weeklyObjectives` é derivado do livro-razão de pontos (só conta as semanais
+registradas pelo watcher, a partir do dia em que o bot passou a acompanhar).
 
 ## 11. Módulo: Empréstimos (ledger de confiança)
 
@@ -229,8 +243,11 @@ seasonParticipation           // um doc por (seasonId, uuid)
   warsFought (int), contributedDelta, raidsDelta,
   joinedGuildDuringSeason (bool), lastUpdatedAt
 
-tomeQueue
-  uuid, joinedQueueAt, scoreCache
+tomeQueue                     // um doc por membro na fila
+  uuid, discordId, username, joinedQueueAt, scoreCache
+  // A ordem é por score (§10). Só "vale" (aparece na fila e pode receber) com
+  // rewardMinGuildDays de guilda E crédito de missão semanal sobrando:
+  //   direito = guildStats.weeklyObjectives − guildStats.tomesDelivered
 
 loans
   borrowerUuid, type (emeralds|item), amount|itemDesc,

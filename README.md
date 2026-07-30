@@ -26,7 +26,7 @@ Todos os módulos do roadmap. Comandos:
 | `/leaderboard season\|alltime` | Placar de guerras pela guilda |
 | `/profile [nick]` | Progresso acumulado de um membro |
 | `/war [nota]` | (WAR/MAIN WAR) Convocação de guerra com presença |
-| `/tome join\|leave\|queue\|grant` | Fila de Tomes (prioridade por pontos) |
+| `/tome join\|leave\|queue\|grant` | Fila de Tomes (prioridade por pontos; 1 Tome por missão semanal, e só vale com 7 dias de guilda) |
 | `/loan new\|list\|repay\|cancel` | (Staff) Livro-razão de empréstimos |
 | `/points show\|leaderboard\|add` | Sistema de pontos unificado |
 | `/calc` | Conversor de esmeraldas (stx/le/eb/em) |
