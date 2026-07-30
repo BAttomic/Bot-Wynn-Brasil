@@ -98,8 +98,6 @@ export const METRICS = Object.freeze({
   xp: { label: 'XP contribuído', emoji: '📈', unit: 'XP', type: 'contribution', short: true },
 });
 
-const DAY_MS = 86_400_000;
-
 /** Fuso em que a staff pensa as datas. O Brasil não tem mais horário de verão. */
 export const TIMEZONE = 'America/Sao_Paulo';
 
@@ -230,7 +228,7 @@ async function uniqueEventId(base) {
  * @param {object} args
  * @param {string} args.name
  * @param {string} args.metricKey     chave de METRICS
- * @param {number} args.days          duração em dias a partir do início
+ * @param {Date}   args.endAt         quando termina (data, não duração)
  * @param {string} args.prize         recompensas separadas por vírgula, uma por premiado
  * @param {string} [args.description] texto livre do evento, com `\n` para quebrar linha
  * @param {Date}   [args.startAt]     quando começa a valer (padrão: agora)
@@ -244,7 +242,7 @@ async function uniqueEventId(base) {
 export async function createEvent({
   name,
   metricKey,
-  days,
+  endAt,
   prize,
   description = '',
   startAt = null,
@@ -265,7 +263,7 @@ export async function createEvent({
     podium: Math.max(1, Math.min(10, podium)),
     points: Math.max(0, points),
     startAt: inicio,
-    endAt: new Date(inicio.getTime() + days * DAY_MS),
+    endAt: new Date(endAt),
     // Só as métricas sem gatilho precisam de um corte próprio, feito quando o
     // evento começa (ver jobs/eventTick.js). Guild raid é creditada ao vivo,
     // então o corte é o próprio `startAt`.

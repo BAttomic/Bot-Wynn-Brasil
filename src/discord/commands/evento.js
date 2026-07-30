@@ -39,7 +39,7 @@ async function resolveEvent(interaction) {
 async function criar(interaction) {
   const nome = interaction.options.getString('nome', true);
   const metrica = interaction.options.getString('metrica', true);
-  const dias = interaction.options.getNumber('dias', true);
+  const fimRaw = interaction.options.getString('fim', true);
   const premio = interaction.options.getString('premio', true);
   const descricao = interaction.options.getString('descricao') ?? '';
   const inicioRaw = interaction.options.getString('inicio');
@@ -47,7 +47,6 @@ async function criar(interaction) {
   const canal = interaction.options.getChannel('canal');
 
   if (!METRICS[metrica]) return interaction.editReply('Métrica inválida.');
-  if (dias <= 0 || dias > 365) return interaction.editReply('A duração precisa ficar entre 0 e 365 dias.');
 
   // Uma recompensa por premiado, na ordem do pódio. Sem `podio` explícito, quem
   // manda é a lista: `Idol, 2 Stx, 1 Stx` premia três.
@@ -61,20 +60,33 @@ async function criar(interaction) {
     );
   }
 
+  const FORMATOS = '`15/08 20:00`, `15/08/2026 20:00` ou `2026-08-15 20:00` (horário de Brasília)';
   const agora = new Date();
+
   let inicio = null;
   if (inicioRaw) {
     inicio = parseStart(inicioRaw, agora);
-    if (!inicio) {
-      return interaction.editReply(
-        'Não entendi a data de início. Use `29/07 00:00`, `29/07/2026 00:00` ou `2026-07-29 00:00` (horário de Brasília).',
-      );
-    }
+    if (!inicio) return interaction.editReply(`Não entendi a data de início. Use ${FORMATOS}.`);
     if (inicio.getTime() < agora.getTime() - 60_000) {
       return interaction.editReply(
         `Essa data já passou (<t:${unix(inicio)}:f>). Um evento não conta o passado — escolha uma data futura ou omita \`inicio\` para começar agora.`,
       );
     }
+  }
+
+  // O fim é uma DATA, não uma duração: a staff pensa "termina dia 15", não
+  // "dura 13,5 dias".
+  const fim = parseStart(fimRaw, agora);
+  if (!fim) return interaction.editReply(`Não entendi a data de fim. Use ${FORMATOS}.`);
+
+  const abertura = inicio ?? agora;
+  if (fim.getTime() <= abertura.getTime()) {
+    return interaction.editReply(
+      `O fim (<t:${unix(fim)}:f>) tem que ser depois do início (<t:${unix(abertura)}:f>).`,
+    );
+  }
+  if (fim.getTime() - abertura.getTime() > 365 * 86_400_000) {
+    return interaction.editReply('Um evento não pode durar mais de 365 dias.');
   }
 
   // CORTE ENTRE O PASSADO E O EVENTO, para as métricas SEM gatilho.
@@ -93,7 +105,7 @@ async function criar(interaction) {
   const event = await createEvent({
     name: nome,
     metricKey: metrica,
-    days: dias,
+    endAt: fim,
     prize: premio,
     description: descricao,
     startAt: inicio,
@@ -113,7 +125,7 @@ async function criar(interaction) {
     `🏆 Evento **${event.name}** (\`${event.eventId}\`, ${METRICS[metrica].label}) criado por <@${interaction.user.id}> — termina <t:${unix(event.endAt)}:f>.`,
   );
 
-  const abertura = inicio
+  const quandoAbre = inicio
     ? `Abre <t:${unix(event.startAt)}:F> (<t:${unix(event.startAt)}:R>)`
     : 'Já está valendo';
 
@@ -126,7 +138,7 @@ async function criar(interaction) {
 
   return interaction.editReply(
     `🏆 Evento **${event.name}** criado (\`${event.eventId}\`).\n` +
-      `Métrica: **${METRICS[metrica].label}** · ${abertura} · Termina <t:${unix(event.endAt)}:R> · Top **${event.podium}** premiado(s).\n` +
+      `Métrica: **${METRICS[metrica].label}** · ${quandoAbre} · Termina <t:${unix(event.endAt)}:F> (<t:${unix(event.endAt)}:R>) · Top **${event.podium}** premiado(s).\n` +
       `🎁 Recompensas:\n${renderPrizes(premio, event.podium)}${faltando}\n` +
       `Todo mundo começa do **zero**: só conta o que for feito depois da abertura.\n` +
       (METRICS[metrica].live
@@ -242,8 +254,12 @@ export default {
             .setRequired(true)
             .addChoices(...Object.entries(METRICS).map(([value, m]) => ({ name: m.label, value }))),
         )
-        .addNumberOption((o) =>
-          o.setName('dias').setDescription('Duração em dias (ex.: 14 para 2 semanas)').setRequired(true).setMinValue(0.1).setMaxValue(365),
+        .addStringOption((o) =>
+          o
+            .setName('fim')
+            .setDescription('Quando termina, horário de Brasília (ex.: 15/08 20:00)')
+            .setRequired(true)
+            .setMaxLength(20),
         )
         .addStringOption((o) =>
           o
@@ -261,7 +277,7 @@ export default {
         .addStringOption((o) =>
           o
             .setName('inicio')
-            .setDescription('Quando abre, horário de Brasília (ex.: 29/07 00:00). Padrão: agora')
+            .setDescription('Quando abre, horário de Brasília (ex.: 01/08 00:00). Padrão: agora')
             .setMaxLength(20),
         )
         .addIntegerOption((o) =>
