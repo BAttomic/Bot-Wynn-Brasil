@@ -15,13 +15,26 @@ import { getConfig } from '../../config/guildConfig.js';
 
 const fmtAsp = (n) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 
-/** Anuncia no canal de Tomes (junto da fila/painel), não no de auditoria. */
-async function announceTome(client, guildDiscordId, content) {
+/**
+ * Anuncia no canal de Tomes (junto da fila/painel), não no de auditoria.
+ *
+ * Quem é NOTIFICADO é só quem recebeu: `ping` traz o Discord id do premiado. A
+ * staff que entregou aparece marcada no texto, mas nunca leva ping — ela já sabe
+ * o que fez, e são sempre as mesmas duas ou três pessoas entregando.
+ *
+ * @param {string[]} [ping] ids que podem ser notificados (só o premiado)
+ */
+async function announceTome(client, guildDiscordId, content, ping = []) {
   const cfg = await getConfig(guildDiscordId);
   const channelId = cfg.channels?.tome;
   if (!channelId) return;
   const channel = await client.channels.fetch(channelId).catch(() => null);
-  if (channel) await channel.send({ content, allowedMentions: { parse: [] } });
+  if (channel) await channel.send({ content, allowedMentions: { users: ping.filter(Boolean) } });
+}
+
+/** Como citar o premiado: marcado se estiver vinculado, senão só o nick. */
+function mention(discordId, username) {
+  return discordId ? `<@${discordId}> (**${username}**)` : `**${username}**`;
 }
 
 /** Ações abertas a qualquer membro. @type {readonly string[]} */
@@ -56,7 +69,13 @@ async function deliverTo(interaction, uuid) {
 
   const { credits, stillQueued } = await deliverTome(uuid);
   const resto = stillQueued ? ` Ainda tem direito a **${credits}**, segue na fila.` : ' Saiu da fila.';
-  await announceTome(interaction.client, interaction.guildId, `📜 Tome entregue a **${entry.username}** por <@${interaction.user.id}>.`);
+  await announceTome(
+    interaction.client,
+    interaction.guildId,
+    `📜 Tome entregue a ${mention(entry.discordId, entry.username)} por <@${interaction.user.id}>.` +
+      (stillQueued ? `\n-# Ainda tem direito a ${credits} — segue na fila.` : ''),
+    [entry.discordId],
+  );
   await ensureTomePanel(interaction.client, interaction.guildId);
   return interaction.editReply({
     content: `Tome entregue a **${entry.username}**.${resto}`,
@@ -127,7 +146,14 @@ async function applyAspectDelivery(interaction) {
   await deliverAspects(uuid, amount);
   const stat = await collections.guildStats().findOne({ uuid });
   const name = stat?.username ?? uuid;
-  await announceTome(interaction.client, interaction.guildId, `✨ ${fmtAsp(amount)} aspect(s) entregue(s) a **${name}** por <@${interaction.user.id}>.`);
+  // guildStats não guarda o Discord id — o vínculo mora em `members`.
+  const link = await collections.members().findOne({ uuid }, { projection: { discordId: 1 } });
+  await announceTome(
+    interaction.client,
+    interaction.guildId,
+    `✨ ${fmtAsp(amount)} aspect(s) entregue(s) a ${mention(link?.discordId, name)} por <@${interaction.user.id}>.`,
+    [link?.discordId],
+  );
   await ensureTomePanel(interaction.client, interaction.guildId);
   return interaction.editReply(`Entregue: **${fmtAsp(amount)}** aspect(s) a **${name}**.`);
 }
@@ -337,7 +363,13 @@ export default {
       target = ready[0];
     }
     const { credits, stillQueued } = await deliverTome(target.uuid);
-    await announceTome(interaction.client, interaction.guildId, `📜 Tome concedido a **${target.username}** por <@${interaction.user.id}>.`);
+    await announceTome(
+      interaction.client,
+      interaction.guildId,
+      `📜 Tome concedido a ${mention(target.discordId, target.username)} por <@${interaction.user.id}>.` +
+        (stillQueued ? `\n-# Ainda tem direito a ${credits} — segue na fila.` : ''),
+      [target.discordId],
+    );
     await ensureTomePanel(interaction.client, interaction.guildId);
     return interaction.editReply(
       `Tome concedido a **${target.username}**.` +

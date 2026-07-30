@@ -152,7 +152,7 @@ export async function buildTomePanel(guildId) {
         value: aspectLines.join('\n') || 'Nada pendente 🎉',
       },
     ],
-    footer: { text: 'Fila por pontos · 1 tome por missão semanal · aspects: 0,5 por guild raid' },
+    footer: { text: 'Fila por pontos · 1 tome por missão semanal · aspects: 0,5 por guild raid · apurado de hora em hora' },
     timestamp: new Date().toISOString(),
   };
 

@@ -16,6 +16,64 @@ import { log } from '../util/log.js';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
+/** Medalha do lugar, ou `4º`, `5º`… daí para baixo. @param {number} rank 1-based */
+export function placeLabel(rank) {
+  return MEDALS[rank - 1] ?? `${rank}º`;
+}
+
+/**
+ * O Discord não deixa digitar Enter num campo de slash command: o texto chega
+ * sempre numa linha só. Então a staff escreve `\n` onde quer a quebra e a gente
+ * converte aqui. Aceita `\n` literal e `\\n` (o que sai de um copiar-e-colar).
+ * @param {string} [text]
+ * @returns {string}
+ */
+export function multiline(text) {
+  return String(text ?? '')
+    .replace(/\\{1,2}n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// Unidades de esmeralda escritas por extenso — `2 Stx` vira `2 STX`, para o
+// painel sair uniforme independente de como a staff digitou.
+const EMERALD_UNITS = /\b(stx|le|eb|em)\b/gi;
+
+/**
+ * A recompensa é uma lista separada por VÍRGULA, uma entrada por premiado, na
+ * ordem do pódio: `Idol, 2 Stx, 1 Stx` → 1º leva Idol, 2º leva 2 STX, 3º leva
+ * 1 STX. Sem vírgula, é uma recompensa só (todo evento antigo cai aqui).
+ * @param {string} [prize]
+ * @returns {string[]}
+ */
+export function parsePrizes(prize) {
+  return String(prize ?? '')
+    .split(',')
+    .map((p) => p.trim().replace(EMERALD_UNITS, (u) => u.toUpperCase()))
+    .filter(Boolean);
+}
+
+/**
+ * Uma linha por premiado, com a medalha do lugar.
+ *
+ * `podium` corta a lista: a criação já recusa mais recompensas que premiados,
+ * mas um evento ANTIGO pode ter vírgula no meio de uma recompensa só ("3 LE,
+ * cargo de Campeão") — sem o corte, ele ganharia um 🥈 que não existe.
+ *
+ * @param {string} [prize]   texto cru, como veio do comando
+ * @param {number} [podium]  quantos colocados são premiados
+ * @returns {string} já pronto para o embed
+ */
+export function renderPrizes(prize, podium = 0) {
+  let prizes = parsePrizes(prize);
+  if (podium > 0 && prizes.length > podium) {
+    // Junta o excedente de volta na última linha, em vez de perder texto.
+    prizes = [...prizes.slice(0, podium - 1), prizes.slice(podium - 1).join(', ')];
+  }
+  if (!prizes.length) return '—';
+  return prizes.map((p, i) => `${placeLabel(i + 1)} ${p}`).join('\n');
+}
+
 /**
  * Métricas disputáveis.
  *
@@ -173,7 +231,8 @@ async function uniqueEventId(base) {
  * @param {string} args.name
  * @param {string} args.metricKey     chave de METRICS
  * @param {number} args.days          duração em dias a partir do início
- * @param {string} args.prize         descrição livre da recompensa
+ * @param {string} args.prize         recompensas separadas por vírgula, uma por premiado
+ * @param {string} [args.description] texto livre do evento, com `\n` para quebrar linha
  * @param {Date}   [args.startAt]     quando começa a valer (padrão: agora)
  * @param {number} [args.podium]      quantos colocados premiados
  * @param {number} [args.points]      pontos para o 1º lugar (metade a cada posição)
@@ -187,6 +246,7 @@ export async function createEvent({
   metricKey,
   days,
   prize,
+  description = '',
   startAt = null,
   podium = 1,
   points = 0,
@@ -201,6 +261,7 @@ export async function createEvent({
     name: name.trim(),
     metric: metricKey,
     prize: prize.trim(),
+    description: multiline(description),
     podium: Math.max(1, Math.min(10, podium)),
     points: Math.max(0, points),
     startAt: inicio,
@@ -462,24 +523,32 @@ export function renderEvent(event, rows, { me = null, total = null } = {}) {
       })
     : [comecou ? 'Ninguém pontuou ainda.' : '_A contagem começa quando o evento abrir._'];
 
-  const prazo = encerrado
-    ? `Encerrado <t:${unix(event.endAt)}:R>`
-    : comecou
-      ? `Termina <t:${unix(event.endAt)}:R> (<t:${unix(event.endAt)}:f>)`
-      : `Começa <t:${unix(event.startAt)}:R> (<t:${unix(event.startAt)}:f>)`;
+  // A descrição da staff vem antes da tabela, com as quebras que ela pediu.
+  const descricao = multiline(event.description);
 
+  // Início e fim aparecem SEMPRE, os dois, com data absoluta e relativa: a
+  // absoluta responde "que dia é isso?" e a relativa, "falta quanto?".
+  const inicio = `<t:${unix(event.startAt)}:f>\n-# <t:${unix(event.startAt)}:R>`;
+  const fim = `<t:${unix(event.endAt)}:f>\n-# ${encerrado ? 'encerrado' : 'termina'} <t:${unix(event.endAt)}:R>`;
+
+  const prizes = parsePrizes(event.prize).slice(0, event.podium);
   const fields = [
-    { name: '🎁 Recompensa', value: event.prize, inline: false },
+    {
+      name: prizes.length > 1 ? '🎁 Recompensas' : '🎁 Recompensa',
+      value: renderPrizes(event.prize, event.podium),
+      inline: false,
+    },
     { name: '📊 Métrica', value: `${metric.emoji} ${metric.label}`, inline: true },
     { name: '🏅 Premiados', value: `Top ${event.podium}`, inline: true },
-    { name: comecou ? '⏳ Prazo' : '📅 Abertura', value: prazo, inline: true },
+    { name: '​', value: '​', inline: true }, // fecha a linha de 3 colunas
+    { name: '📅 Início', value: inicio, inline: true },
+    { name: '🏁 Fim', value: fim, inline: true },
   ];
-  if (comecou && !encerrado) {
-    fields.push({
-      name: '🚦 Contando desde',
-      value: `<t:${unix(event.startAt)}:f>`,
-      inline: true,
-    });
+  // O corte da contagem só aparece quando NÃO é o próprio início (métricas sem
+  // gatilho abrem com uma apuração, que pode cair alguns minutos depois).
+  const corte = event.countFrom ? new Date(event.countFrom) : null;
+  if (comecou && !encerrado && corte && corte.getTime() !== new Date(event.startAt).getTime()) {
+    fields.push({ name: '🚦 Contando desde', value: `<t:${unix(corte)}:f>`, inline: true });
   }
   if (event.points) {
     fields.push({
@@ -498,14 +567,14 @@ export function renderEvent(event, rows, { me = null, total = null } = {}) {
 
   return {
     title: `${encerrado ? '🏁' : comecou ? '🏆' : '📅'} ${event.name}`,
-    description: lines.join('\n'),
+    description: (descricao ? `${descricao}\n\n` : '') + lines.join('\n'),
     color: encerrado ? 0x95a5a6 : comecou ? 0xe67e22 : 0x3498db,
     fields,
     footer: {
       text:
         `Evento \`${event.eventId}\`` +
         (total !== null ? ` — ${total} participante(s)` : '') +
-        ' — apurado na contagem diária',
+        ' — apurado de hora em hora',
     },
     timestamp: new Date().toISOString(),
   };
@@ -617,19 +686,22 @@ async function announceWinners(client, event, metric) {
   const channel = await eventChannel(client, event);
   if (!channel) return;
 
+  // Cada colocado leva a recompensa da SUA posição (1ª vírgula = 1º lugar).
+  // Se a staff cadastrou menos recompensas que premiados, os de baixo saem sem.
+  const prizes = parsePrizes(event.prize).slice(0, event.podium);
   const lines = event.winners.length
     ? event.winners.map((w) => {
         const quem = w.discordId ? `<@${w.discordId}> (**${w.username}**)` : `**${w.username}**`;
         const pts = w.points ? ` — \`+${w.points} pts\`` : '';
-        return `${MEDALS[w.rank - 1] || `${w.rank}º`} ${quem} — ${formatValue(w.value, metric)} ${metric.unit}${pts}`;
+        const premio = prizes[w.rank - 1] ? ` — 🎁 **${prizes[w.rank - 1]}**` : '';
+        return `${placeLabel(w.rank)} ${quem} — ${formatValue(w.value, metric)} ${metric.unit}${premio}${pts}`;
       })
     : ['Ninguém pontuou — o evento terminou sem vencedores.'];
 
   await channel
     .send({
       content:
-        `🏁 **${event.name}** terminou!\n${lines.join('\n')}\n` +
-        `\n🎁 Recompensa: **${event.prize}**` +
+        `🏁 **${event.name}** terminou!\n${lines.join('\n')}` +
         (event.winners.length ? '\n-# Falem com a staff para receber.' : ''),
       allowedMentions: { users: event.winners.map((w) => w.discordId).filter(Boolean) },
     })

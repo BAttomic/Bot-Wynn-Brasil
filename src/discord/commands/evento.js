@@ -16,6 +16,9 @@ import {
   ensureEventPanel,
   endEvent,
   formatValue,
+  parsePrizes,
+  renderPrizes,
+  placeLabel,
 } from '../../services/events.js';
 import { takeSnapshots } from '../../services/progress.js';
 import { audit } from '../../services/audit.js';
@@ -38,13 +41,25 @@ async function criar(interaction) {
   const metrica = interaction.options.getString('metrica', true);
   const dias = interaction.options.getNumber('dias', true);
   const premio = interaction.options.getString('premio', true);
+  const descricao = interaction.options.getString('descricao') ?? '';
   const inicioRaw = interaction.options.getString('inicio');
-  const podio = interaction.options.getInteger('podio') ?? 1;
   const pontos = interaction.options.getInteger('pontos') ?? 0;
   const canal = interaction.options.getChannel('canal');
 
   if (!METRICS[metrica]) return interaction.editReply('Métrica inválida.');
   if (dias <= 0 || dias > 365) return interaction.editReply('A duração precisa ficar entre 0 e 365 dias.');
+
+  // Uma recompensa por premiado, na ordem do pódio. Sem `podio` explícito, quem
+  // manda é a lista: `Idol, 2 Stx, 1 Stx` premia três.
+  const premios = parsePrizes(premio);
+  if (!premios.length) return interaction.editReply('Informe ao menos uma recompensa.');
+  const podio = interaction.options.getInteger('podio') ?? Math.min(10, premios.length);
+  if (premios.length > podio) {
+    return interaction.editReply(
+      `Você cadastrou **${premios.length}** recompensas mas só **${podio}** premiado(s). ` +
+        'Aumente `podio` ou tire recompensas da lista.',
+    );
+  }
 
   const agora = new Date();
   let inicio = null;
@@ -80,6 +95,7 @@ async function criar(interaction) {
     metricKey: metrica,
     days: dias,
     prize: premio,
+    description: descricao,
     startAt: inicio,
     podium: podio,
     points: pontos,
@@ -101,13 +117,21 @@ async function criar(interaction) {
     ? `Abre <t:${unix(event.startAt)}:F> (<t:${unix(event.startAt)}:R>)`
     : 'Já está valendo';
 
+  // Menos recompensas que premiados é permitido (os de baixo levam só os pontos),
+  // mas é quase sempre um descuido — avisa sem barrar.
+  const faltando =
+    premios.length < event.podium
+      ? `\n⚠️ Top ${event.podium} premiado(s), mas só **${premios.length}** recompensa(s) — do ${placeLabel(premios.length + 1)} para baixo ninguém leva item.`
+      : '';
+
   return interaction.editReply(
     `🏆 Evento **${event.name}** criado (\`${event.eventId}\`).\n` +
       `Métrica: **${METRICS[metrica].label}** · ${abertura} · Termina <t:${unix(event.endAt)}:R> · Top **${event.podium}** premiado(s).\n` +
+      `🎁 Recompensas:\n${renderPrizes(premio, event.podium)}${faltando}\n` +
       `Todo mundo começa do **zero**: só conta o que for feito depois da abertura.\n` +
       (METRICS[metrica].live
         ? '-# Cada guild raid é creditada no instante em que termina.\n'
-        : '-# Guerras e XP entram na contagem diária.\n') +
+        : '-# Guerras e XP entram na contagem de hora em hora.\n') +
       (msg
         ? `Painel publicado em <#${msg.channelId}> (atualiza sozinho).`
         : '⚠️ Não consegui publicar o painel — configure `/config channel key:events`.') +
@@ -222,7 +246,17 @@ export default {
           o.setName('dias').setDescription('Duração em dias (ex.: 14 para 2 semanas)').setRequired(true).setMinValue(0.1).setMaxValue(365),
         )
         .addStringOption((o) =>
-          o.setName('premio').setDescription('A recompensa (ex.: 3 LE + cargo de Campeão)').setRequired(true).setMaxLength(200),
+          o
+            .setName('premio')
+            .setDescription('Uma por premiado, separadas por vírgula (ex.: Idol, 2 Stx, 1 Stx)')
+            .setRequired(true)
+            .setMaxLength(400),
+        )
+        .addStringOption((o) =>
+          o
+            .setName('descricao')
+            .setDescription('Texto livre do evento. Use \\n para quebrar linha')
+            .setMaxLength(1000),
         )
         .addStringOption((o) =>
           o
@@ -231,7 +265,11 @@ export default {
             .setMaxLength(20),
         )
         .addIntegerOption((o) =>
-          o.setName('podio').setDescription('Quantos colocados são premiados (padrão: 1)').setMinValue(1).setMaxValue(10),
+          o
+            .setName('podio')
+            .setDescription('Quantos colocados são premiados (padrão: o número de recompensas)')
+            .setMinValue(1)
+            .setMaxValue(10),
         )
         .addIntegerOption((o) =>
           o

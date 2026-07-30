@@ -20,6 +20,7 @@ import { ensureDownloadsPanel, ensureLeaderboardPanel } from './services/leaderb
 import { ensureTomePanel } from './services/tomes.js';
 import { ensureAspectBaselines } from './services/aspects.js';
 import { runPingsCleanup } from './jobs/pingsCleanup.js';
+import { runTomeCleanup } from './jobs/tomeCleanup.js';
 import { runRecruitCleanup } from './jobs/recruitCleanup.js';
 import { ensureActiveSeason } from './services/seasons.js';
 import { initErrorReport, reportError } from './services/errorReport.js';
@@ -103,6 +104,8 @@ async function main() {
       await ensureLeaderboardPanel(client, guildId);
     }, { runOnStart: true });
     everyMinutes(60, 'pingsCleanup', () => runPingsCleanup(client), { runOnStart: true });
+    // Anúncios de entrega de tome/aspect somem 3 dias depois (o painel fica).
+    everyMinutes(60, 'tomeCleanup', () => runTomeCleanup(client), { runOnStart: true });
     everyMinutes(30, 'recruitCleanup', () => runRecruitCleanup(client), { runOnStart: true });
     // Vira a season (ou entra em off-season) assim que o jogo virar.
     everyMinutes(60, 'seasonSync', () => ensureActiveSeason(), { runOnStart: true });
@@ -120,7 +123,14 @@ async function main() {
     everySeconds(watchS, 'guildWatch', () => runGuildWatch(client), { runOnStart: true });
     // O resumo agrupado de território decide sozinho quando é hora (anti-spam).
     everyMinutes(5, 'territoryDigest', () => flushTerritoryDigest(client));
-    dailyAt(snapH, 0, 'progressSnapshot', () => runProgressSnapshot(client));
+    // DE HORA EM HORA, não uma vez por dia: o leaderboard, os pontos e a margem
+    // de inatividade saem daqui, e um painel que só muda de madrugada parece
+    // quebrado. Rodar mais vezes não pontua duas vezes — cada apuração tem seu
+    // `snapshotAt`, e o índice único de pointsEvents recusa a repetição.
+    // `snapshotHourUTC` deixou de valer como cadência: agora é só o horário do
+    // reforço diário, que continua para o caso do bot passar horas fora do ar.
+    everyMinutes(60, 'progressSnapshot', () => runProgressSnapshot(client), { runOnStart: true });
+    dailyAt(snapH, 0, 'progressSnapshot(diário)', () => runProgressSnapshot(client));
     dailyAt(loanH, 0, 'loanReminders', () => runLoanReminders(client));
     dailyAt(verifyH, 0, 'verificationReport', () => runVerificationReport(client));
   });
