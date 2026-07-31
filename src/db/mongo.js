@@ -34,6 +34,7 @@ export const collections = {
   warQueue: () => getDb().collection('warQueue'),
   territoryCaptures: () => getDb().collection('territoryCaptures'),
   bans: () => getDb().collection('bans'),
+  warns: () => getDb().collection('warns'),
   pointsEvents: () => getDb().collection('pointsEvents'),
   leaderboardCache: () => getDb().collection('leaderboardCache'),
   watcherState: () => getDb().collection('watcherState'),
@@ -65,6 +66,12 @@ async function ensureIndexes() {
   // Banimento pega pelos dois lados da identidade.
   await collections.bans().createIndex({ uuid: 1 }, { unique: true });
   await collections.bans().createIndex({ discordIds: 1 });
+  // Advertências: uma linha por ocorrência (ao contrário do ban, que é um
+  // registro só por pessoa). A busca é sempre "os warns de fulano, mais recentes
+  // primeiro", pelos dois lados da identidade.
+  await collections.warns().createIndex({ warnId: 1 }, { unique: true });
+  await collections.warns().createIndex({ uuid: 1, at: -1 });
+  await collections.warns().createIndex({ discordId: 1, at: -1 });
   await collections.pointsEvents().createIndex({ uuid: 1, at: -1 });
   await collections.pointsEvents().createIndex({ seasonId: 1, uuid: 1 });
   // Idempotência do snapshot: um evento por membro/tipo/instante de snapshot.

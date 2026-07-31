@@ -12,7 +12,7 @@ import { getConfig } from '../config/guildConfig.js';
 import { optional } from '../config/env.js';
 import { audit } from './audit.js';
 import { isHigherRank } from './guildData.js';
-import { findBan, recordBan, BAN_REASON_BLACKLIST_GUILD } from './bans.js';
+import { findBan, findExemption, recordBan, BAN_REASON_BLACKLIST_GUILD } from './bans.js';
 import { ensurePanel } from './panels.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { log } from '../util/log.js';
@@ -201,8 +201,15 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
   // mesmo que hoje esteja sem guilda ou dentro da nossa. E cada tentativa reforça
   // o par (uuid, discord), então trocar de conta ou de Discord só amplia a teia.
   const priorBan = await findBan({ uuid: player.uuid, discordId: targetDiscordId });
+  // Isenção da staff vem antes de tudo: sem isto, bastava a pessoa se registrar
+  // de novo para `classifyPlayer` reconhecer a GsW e recriar o banimento.
+  // Continuar na GsW isento não vira 'member' — vira 'neutral', o mesmo que
+  // qualquer um de fora, e é o `inGuild` que decide se sobe para membro.
+  const exemption = await findExemption({ uuid: player.uuid, discordId: targetDiscordId });
   let kind = classifyPlayer(player);
-  if (priorBan || kind === 'banned') {
+  if (exemption) {
+    if (kind === 'banned') kind = 'neutral';
+  } else if (priorBan || kind === 'banned') {
     kind = 'banned';
     await recordBan({
       uuid: player.uuid,

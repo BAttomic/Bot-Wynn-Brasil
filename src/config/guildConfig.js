@@ -76,6 +76,8 @@ export const PARAM_KEYS = Object.freeze([
   'rewardMinGuildDays',
   'tomeMinClassLevel',
   'warMinGuildDays',
+  'warnsToBan',
+  'warnExpiryDays',
 ]);
 
 /**
@@ -121,6 +123,8 @@ export const PARAM_KEYS = Object.freeze([
  * @property {number}         rewardMinGuildDays    dias mínimos na guilda p/ fila de Tomes e receber aspects
  * @property {number}         tomeMinClassLevel     nível mínimo de uma classe p/ entrar na fila de Tomes
  * @property {number}         warMinGuildDays       dias mínimos na guilda p/ o cargo WAR automático
+ * @property {number}         warnsToBan            advertências ativas que disparam o ban automático
+ * @property {number}         warnExpiryDays        dias até uma advertência parar de contar
  */
 
 /** @type {GuildParams} */
@@ -181,6 +185,12 @@ const DEFAULT_PARAMS = Object.freeze({
   // de guilda, e senão espera na fila até completar. Bem menor que os 7 dias das
   // recompensas — aqui o objetivo é só filtrar quem acabou de chegar.
   warMinGuildDays: 3,
+  // Advertências ATIVAS que disparam o ban automático. A staff continua podendo
+  // banir antes disso à mão, ou isentar depois com /ban remove.
+  warnsToBan: 3,
+  // Depois disto a advertência para de contar para o ban, mas continua no
+  // histórico. Nada é apagado: /warn list mostra ativas e expiradas.
+  warnExpiryDays: 90,
 });
 
 /**

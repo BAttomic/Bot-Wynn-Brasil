@@ -280,8 +280,75 @@ async function main() {
     check('índice em memória tem o uuid', idx.uuids.has('uuid-gsw'), true);
     check('índice em memória tem os discords', idx.discordIds.has('discord-2'), true);
 
-    check('remover por discord apaga o registro', await B2.removeBan({ discordId: 'discord-1' }), 1);
+    check('remover por discord isenta o registro', await B2.removeBan({ discordId: 'discord-1' }), 1);
     check('depois de remover, não está banido', await B2.isBanned({ uuid: 'uuid-gsw' }), false);
+
+    // A isenção existe justamente para sobreviver ao roleSync, que a cada ciclo
+    // reencontra a pessoa na GsW e tentaria bani-la de novo.
+    check('o registro virou isenção, não sumiu', !!(await B2.findExemption({ uuid: 'uuid-gsw' })), true);
+    check('não conta como banimento ativo', await B2.countBans(), 0);
+    check('conta como isenção', await B2.countExemptions(), 1);
+
+    const reban = await B2.recordBan({ uuid: 'uuid-gsw', discordId: 'discord-1', reason: B2.BAN_REASON_BLACKLIST_GUILD });
+    check('regra automática é recusada pela isenção', reban, false);
+    check('e a pessoa segue não-banida', await B2.isBanned({ uuid: 'uuid-gsw' }), false);
+
+    // A isenção herda a teia: conta nova com o mesmo Discord também é isenta.
+    check('conta nova, mesmo Discord => isento', await B2.isExempt({ uuid: 'uuid-outro', discordId: 'discord-1' }), true);
+
+    const idx2 = await B2.loadBanIndex();
+    check('índice separa isento de banido', [idx2.uuids.size, idx2.exemptUuids.has('uuid-gsw')], [0, true]);
+    check('exemptInIndex acha pelo discord', B2.exemptInIndex(idx2, { discordId: 'discord-2' }), true);
+
+    // Staff rebanindo à mão vence a isenção.
+    check('ban explícito da staff derruba a isenção', await B2.recordBan({ uuid: 'uuid-gsw', reason: 'reincidiu', by: 'staff-1', override: true }), true);
+    check('voltou a estar banido', await B2.isBanned({ uuid: 'uuid-gsw' }), true);
+    check('não sobrou isenção', await B2.countExemptions(), 0);
+    check('motivo novo prevalece', (await B2.findBan({ uuid: 'uuid-gsw' })).reason, 'reincidiu');
+
+    // ---------------------------------------------------- Advertências
+    section('10b. Advertências acumulam, expiram e escalam para ban');
+    const W = await import('../src/services/warns.js');
+    const GID = process.env.DISCORD_GUILD_ID;
+
+    // Corte de expiração é função pura: dá para conferir sem tocar no banco.
+    check('expiração desligada com 0 dias', W.expiryCutoff(0), null);
+    check('90 dias vira uma data no passado', W.expiryCutoff(90) < new Date(), true);
+
+    const alvo = { uuid: 'uuid-warn', username: 'Advertido', discordId: 'discord-w1' };
+    const w1 = await W.recordWarn(GID, { ...alvo, reason: 'flood', by: 'staff-1' });
+    check('primeira advertência conta 1', w1.active, 1);
+    check('limiar vem da config', w1.threshold, 3);
+    check('id curto para o /warn remove', w1.warn.warnId.length, 8);
+    check('ainda não bane', (await W.escalate(GID, { ...alvo, ...w1 })).banned, false);
+
+    // A teia de identidade vale aqui também: mesmo Discord, conta nova.
+    const w2 = await W.recordWarn(GID, { uuid: 'uuid-warn-2', discordId: 'discord-w1', reason: 'spam', by: 'staff-1' });
+    check('conta nova, mesmo Discord => acumula', w2.active, 2);
+
+    const w3 = await W.recordWarn(GID, { ...alvo, reason: 'desrespeito', by: 'staff-1' });
+    check('terceira atinge o limiar', w3.active, 3);
+    const esc = await W.escalate(GID, { ...alvo, ...w3 });
+    check('escalou para ban', esc.banned, true);
+    check('e o ban existe de verdade', await B2.isBanned({ uuid: 'uuid-warn' }), true);
+
+    // Sem uuid não dá para banir: o ban é indexado por conta do jogo.
+    const semConta = { uuid: null, discordId: 'discord-w9' };
+    const w4 = await W.recordWarn(GID, { ...semConta, reason: 'a', by: 'staff-1' });
+    check('escalação sem uuid é recusada', (await W.escalate(GID, { ...semConta, active: 99, threshold: 3 })).reason, 'noUuid');
+    check('mas a advertência foi registrada', w4.active, 1);
+
+    // Perdão mantém o registro e tira da contagem.
+    check('perdoar devolve true', await W.removeWarn(w1.warn.warnId, 'staff-2', 'apelou'), true);
+    check('perdoar de novo devolve false', await W.removeWarn(w1.warn.warnId, 'staff-2'), false);
+    check('ativas caem para 2', await W.countActiveWarns(GID, alvo), 2);
+    const hist = await W.warnHistory(GID, alvo);
+    check('histórico mantém a perdoada', hist.length, 3);
+    check('e a marca como não-ativa', hist.find((w) => w.warnId === w1.warn.warnId).active, false);
+
+    check('clear perdoa as restantes', await W.clearWarns(GID, alvo, 'staff-2'), 2);
+    check('sobra zero ativa', await W.countActiveWarns(GID, alvo), 0);
+    check('histórico continua inteiro', (await W.warnHistory(GID, alvo)).length, 3);
 
     // ------------------------------------------------ Season e off-season
     section('11. Season do jogo e off-season');

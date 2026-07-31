@@ -3,7 +3,15 @@ import { collections } from '../../db/mongo.js';
 import { wynn } from '../../wynn/api.js';
 import { getConfig } from '../../config/guildConfig.js';
 import { applyClassificationRoles } from '../../services/registration.js';
-import { findBan, recordBan, removeBan, listBans, countBans } from '../../services/bans.js';
+import {
+  findBan,
+  findExemption,
+  recordBan,
+  removeBan,
+  listBans,
+  countBans,
+  countExemptions,
+} from '../../services/bans.js';
 import { audit } from '../../services/audit.js';
 
 const ts = (d) => (d ? `<t:${Math.floor(new Date(d).getTime() / 1000)}:d>` : '—');
@@ -68,8 +76,11 @@ export default {
     const nick = interaction.options.getString('nick');
 
     if (sub === 'list') {
-      const [bans, total] = await Promise.all([listBans(25), countBans()]);
-      if (!bans.length) return interaction.editReply('Nenhum banimento registrado.');
+      const [bans, total, isentos] = await Promise.all([listBans(25), countBans(), countExemptions()]);
+      const rodape = isentos ? ` · ${isentos} isento(s) por decisão da staff` : '';
+      if (!bans.length) {
+        return interaction.editReply(`Nenhum banimento ativo.${isentos ? ` (${isentos} isento(s) na lista.)` : ''}`);
+      }
       const lines = bans.map((b) => {
         const nicks = (b.usernames || []).join(', ') || '`?`';
         const discords = (b.discordIds || []).map((id) => `<@${id}>`).join(', ') || '—';
@@ -80,7 +91,7 @@ export default {
           title: `🚫 Banidos (${total})`,
           description: lines.join('\n').slice(0, 4000),
           color: 0xe74c3c,
-          footer: { text: total > bans.length ? `Mostrando ${bans.length} de ${total}` : 'Lista completa' },
+          footer: { text: `${total > bans.length ? `Mostrando ${bans.length} de ${total}` : 'Lista completa'}${rodape}` },
         }],
       });
     }
@@ -90,7 +101,17 @@ export default {
       let uuid = null;
       if (nick) uuid = (await wynn.player(nick).catch(() => null))?.uuid ?? null;
       const ban = await findBan({ uuid, discordId: user?.id ?? null });
-      if (!ban) return interaction.editReply('✅ Não está na lista de banidos.');
+      if (!ban) {
+        // Distinguir "nunca foi banido" de "foi isento" evita a staff achar que
+        // o /ban remove não pegou e sair banindo de novo à mão.
+        const ex = await findExemption({ uuid, discordId: user?.id ?? null });
+        if (ex) {
+          return interaction.editReply(
+            `✅ Não está banido — **isento pela staff** ${ts(ex.exemptAt)}${ex.exemptBy ? ` por <@${ex.exemptBy}>` : ''}.\nMotivo do banimento original: *${ex.reason}*\n-# A regra automática da GsW não volta a banir. Só \`/ban add\` derruba a isenção.`,
+          );
+        }
+        return interaction.editReply('✅ Não está na lista de banidos.');
+      }
       return interaction.editReply(
         `🚫 **Banido.**\nUUID: \`${ban.uuid}\`\nNicks: ${(ban.usernames || []).join(', ') || '?'}\nDiscords: ${(ban.discordIds || []).map((id) => `<@${id}>`).join(', ') || '—'}\nMotivo: *${ban.reason}*\nDesde: ${ts(ban.firstBannedAt)}`,
       );
@@ -101,10 +122,12 @@ export default {
     if (sub === 'remove') {
       let uuid = null;
       if (nick) uuid = (await wynn.player(nick).catch(() => null))?.uuid ?? null;
-      const removed = await removeBan({ uuid, discordId: user?.id ?? null });
+      const removed = await removeBan({ uuid, discordId: user?.id ?? null, by: interaction.user.id });
       if (!removed) return interaction.editReply('Nenhum banimento encontrado para esse alvo.');
-      audit(interaction.client, interaction.guildId, `♻️ <@${interaction.user.id}> removeu ${removed} banimento(s).`);
-      return interaction.editReply(`Banimento removido (${removed} registro(s)). O cargo volta no próximo sync de cargos.`);
+      audit(interaction.client, interaction.guildId, `♻️ <@${interaction.user.id}> removeu ${removed} banimento(s) — isenção permanente gravada.`);
+      return interaction.editReply(
+        `Banimento removido (${removed} registro(s)). O cargo volta no próximo sync de cargos.\n-# Fica gravado como **isenção**: mesmo continuando na GsW, o bot não bane essa pessoa de novo sozinho. Para rebanir, use \`/ban add\`.`,
+      );
     }
 
     // add
@@ -116,7 +139,10 @@ export default {
     }
 
     const motivo = interaction.options.getString('motivo') ?? 'Banido pela staff';
-    await recordBan({ ...target, reason: motivo, by: interaction.user.id });
+    // Ban da staff é explícito e vence a isenção — o contrário deixaria um alvo
+    // isento imune até a alguém da staff.
+    const hadExemption = !!(await findExemption(target));
+    await recordBan({ ...target, reason: motivo, by: interaction.user.id, override: true });
 
     // Aplica o cargo já, se a pessoa estiver no servidor.
     let aplicado = false;
@@ -131,7 +157,7 @@ export default {
 
     audit(interaction.client, interaction.guildId, `🚫 <@${interaction.user.id}> baniu **${target.username ?? target.uuid}**.`);
     return interaction.editReply(
-      `Banido: **${target.username ?? target.uuid}**\nUUID: \`${target.uuid}\`\nDiscord: ${target.discordId ? `<@${target.discordId}>` : '— (só a conta do jogo)'}\nMotivo: *${motivo}*\n${aplicado ? 'Cargo aplicado agora.' : 'Cargo será aplicado quando essa pessoa entrar/registrar.'}`,
+      `Banido: **${target.username ?? target.uuid}**\nUUID: \`${target.uuid}\`\nDiscord: ${target.discordId ? `<@${target.discordId}>` : '— (só a conta do jogo)'}\nMotivo: *${motivo}*\n${aplicado ? 'Cargo aplicado agora.' : 'Cargo será aplicado quando essa pessoa entrar/registrar.'}${hadExemption ? '\n-# A isenção anterior foi derrubada por este banimento.' : ''}`,
     );
   },
 };

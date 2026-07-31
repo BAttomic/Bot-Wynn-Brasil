@@ -3,7 +3,12 @@ import { fetchGuildMembers, isHigherRank, RANK_LABEL } from '../services/guildDa
 import { getConfig } from '../config/guildConfig.js';
 import { audit } from '../services/audit.js';
 import { applyClassificationRoles, blacklistGuild, syncNickname } from '../services/registration.js';
-import { loadBanIndex, recordBan, BAN_REASON_BLACKLIST_GUILD } from '../services/bans.js';
+import {
+  loadBanIndex,
+  recordBan,
+  exemptInIndex,
+  BAN_REASON_BLACKLIST_GUILD,
+} from '../services/bans.js';
 import { optional } from '../config/env.js';
 import { log } from '../util/log.js';
 
@@ -45,8 +50,13 @@ export async function runRoleSync(client) {
     const inGuild = !!rank;
 
     // Entrou na guilda proibida desde o último ciclo? Entra na lista, para sempre.
+    //
+    // Salvo isenção: sem esta checagem, este job era justamente o que desfazia o
+    // `/ban remove` — a pessoa saía da lista e, dez minutos depois, voltava por
+    // continuar na GsW. A isenção é a decisão da staff, e ela vence a regra.
     const nowInBlacklistGuild = blacklistedUuids.has(m.uuid);
-    if (nowInBlacklistGuild && !banIndex.uuids.has(m.uuid)) {
+    const exempt = exemptInIndex(banIndex, { uuid: m.uuid, discordId: m.discordId });
+    if (nowInBlacklistGuild && !exempt && !banIndex.uuids.has(m.uuid)) {
       await recordBan({
         uuid: m.uuid,
         username: m.username,

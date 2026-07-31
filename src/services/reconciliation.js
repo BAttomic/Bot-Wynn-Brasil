@@ -2,7 +2,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder }
 import { collections } from '../db/mongo.js';
 import { fetchGuildMembers, RANKS, RANK_LABEL } from './guildData.js';
 import { applyClassificationRoles, blacklistGuild } from './registration.js';
-import { loadBanIndex, recordBan, BAN_REASON_BLACKLIST_GUILD } from './bans.js';
+import { loadBanIndex, recordBan, exemptInIndex, BAN_REASON_BLACKLIST_GUILD } from './bans.js';
 import { getConfig } from '../config/guildConfig.js';
 import { optional } from '../config/env.js';
 
@@ -58,6 +58,12 @@ function resolveKind({ nickLower, uuid, discordId }, ctx) {
   const { guildUuids, guildNames, blUuids, blNames, ban } = ctx;
   const banned = ban.discordIds.has(discordId) || (uuid && ban.uuids.has(uuid));
   const inBlacklist = (uuid && blUuids.has(uuid)) || blNames.has(nickLower);
+  // Isento pela staff continua na GsW, e é essa a ideia: `inBlacklist` sozinho
+  // não pode bastar, senão a reconciliação rebaixaria a pessoa a banido de novo
+  // sem nem consultar a lista.
+  if (exemptInIndex(ban, { uuid, discordId })) {
+    return (uuid && guildUuids.has(uuid)) || guildNames.has(nickLower) ? 'member' : 'neutral';
+  }
   if (banned || inBlacklist) return 'banned';
   if ((uuid && guildUuids.has(uuid)) || guildNames.has(nickLower)) return 'member';
   return 'neutral';
@@ -125,7 +131,13 @@ export async function computeReconciliation(guild) {
     // Banimento é PERMANENTE: quem já carrega o cargo de banido não o perde por
     // reconciliação. Sair da GsW não devolve o acesso sozinho — a remoção só vem
     // de /ban remove, depois de uma apelação. (Mesma regra do roleSync/bans.js.)
-    if (roleIds.banned && member.roles.cache.has(roleIds.banned)) kind = 'banned';
+    //
+    // O isento é a exceção, e ela precisa estar AQUI também: entre o /ban remove
+    // e o roleSync que tira o cargo existe uma janela em que a pessoa ainda o
+    // carrega. Sem esta ressalva, o cargo remanescente se reafirmaria como
+    // banido e o painel recriaria o banimento que a staff acabou de tirar.
+    const exempt = exemptInIndex(ctx.ban, { uuid, discordId: member.id });
+    if (!exempt && roleIds.banned && member.roles.cache.has(roleIds.banned)) kind = 'banned';
 
     // Estado atual x desejado, só nos três cargos de classificação.
     const wantedKeys = ROLES_BY_KIND[kind];
