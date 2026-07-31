@@ -16,6 +16,10 @@ import { log } from '../util/log.js';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
+// Campo invisível: fecha a linha de campos inline do embed, forçando duas
+// colunas em vez das três que o Discord empacota sozinho.
+const SPACER = Object.freeze({ name: '​', value: '​', inline: true });
+
 /** Medalha do lugar, ou `4º`, `5º`… daí para baixo. @param {number} rank 1-based */
 export function placeLabel(rank) {
   return MEDALS[rank - 1] ?? `${rank}º`;
@@ -95,7 +99,8 @@ export function renderPrizes(prize, podium = 0) {
 export const METRICS = Object.freeze({
   guildraid: { label: 'Guild Raids', emoji: '🛡️', unit: 'guild raids', type: 'guildRaid', live: true },
   guerra: { label: 'Guerras', emoji: '⚔️', unit: 'guerras', type: 'war' },
-  xp: { label: 'XP contribuído', emoji: '📈', unit: 'XP', type: 'contribution', short: true },
+  // Sem emote: o 📈 some no meio do texto e polui a coluna.
+  xp: { label: 'XP contribuído', emoji: '', unit: 'XP', type: 'contribution', short: true },
 });
 
 /** Fuso em que a staff pensa as datas. O Brasil não tem mais horário de verão. */
@@ -544,18 +549,15 @@ export function renderEvent(event, rows, { me = null, total = null } = {}) {
       value: renderPrizes(event.prize, event.podium),
       inline: false,
     },
-    { name: '📊 Métrica', value: `${metric.emoji} ${metric.label}`, inline: true },
+    // DUAS colunas por linha. O Discord empacota 3 campos inline por linha, e o
+    // separador invisível fecha a linha antes disso.
+    { name: '📊 Métrica', value: [metric.emoji, metric.label].filter(Boolean).join(' '), inline: true },
     { name: '🏅 Premiados', value: `Top ${event.podium}`, inline: true },
-    { name: '​', value: '​', inline: true }, // fecha a linha de 3 colunas
+    SPACER,
     { name: '📅 Início', value: inicio, inline: true },
     { name: '🏁 Fim', value: fim, inline: true },
+    SPACER,
   ];
-  // O corte da contagem só aparece quando NÃO é o próprio início (métricas sem
-  // gatilho abrem com uma apuração, que pode cair alguns minutos depois).
-  const corte = event.countFrom ? new Date(event.countFrom) : null;
-  if (comecou && !encerrado && corte && corte.getTime() !== new Date(event.startAt).getTime()) {
-    fields.push({ name: '🚦 Contando desde', value: `<t:${unix(corte)}:f>`, inline: true });
-  }
   if (event.points) {
     fields.push({
       name: '⭐ Pontos',
