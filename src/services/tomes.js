@@ -78,19 +78,19 @@ export async function queueView(guildId) {
 }
 
 /**
- * Registra a entrega de um Tome. O crédito consumido é um objetivo semanal:
- * quem ainda tem crédito sobrando CONTINUA na fila (com um tome a menos de
- * direito); quem zerou sai.
- * @returns {Promise<{credits:number, stillQueued:boolean}>}
+ * Registra a entrega de um Tome e TIRA a pessoa da fila, sempre. Ter direito a
+ * outro não a mantém na fila: quem quiser o próximo entra de novo, e volta para
+ * o fim — ou melhor, para a posição que os pontos dela mandarem.
+ *
+ * @returns {Promise<{credits:number}>} `credits` = quantos ainda pode pedir
  */
 export async function deliverTome(uuid) {
   await collections.guildStats().updateOne({ uuid }, { $inc: { tomesDelivered: 1 } }, { upsert: true });
+  await collections.tomeQueue().deleteOne({ uuid });
   const stat = await collections
     .guildStats()
     .findOne({ uuid }, { projection: { weeklyObjectives: 1, tomesDelivered: 1 } });
-  const credits = tomeCredits(stat);
-  if (credits <= 0) await collections.tomeQueue().deleteOne({ uuid });
-  return { credits, stillQueued: credits > 0 };
+  return { credits: tomeCredits(stat) };
 }
 
 function fmtAsp(n) {

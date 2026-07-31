@@ -202,8 +202,9 @@ em espera, aparecendo na fila (e podendo receber) só quando destravam:
 2. **Crédito de missão semanal** — `weeklyObjectives − tomesDelivered > 0`.
 
 **1 Tome por missão semanal cumprida, e acumula:** quem tem 2 semanais e nunca
-pegou tome pode pegar 2. Cada entrega incrementa `guildStats.tomesDelivered`; se
-ainda sobrar crédito, a pessoa **continua na fila** — só sai quando zera.
+pegou tome pode pegar 2. Cada entrega incrementa `guildStats.tomesDelivered` e
+**tira a pessoa da fila**, mesmo que ela ainda tenha crédito — para pegar o
+próximo, ela entra de novo, e volta para a posição que os pontos dela mandarem.
 `weeklyObjectives` é derivado do livro-razão de pontos (só conta as semanais
 registradas pelo watcher, a partir do dia em que o bot passou a acompanhar).
 

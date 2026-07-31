@@ -67,18 +67,18 @@ async function deliverTo(interaction, uuid) {
   const entry = await collections.tomeQueue().findOne({ uuid });
   if (!entry) return interaction.editReply({ content: 'Essa pessoa não está mais na fila.', components: [] });
 
-  const { credits, stillQueued } = await deliverTome(uuid);
-  const resto = stillQueued ? ` Ainda tem direito a **${credits}**, segue na fila.` : ' Saiu da fila.';
+  const { credits } = await deliverTome(uuid);
+  const resto = credits > 0 ? ` Ainda tem direito a **${credits}** — precisa entrar na fila de novo.` : '';
   await announceTome(
     interaction.client,
     interaction.guildId,
     `📜 Tome entregue a ${mention(entry.discordId, entry.username)} por <@${interaction.user.id}>.` +
-      (stillQueued ? `\n-# Ainda tem direito a ${credits} — segue na fila.` : ''),
+      (credits > 0 ? `\n-# Ainda tem direito a ${credits} — é só entrar na fila de novo.` : ''),
     [entry.discordId],
   );
   await ensureTomePanel(interaction.client, interaction.guildId);
   return interaction.editReply({
-    content: `Tome entregue a **${entry.username}**.${resto}`,
+    content: `Tome entregue a **${entry.username}**. Saiu da fila.${resto}`,
     components: [],
   });
 }
@@ -362,18 +362,18 @@ export default {
       if (!ready.length) return interaction.editReply('Ninguém elegível na fila.');
       target = ready[0];
     }
-    const { credits, stillQueued } = await deliverTome(target.uuid);
+    const { credits } = await deliverTome(target.uuid);
     await announceTome(
       interaction.client,
       interaction.guildId,
       `📜 Tome concedido a ${mention(target.discordId, target.username)} por <@${interaction.user.id}>.` +
-        (stillQueued ? `\n-# Ainda tem direito a ${credits} — segue na fila.` : ''),
+        (credits > 0 ? `\n-# Ainda tem direito a ${credits} — é só entrar na fila de novo.` : ''),
       [target.discordId],
     );
     await ensureTomePanel(interaction.client, interaction.guildId);
     return interaction.editReply(
-      `Tome concedido a **${target.username}**.` +
-        (stillQueued ? ` Ainda tem direito a **${credits}**, segue na fila.` : ' Saiu da fila.'),
+      `Tome concedido a **${target.username}**. Saiu da fila.` +
+        (credits > 0 ? ` Ainda tem direito a **${credits}** — precisa entrar na fila de novo.` : ''),
     );
   },
 };
