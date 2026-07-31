@@ -579,8 +579,12 @@ export function renderEvent(event, rows, { me = null, total = null } = {}) {
     // O id não entra aqui: o painel é para os membros, e rodapé de embed nem
     // renderiza markdown (o `id` saía com as crases à mostra). Quem precisa do
     // id é a staff, e ele está no /evento listar.
+    // Cada métrica tem a sua cadência, e dizer "de hora em hora" para guild raid
+    // (que é creditada na hora) faz o jogador achar que o placar travou.
     footer: {
-      text: (total !== null ? `${total} participante(s) — ` : '') + 'apurado de hora em hora',
+      text:
+        (total !== null ? `${total} participante(s) — ` : '') +
+        (metric.live ? 'cada raid entra no placar em até 1 min' : 'guerras e XP entram na apuração de hora em hora'),
     },
     timestamp: new Date().toISOString(),
   };
@@ -598,6 +602,23 @@ async function eventChannel(client, event) {
 }
 
 /**
+ * O painel mudou? Compara só o que o leitor vê. O `timestamp` fica de fora de
+ * propósito: ele muda a cada render e, sozinho, não é motivo para reeditar.
+ * @param {object} [a] embed que já está na mensagem
+ * @param {object} b   embed recém-montado
+ */
+function sameEmbed(a, b) {
+  if (!a) return false;
+  const norm = (e) => JSON.stringify({
+    title: e.title ?? null,
+    description: e.description ?? null,
+    footer: e.footer?.text ?? null,
+    fields: (e.fields ?? []).map((f) => [f.name, f.value, !!f.inline]),
+  });
+  return norm(a) === norm(b);
+}
+
+/**
  * Publica (ou reedita) o painel do evento no canal. Se a mensagem sumiu, manda
  * outra — o painel se reconstrói sozinho, como os demais painéis fixos.
  * @param {import('discord.js').Client} client
@@ -609,11 +630,18 @@ export async function ensureEventPanel(client, event) {
 
   const rows = await scoreboard(event.eventId, 10);
   const total = await scoreCount(event.eventId);
-  const payload = { embeds: [renderEvent(event, rows, { total })] };
+  const embed = renderEvent(event, rows, { total });
+  const payload = { embeds: [embed] };
 
   if (event.messageId) {
     const msg = await channel.messages.fetch(event.messageId).catch(() => null);
     if (msg) {
+      // Só edita se algo MUDOU de verdade. O tick roda de minuto em minuto para
+      // abrir e fechar evento na hora certa, mas guerra e XP só andam a cada
+      // apuração (1h) — sem esta comparação a mensagem aparecia editada todo
+      // minuto sem número nenhum ter mudado, e ainda gastava uma chamada de API
+      // por evento por minuto.
+      if (sameEmbed(msg.embeds[0], embed)) return msg;
       await msg.edit(payload).catch(() => {});
       return msg;
     }
