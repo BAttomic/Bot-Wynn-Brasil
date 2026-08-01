@@ -3,6 +3,7 @@ import { getConfig } from '../config/guildConfig.js';
 import { awardPoints } from './points.js';
 import { shortNumber } from '../util/format.js';
 import { log } from '../util/log.js';
+import { blockedUuids, isEventBlocked } from './eventBlacklist.js';
 
 // Eventos de competição por métrica.
 //
@@ -350,6 +351,9 @@ export async function refreshScores(event) {
   // Evento encerrado congela na data de encerramento; ativo conta até agora.
   const until = event.status === 'active' ? new Date() : new Date(event.endAt);
 
+  // Lista negra global: quem está nela não entra na apuração de evento nenhum.
+  const bloqueados = await blockedUuids();
+
   const rows = await collections
     .pointsEvents()
     .aggregate([
@@ -359,6 +363,7 @@ export async function refreshScores(event) {
           at: { $gt: countFrom(event), $lte: until },
           qty: { $gt: 0 },
           'meta.baseline': { $ne: true },
+          ...(bloqueados.length ? { uuid: { $nin: bloqueados } } : {}),
         },
       },
       { $sort: { at: 1 } },
@@ -456,6 +461,13 @@ async function rerank(eventId) {
  * @returns {Promise<number>} em quantos eventos a raid foi creditada
  */
 export async function creditGuildRaid({ uuid, username, at = new Date() }) {
+  // Métrica ao vivo não passa por refreshScores, então o filtro da lista negra
+  // precisa estar aqui também — senão o bloqueado voltaria a pontuar na raid.
+  if (await isEventBlocked(uuid)) {
+    log.info(`Guild raid de ${username} ignorada: jogador na lista negra de eventos.`);
+    return 0;
+  }
+
   const alvos = await collections
     .events()
     .find({
@@ -481,6 +493,31 @@ export async function creditGuildRaid({ uuid, username, at = new Date() }) {
   }
   log.info(`Guild raid de ${username} creditada em ${alvos.length} evento(s).`);
   return alvos.length;
+}
+
+/**
+ * Tira um jogador de todas as tabelas de evento e reordena o que sobrou.
+ *
+ * Usado quando alguém entra na lista negra: só filtrar a apuração dali em diante
+ * deixaria o bloqueado no pódio dos eventos ao vivo (que não passam por
+ * refreshScores) até o próximo recálculo.
+ *
+ * O livro-razão `pointsEvents` não é tocado — o histórico continua lá, o que
+ * permite desfazer o bloqueio sem perder nada.
+ *
+ * @param {string} uuid
+ * @returns {Promise<{removidos: number, eventos: string[]}>}
+ */
+export async function purgeMemberScores(uuid) {
+  const scores = collections.eventScores();
+  const afetados = await scores.find({ uuid }, { projection: { eventId: 1 } }).toArray();
+  if (!afetados.length) return { removidos: 0, eventos: [] };
+
+  const eventos = [...new Set(afetados.map((r) => r.eventId))];
+  const res = await scores.deleteMany({ uuid });
+  for (const eventId of eventos) await rerank(eventId);
+
+  return { removidos: res.deletedCount, eventos };
 }
 
 /** Lê a tabela secundária já apurada (sem tocar no livro-razão). */

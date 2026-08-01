@@ -42,6 +42,7 @@ export const collections = {
   booths: () => getDb().collection('booths'),
   events: () => getDb().collection('events'),
   eventScores: () => getDb().collection('eventScores'),
+  eventBlacklist: () => getDb().collection('eventBlacklist'),
   giveaways: () => getDb().collection('giveaways'),
   giveawayEntries: () => getDb().collection('giveawayEntries'),
 };
@@ -66,6 +67,8 @@ async function ensureIndexes() {
   // Banimento pega pelos dois lados da identidade.
   await collections.bans().createIndex({ uuid: 1 }, { unique: true });
   await collections.bans().createIndex({ discordIds: 1 });
+  await collections.eventBlacklist().createIndex({ uuid: 1 }, { unique: true });
+  await collections.eventBlacklist().createIndex({ discordIds: 1 });
   // Advertências: uma linha por ocorrência (ao contrário do ban, que é um
   // registro só por pessoa). A busca é sempre "os warns de fulano, mais recentes
   // primeiro", pelos dois lados da identidade.

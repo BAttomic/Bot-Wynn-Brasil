@@ -19,9 +19,18 @@ import {
   parsePrizes,
   renderPrizes,
   placeLabel,
+  purgeMemberScores,
 } from '../../services/events.js';
 import { takeSnapshots } from '../../services/progress.js';
 import { audit } from '../../services/audit.js';
+import { wynn } from '../../wynn/api.js';
+import {
+  blockMember,
+  unblockMember,
+  findBlock,
+  listBlocks,
+  countBlocks,
+} from '../../services/eventBlacklist.js';
 
 const unix = (d) => Math.floor(new Date(d).getTime() / 1000);
 
@@ -244,6 +253,101 @@ async function apurar(interaction) {
   return interaction.editReply(`Tabela e painel reapurados para **${events.length}** evento(s) ativo(s).`);
 }
 
+// Mesma ordem de resolução do /ban: vínculo no banco primeiro, API depois.
+async function resolveAlvo({ user, nick }) {
+  if (user) {
+    const linked = await collections.members().findOne({ discordId: user.id });
+    if (linked) return { uuid: linked.uuid, username: linked.username, discordId: user.id };
+  }
+  if (nick) {
+    const player = await wynn.player(nick).catch(() => null);
+    if (player?.uuid) return { uuid: player.uuid, username: player.username, discordId: user?.id ?? null };
+    return null;
+  }
+  // Sem vínculo e sem nick, só dá para agir se já houver bloqueio anterior
+  // guardando o uuid — é o que permite remover pelo Discord.
+  if (user) {
+    const prior = await findBlock({ discordId: user.id });
+    if (prior) return { uuid: prior.uuid, username: prior.usernames?.[0] ?? null, discordId: user.id };
+  }
+  return null;
+}
+
+async function blacklist(interaction, sub) {
+  const user = interaction.options.getUser('user');
+  const nick = interaction.options.getString('nick');
+
+  if (sub === 'listar') {
+    const [rows, total] = await Promise.all([listBlocks(25), countBlocks()]);
+    if (!rows.length) return interaction.editReply('Ninguém na lista negra de eventos.');
+    const linhas = rows.map((b) => {
+      const nicks = (b.usernames || []).join(', ') || '`?`';
+      const discords = (b.discordIds || []).map((id) => `<@${id}>`).join(', ') || '—';
+      return `• **${nicks}** — ${discords}\n  \`${b.uuid}\` · <t:${unix(b.blockedAt)}:d> · *${b.reason}*`;
+    });
+    return interaction.editReply({
+      embeds: [
+        {
+          title: `🚫 Barrados de eventos (${total})`,
+          description: linhas.join('\n').slice(0, 4000),
+          color: 0xe74c3c,
+          footer: { text: total > rows.length ? `Mostrando ${rows.length} de ${total}` : 'Lista completa' },
+        },
+      ],
+    });
+  }
+
+  if (!user && !nick) return interaction.editReply('Informe `user`, `nick`, ou os dois.');
+
+  if (sub === 'remove') {
+    let uuid = null;
+    if (nick) uuid = (await wynn.player(nick).catch(() => null))?.uuid ?? null;
+    const removidos = await unblockMember({ uuid, discordId: user?.id ?? null });
+    if (!removidos) return interaction.editReply('Esse jogador não estava na lista negra.');
+    audit(
+      interaction.client,
+      interaction.guildId,
+      `♻️ <@${interaction.user.id}> liberou ${removidos} jogador(es) de volta para os eventos.`,
+    );
+    return interaction.editReply(
+      `Liberado (${removidos} registro(s)). Volta a pontuar a partir de agora.\n` +
+        '-# O histórico dele nunca foi apagado, então a próxima apuração recupera a pontuação da janela do evento. Em evento de métrica ao vivo (guild raid), só conta o que vier daqui pra frente.',
+    );
+  }
+
+  // add
+  const alvo = await resolveAlvo({ user, nick });
+  if (!alvo) {
+    return interaction.editReply(
+      'Não consegui identificar a conta. Informe um `nick` válido do WynnCraft, ou um `user` já vinculado.',
+    );
+  }
+
+  const motivo = interaction.options.getString('motivo') ?? 'Barrado pela staff';
+  await blockMember({ ...alvo, reason: motivo, by: interaction.user.id });
+  const { removidos, eventos } = await purgeMemberScores(alvo.uuid);
+
+  // Painel dos eventos afetados precisa refletir o pódio novo na hora.
+  for (const eventId of eventos) {
+    const ev = await getEvent(eventId);
+    if (ev?.status === 'active') await ensureEventPanel(interaction.client, ev).catch(() => null);
+  }
+
+  audit(
+    interaction.client,
+    interaction.guildId,
+    `🚫 <@${interaction.user.id}> barrou **${alvo.username ?? alvo.uuid}** de todos os eventos.`,
+  );
+  return interaction.editReply(
+    `Barrado de eventos: **${alvo.username ?? alvo.uuid}**\nUUID: \`${alvo.uuid}\`\n` +
+      `Discord: ${alvo.discordId ? `<@${alvo.discordId}>` : '— (só a conta do jogo)'}\nMotivo: *${motivo}*\n` +
+      (removidos
+        ? `Removido de **${eventos.length}** evento(s); painel atualizado.`
+        : 'Não estava pontuando em nenhum evento no momento.') +
+      '\n-# Vale para todos os eventos, inclusive os futuros. O histórico de pontos não é apagado — `remove` desfaz.',
+  );
+}
+
 export default {
   data: new SlashCommandBuilder()
     .setName('evento')
@@ -322,12 +426,41 @@ export default {
         .addStringOption((o) => o.setName('id').setDescription('ID do evento (padrão: o ativo)')),
     )
     .addSubcommand((s) => s.setName('apurar').setDescription('(Staff) Reapura a tabela e o painel agora'))
+    .addSubcommandGroup((g) =>
+      g
+        .setName('blacklist')
+        .setDescription('(Staff) Lista negra global de eventos')
+        .addSubcommand((s) =>
+          s
+            .setName('add')
+            .setDescription('Barra um jogador de todos os eventos (por Discord, nick, ou ambos)')
+            .addUserOption((o) => o.setName('user').setDescription('Usuário do Discord'))
+            .addStringOption((o) => o.setName('nick').setDescription('Nick no WynnCraft'))
+            .addStringOption((o) => o.setName('motivo').setDescription('Motivo do bloqueio')),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName('remove')
+            .setDescription('Libera o jogador de volta para os eventos')
+            .addUserOption((o) => o.setName('user').setDescription('Usuário do Discord'))
+            .addStringOption((o) => o.setName('nick').setDescription('Nick no WynnCraft')),
+        )
+        .addSubcommand((s) => s.setName('listar').setDescription('Mostra quem está na lista negra')),
+    )
     .toJSON(),
 
   async execute(interaction) {
+    const grupo = interaction.options.getSubcommandGroup(false);
     const sub = interaction.options.getSubcommand();
-    const publico = sub === 'ranking' || sub === 'listar';
+    // Só ranking e listar são públicos — e `listar` da blacklist não é o mesmo
+    // `listar` do evento: lista negra é assunto de staff, sempre efêmero.
+    const publico = !grupo && (sub === 'ranking' || sub === 'listar');
     await interaction.deferReply({ ephemeral: !publico });
+
+    if (grupo === 'blacklist') {
+      if (!isStaff(interaction)) return interaction.editReply('Apenas staff pode mexer na lista negra.');
+      return blacklist(interaction, sub);
+    }
 
     if (sub === 'criar') {
       if (!isStaff(interaction)) return interaction.editReply('Apenas staff pode criar eventos.');
