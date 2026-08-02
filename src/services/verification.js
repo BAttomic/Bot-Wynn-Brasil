@@ -1,5 +1,5 @@
 import { collections } from '../db/mongo.js';
-import { fetchGuildMembers } from './guildData.js';
+import { fetchGuildMembers, RANK_LABEL, isHigherRank } from './guildData.js';
 import { optional } from '../config/env.js';
 
 // Cruza os membros da guilda (API) com os vínculos no banco.
@@ -9,23 +9,33 @@ export async function computeVerification() {
   const res = await fetchGuildMembers(prefix);
   if (!res) return null;
 
+  const rankByUuid = new Map(res.members.map((m) => [m.uuid, m.rank]));
   const guildUuids = new Set(res.members.map((m) => m.uuid));
   const linked = await collections.members().find({}).toArray();
   const linkedUuids = new Set(linked.map((m) => m.uuid));
 
   const verified = []; // vinculado e na guilda
-  const community = []; // vinculado, fora da guilda — estado LEGÍTIMO (só comunidade)
-  const banned = []; // vinculado e marcado como banido
+  // No Discord (verificado) → pode ser Recrutador. Ainda como Recruta = elegível a subir.
+  const canBeRecruiter = [];
   for (const m of linked) {
-    if (m.classification === 'banned') banned.push(m.username);
-    else if (guildUuids.has(m.uuid)) verified.push(m.username);
-    else community.push(m.username);
+    if (m.classification === 'banned') continue; // banido não entra no relatório
+    if (guildUuids.has(m.uuid)) {
+      verified.push(m.username);
+      if (rankByUuid.get(m.uuid) === 'recruit') canBeRecruiter.push(m.username);
+    }
+    // vinculado fora da guilda (só comunidade) é estado legítimo — não exibimos mais.
   }
-  const notLinked = []; // na guilda mas sem vínculo no Discord
+
+  // Na guilda mas sem vínculo no Discord → deve ser Recruta.
+  // ⚠️ marca quem está acima de Recruta e precisa ser rebaixado.
+  const notLinked = [];
   for (const gm of res.members) {
-    if (!linkedUuids.has(gm.uuid)) notLinked.push(gm.username);
+    if (linkedUuids.has(gm.uuid)) continue;
+    const above = isHigherRank(gm.rank, 'recruit');
+    notLinked.push(above ? `⚠️ ${gm.username} (${RANK_LABEL[gm.rank] ?? gm.rank})` : gm.username);
   }
-  return { verified, community, banned, notLinked, total: res.members.length };
+
+  return { verified, notLinked, canBeRecruiter, total: res.members.length };
 }
 
 function block(list, max = 1000) {
@@ -40,11 +50,10 @@ export function verificationEmbed(data) {
     color: 0x3498db,
     fields: [
       { name: `🔰 Membros verificados (${data.verified.length})`, value: block(data.verified) },
-      { name: `⚪ Comunidade — vinculado, fora da guilda (${data.community.length})`, value: block(data.community) },
-      { name: `🚫 Banidos vinculados (${data.banned.length})`, value: block(data.banned) },
-      { name: `🤙 Na guilda sem vínculo no Discord (${data.notLinked.length})`, value: block(data.notLinked) },
+      { name: `⬆️ No Discord — podem virar Recrutador (${data.canBeRecruiter.length})`, value: block(data.canBeRecruiter) },
+      { name: `🤙 Na guilda sem vínculo no Discord — deveriam ser Recruta (${data.notLinked.length})`, value: block(data.notLinked) },
     ],
-    footer: { text: 'Estar na comunidade sem guilda é normal. Para auditar cargos errados e quem está na guilda mas fora do Discord, use /reconciliar.' },
+    footer: { text: 'Quem está no Discord pode ser Recrutador; quem não está deve ser Recruta. Ranks do jogo são manuais — o bot só avisa. Use /reconciliar para auditar cargos.' },
     timestamp: new Date().toISOString(),
   };
 }
