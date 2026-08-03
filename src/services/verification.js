@@ -42,17 +42,22 @@ function block(list, max = 1000) {
   return s.length > max ? `${s.slice(0, max)} …` : s;
 }
 
+// Título curto + explicação numa linha de citação (>) acima dos nicks.
+function field(name, desc, list) {
+  return { name: `${name} (${list.length})`, value: `> ${desc}\n${block(list)}` };
+}
+
 export function verificationEmbed(data) {
   return {
     title: 'Wynn Brasil [WnBR] — Verificação',
     color: 0x3498db,
     fields: [
-      { name: `🔰 Membros verificados — na guilda, Recruiter, com registro (${data.verified.length})`, value: block(data.verified) },
-      { name: `⬆️ No Discord — na guilda e com registro, falta virar Recruiter (${data.missingRecruiter.length})`, value: block(data.missingRecruiter) },
-      { name: `⬇️ Na guilda — Recruiter sem registro, deveria ser Recruit (${data.shouldBeRecruit.length})`, value: block(data.shouldBeRecruit) },
-      { name: `🤙 Na guilda sem vínculo no Discord — Recruit (tá certo) (${data.recruitNoLink.length})`, value: block(data.recruitNoLink) },
+      field('🔰 Membros verificados', 'Na guilda, Recruiter e com registro.', data.verified),
+      field('⬆️ No Discord', 'Na guilda e com registro — falta virar Recruiter.', data.missingRecruiter),
+      field('⬇️ Na guilda', 'Recruiter sem registro — deveria ser Recruit.', data.shouldBeRecruit),
+      field('🤙 Sem vínculo no Discord', 'Recruit sem registro — tá certo.', data.recruitNoLink),
     ],
-    footer: { text: 'Quem está no Discord (tem registro) pode ser Recruiter; quem não está deve ser Recruit. Ranks do jogo são manuais — o bot só avisa. Use /reconciliar para auditar cargos.' },
+    footer: { text: 'Quem tem registro pode ser Recruiter; quem não tem deve ser Recruit. Ranks do jogo são manuais — o bot só avisa. Use /reconciliar para auditar cargos.' },
     timestamp: new Date().toISOString(),
   };
 }
