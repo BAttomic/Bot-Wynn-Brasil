@@ -252,7 +252,10 @@ export function reconciliationPanel(data, note = null) {
     row1.addComponents(btn('recon:apply:all', `Tudo (${pending.length})`, ButtonStyle.Primary, '⚡'));
     components.push(row1);
   }
-  components.push(new ActionRowBuilder().addComponents(btn('recon:refresh', 'Atualizar', ButtonStyle.Secondary, '🔄')));
+  components.push(new ActionRowBuilder().addComponents(
+    btn('recon:register', 'Registrar todos pelo apelido', ButtonStyle.Primary, '🔗'),
+    btn('recon:refresh', 'Atualizar', ButtonStyle.Secondary, '🔄'),
+  ));
 
   // Menu para escolher indivíduos (limite de 25 do Discord).
   if (pending.length) {
