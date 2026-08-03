@@ -1,5 +1,5 @@
 import { collections } from '../db/mongo.js';
-import { fetchGuildMembers, RANK_LABEL, isHigherRank } from './guildData.js';
+import { fetchGuildMembers } from './guildData.js';
 import { optional } from '../config/env.js';
 
 // Cruza os membros da guilda (API) com os vínculos no banco.
@@ -26,13 +26,12 @@ export async function computeVerification() {
     // vinculado fora da guilda (só comunidade) é estado legítimo — não exibimos mais.
   }
 
-  // Na guilda mas sem vínculo no Discord → deve ser Recruta.
-  // ⚠️ marca quem está acima de Recruta e precisa ser rebaixado.
+  // Na guilda mas sem vínculo no Discord → deveriam ser Recruta.
+  // Só o nick, entre crases: nome com `_` não vira itálico/negrito no Discord.
   const notLinked = [];
   for (const gm of res.members) {
     if (linkedUuids.has(gm.uuid)) continue;
-    const above = isHigherRank(gm.rank, 'recruit');
-    notLinked.push(above ? `⚠️ ${gm.username} (${RANK_LABEL[gm.rank] ?? gm.rank})` : gm.username);
+    notLinked.push(`\`${gm.username}\``);
   }
 
   return { verified, notLinked, canBeRecruiter, total: res.members.length };
