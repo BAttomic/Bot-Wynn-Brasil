@@ -1,31 +1,39 @@
 import { collections } from '../db/mongo.js';
-import { fetchGuildMembers } from './guildData.js';
+import { fetchGuildMembers, isHigherRank } from './guildData.js';
 import { optional } from '../config/env.js';
 
-// Cruza os membros da guilda (API) com os vínculos no banco.
+// Cruza os membros da guilda (API) com os vínculos no banco (o "registro").
+//
+// Dois eixos definem os quatro grupos: tem registro (vínculo) ou não × é
+// Recruiter (rank acima de Recruit) ou é Recruit. A regra: quem está no Discord
+// pode ser Recruiter; quem não está deve ser Recruit.
 export async function computeVerification() {
   const prefix = optional('WYNN_GUILD_PREFIX');
   if (!prefix) return null;
   const res = await fetchGuildMembers(prefix);
   if (!res) return null;
 
-  const guildUuids = new Set(res.members.map((m) => m.uuid));
-  const linked = await collections.members().find({}).toArray();
-  const linkedUuids = new Set(linked.map((m) => m.uuid));
+  const linkByUuid = new Map((await collections.members().find({}).toArray()).map((m) => [m.uuid, m]));
 
-  const verified = []; // vinculado e na guilda
-  const community = []; // vinculado, fora da guilda — estado LEGÍTIMO (só comunidade)
-  const banned = []; // vinculado e marcado como banido
-  for (const m of linked) {
-    if (m.classification === 'banned') banned.push(m.username);
-    else if (guildUuids.has(m.uuid)) verified.push(m.username);
-    else community.push(m.username);
-  }
-  const notLinked = []; // na guilda mas sem vínculo no Discord
+  // Nick entre crases: nome com `_` não vira itálico/negrito no Discord.
+  const nick = (u) => `\`${u}\``;
+
+  const verified = []; // registro + na guilda + Recruiter → tudo certo
+  const missingRecruiter = []; // registro + na guilda + ainda Recruit → falta promover
+  const shouldBeRecruit = []; // sem registro + na guilda + Recruiter → deveria ser Recruit
+  const recruitNoLink = []; // sem registro + na guilda + Recruit → certo
+
   for (const gm of res.members) {
-    if (!linkedUuids.has(gm.uuid)) notLinked.push(gm.username);
+    const link = linkByUuid.get(gm.uuid);
+    if (link?.classification === 'banned') continue; // banido não entra no relatório
+    const registered = !!link;
+    const isRecruiter = isHigherRank(gm.rank, 'recruit'); // qualquer rank acima de Recruit
+
+    if (registered) (isRecruiter ? verified : missingRecruiter).push(nick(gm.username));
+    else (isRecruiter ? shouldBeRecruit : recruitNoLink).push(nick(gm.username));
   }
-  return { verified, community, banned, notLinked, total: res.members.length };
+
+  return { verified, missingRecruiter, shouldBeRecruit, recruitNoLink, total: res.members.length };
 }
 
 function block(list, max = 1000) {
@@ -34,17 +42,22 @@ function block(list, max = 1000) {
   return s.length > max ? `${s.slice(0, max)} …` : s;
 }
 
+// Título curto + explicação numa linha de citação (>) acima dos nicks.
+function field(name, desc, list) {
+  return { name: `${name} (${list.length})`, value: `> ${desc}\n${block(list)}` };
+}
+
 export function verificationEmbed(data) {
   return {
     title: 'Wynn Brasil [WnBR] — Verificação',
     color: 0x3498db,
     fields: [
-      { name: `🔰 Membros verificados (${data.verified.length})`, value: block(data.verified) },
-      { name: `⚪ Comunidade — vinculado, fora da guilda (${data.community.length})`, value: block(data.community) },
-      { name: `🚫 Banidos vinculados (${data.banned.length})`, value: block(data.banned) },
-      { name: `🤙 Na guilda sem vínculo no Discord (${data.notLinked.length})`, value: block(data.notLinked) },
+      field('🔰 Membros verificados', 'Na guilda, Recruiter e com registro.', data.verified),
+      field('⬆️ No Discord', 'Na guilda e com registro — falta virar Recruiter.', data.missingRecruiter),
+      field('⬇️ Na guilda', 'Recruiter sem registro — deveria ser Recruit.', data.shouldBeRecruit),
+      field('🤙 Sem vínculo no Discord', 'Recruit sem registro — tá certo.', data.recruitNoLink),
     ],
-    footer: { text: 'Estar na comunidade sem guilda é normal. Para auditar cargos errados e quem está na guilda mas fora do Discord, use /reconciliar.' },
+    footer: { text: 'Quem tem registro pode ser Recruiter; quem não tem deve ser Recruit. Ranks do jogo são manuais — o bot só avisa. Use /reconciliar para auditar cargos.' },
     timestamp: new Date().toISOString(),
   };
 }

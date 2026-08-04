@@ -4,6 +4,7 @@ import {
   reconciliationPanel,
   applyReconciliation,
 } from '../../services/reconciliation.js';
+import { registerAllByNick } from '../../services/registration.js';
 import { getConfig } from '../../config/guildConfig.js';
 import { audit } from '../../services/audit.js';
 
@@ -44,6 +45,21 @@ export default {
       return interaction.editReply(reconciliationPanel(data));
     }
 
+    // Registro em massa: olha o apelido de cada membro sem vínculo na API e,
+    // se o jogador existir, cria o vínculo (mesma lógica do registro).
+    if (action === 'register') {
+      await interaction.deferUpdate();
+      const summary = await registerAllByNick(interaction.guild, { actorId: interaction.user.id });
+      audit(
+        interaction.client,
+        interaction.guildId,
+        `🔗 <@${interaction.user.id}> registrou em massa pelo apelido: **${summary.registered}** novo(s) vínculo(s) de **${summary.scanned}** membros.`,
+      );
+      const data = await computeReconciliation(interaction.guild);
+      if (!data) return interaction.editReply({ content: 'Não consegui obter os dados da guilda.', embeds: [], components: [] });
+      return interaction.editReply(reconciliationPanel(data, registerNote(summary)));
+    }
+
     // Seleção de indivíduos: aplica cada um com a classificação recomputada.
     if (action === 'select') {
       await interaction.deferUpdate();
@@ -76,4 +92,14 @@ function note(applied) {
   return applied
     ? `✅ **${applied}** cargo(s) aplicado(s). Retrato atualizado abaixo.`
     : 'Nada a aplicar — ninguém elegível na seleção.';
+}
+
+function registerNote(s) {
+  const partes = [
+    `🔗 Registro em massa: **${s.registered}** novo(s) vínculo(s) de **${s.scanned}** membros.`,
+    `Já vinculados: **${s.already}** · Nick não encontrado na API: **${s.notFound}**`,
+  ];
+  if (s.conflicts) partes.push(`⚠️ Conflitos (apelido de conta já vinculada a outro): **${s.conflicts}** — use \`/forcelink\` caso queira sobrescrever.`);
+  if (s.registered) partes.push(`Classificação: 🟢 ${s.byKind.member} membro(s) · ⚪ ${s.byKind.neutral} comunidade · 🚫 ${s.byKind.banned} banido(s).`);
+  return partes.join('\n');
 }

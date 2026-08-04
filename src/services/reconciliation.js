@@ -100,7 +100,6 @@ export async function computeReconciliation(guild) {
     ban,
   };
   const linkByDiscord = new Map(links.map((l) => [l.discordId, l]));
-  const linkByUuid = new Map(links.map((l) => [l.uuid, l]));
   const linkByName = new Map(links.map((l) => [norm(l.username), l]));
   const rankIds = rankRoleIds(guild);
 
@@ -109,16 +108,8 @@ export async function computeReconciliation(guild) {
     toNeutral: [], // deveria ser só Comunidade (perde cargo de guilda indevido)
     toBanned: [], // deveria ser Banido
     rankWithoutGuild: [], // tem cargo de rank sem estar na guilda (só aviso)
-    inGuildNotOnDiscord: [], // está na guilda mas não achamos no Discord
   };
   let okCount = 0;
-
-  const discordByNick = new Map();
-  for (const member of guild.members.cache.values()) {
-    if (member.user.bot) continue;
-    const nick = member.nickname || member.user.username;
-    discordByNick.set(norm(nick), member);
-  }
 
   for (const member of guild.members.cache.values()) {
     if (member.user.bot) continue;
@@ -177,16 +168,6 @@ export async function computeReconciliation(guild) {
     else buckets.toNeutral.push(entry);
   }
 
-  // Na guilda, mas sem presença no Discord (nem vínculo, nem apelido casado).
-  for (const gm of ours.members) {
-    const link = linkByUuid.get(gm.uuid);
-    const onDiscordViaLink = link && guild.members.cache.has(link.discordId);
-    const onDiscordViaNick = discordByNick.has(norm(gm.username));
-    if (!onDiscordViaLink && !onDiscordViaNick) {
-      buckets.inGuildNotOnDiscord.push({ username: gm.username, rank: gm.rank });
-    }
-  }
-
   return { buckets, okCount, cfg, roleIds, guildName: ours.guild.name, prefix };
 }
 
@@ -228,7 +209,6 @@ export function reconciliationPanel(data, note = null) {
   add('⚪', 'Vão ficar só como Comunidade', buckets.toNeutral, (e) => `**${e.nick}** — tem: ${holdLabel(e.holds)}`);
   add('🚫', 'Vão receber banimento', buckets.toBanned, (e) => `**${e.nick}** — tem: ${holdLabel(e.holds)}`);
   add('⚠️', 'Cargo de rank sem estar na guilda', buckets.rankWithoutGuild, (e) => `**${e.nick}** — ${e.roles}`);
-  add('👻', 'Na guilda, fora do Discord', buckets.inGuildNotOnDiscord, (e) => `**${e.username}** — ${RANK_LABEL[e.rank] ?? e.rank}`);
 
   if (!fields.length) {
     fields.push({ name: '✅ Tudo sincronizado', value: 'Nenhum cargo a corrigir.' });
@@ -252,7 +232,10 @@ export function reconciliationPanel(data, note = null) {
     row1.addComponents(btn('recon:apply:all', `Tudo (${pending.length})`, ButtonStyle.Primary, '⚡'));
     components.push(row1);
   }
-  components.push(new ActionRowBuilder().addComponents(btn('recon:refresh', 'Atualizar', ButtonStyle.Secondary, '🔄')));
+  components.push(new ActionRowBuilder().addComponents(
+    btn('recon:register', 'Registrar todos pelo apelido', ButtonStyle.Primary, '🔗'),
+    btn('recon:refresh', 'Atualizar', ButtonStyle.Secondary, '🔄'),
+  ));
 
   // Menu para escolher indivíduos (limite de 25 do Discord).
   if (pending.length) {

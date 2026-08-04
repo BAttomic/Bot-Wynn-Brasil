@@ -165,15 +165,15 @@ async function notifyRecruitAlert(client, cfg, { player, kind, discordId }) {
  * @param {boolean}                           [args.force]    sobrescreve vínculos conflitantes
  * @returns {Promise<{ok: boolean, error?: string, kind?: string, roleId?: string|null, player?: object, replaced?: object|null}>}
  */
-async function performLink({ client, guildId, targetDiscordId, targetMember, rawNick, actorId, force = false }) {
+async function performLink({ client, guildId, targetDiscordId, targetMember, rawNick, actorId, force = false, silent = false }) {
   const nick = rawNick.trim();
   if (!/^\w{1,20}$/.test(nick)) {
-    return { ok: false, error: 'Nick inválido. Use apenas letras, números e `_` (até 20 caracteres).' };
+    return { ok: false, code: 'invalid_nick', error: 'Nick inválido. Use apenas letras, números e `_` (até 20 caracteres).' };
   }
 
   const player = await wynn.player(nick).catch(() => null);
   if (!player || !player.uuid) {
-    return { ok: false, error: `Não encontrei o jogador **${nick}** na API do WynnCraft. Confira a escrita do nick.` };
+    return { ok: false, code: 'not_found', error: `Não encontrei o jogador **${nick}** na API do WynnCraft. Confira a escrita do nick.` };
   }
 
   const members = collections.members();
@@ -182,10 +182,10 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
 
   // Conflitos: no fluxo normal são erro; no forçado, a staff assume e sobrescreve.
   if (byUuid && byUuid.discordId !== targetDiscordId && !force) {
-    return { ok: false, error: 'Essa conta do WynnCraft já está vinculada a outro usuário. Fale com a staff se for engano.' };
+    return { ok: false, code: 'conflict', error: 'Essa conta do WynnCraft já está vinculada a outro usuário. Fale com a staff se for engano.' };
   }
   if (byDiscord && byDiscord.uuid !== player.uuid && !force) {
-    return { ok: false, error: `Seu Discord já está vinculado a **${byDiscord.username}**. Peça à staff um \`/unlink\` para trocar.` };
+    return { ok: false, code: 'conflict', error: `Seu Discord já está vinculado a **${byDiscord.username}**. Peça à staff um \`/unlink\` para trocar.` };
   }
 
   // Ao forçar sobre conflitos, apaga os vínculos antigos para não colidir com os
@@ -249,6 +249,10 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
     roleId = await applyClassificationRoles(targetMember, cfg, kind);
     await syncNickname(targetMember, player.username);
   }
+
+  // Em registro em massa (silent) não geramos aviso de recruta nem uma linha de
+  // auditoria por pessoa — só o resumo, a cargo de quem disparou a varredura.
+  if (silent) return { ok: true, kind, roleId, player, replaced: replaced[0] ?? null };
 
   await notifyRecruitAlert(client, cfg, { player, kind, discordId: targetDiscordId });
 
@@ -315,6 +319,67 @@ export async function forceLink({ interaction, targetUser, targetMember, rawNick
     linhas.push('⚠️ O usuário não está no servidor, então nenhum cargo foi aplicado — só o registro no banco.');
   }
   return linhas.join('\n');
+}
+
+/**
+ * Registro em massa pelo apelido. Varre todos os membros do Discord e, para quem
+ * ainda NÃO tem vínculo, olha o apelido na API do Wynn; se o jogador existir,
+ * cria o vínculo — a mesma lógica do registro, só que disparada pela staff.
+ *
+ * Usa `force: false` de propósito: se o apelido de alguém casa com uma conta já
+ * vinculada a outra pessoa, o vínculo do dono NÃO é roubado — a colisão só entra
+ * no resumo. Roubar exige o `/forcelink` individual, uma decisão consciente.
+ *
+ * A API já serializa e espaça as chamadas (MIN_GAP_MS), então não há throttle
+ * extra aqui; com muitos membros a varredura apenas leva mais tempo.
+ *
+ * @param {import('discord.js').Guild} guild
+ * @param {{ actorId?: string }} [opts]
+ * @returns {Promise<{scanned:number, already:number, registered:number, notFound:number, conflicts:number, failed:number, byKind:{member:number, neutral:number, banned:number}}>}
+ */
+export async function registerAllByNick(guild, { actorId } = {}) {
+  await guild.members.fetch().catch(() => {});
+  const linked = await collections.members().find({}, { projection: { discordId: 1 } }).toArray();
+  const linkedDiscord = new Set(linked.map((l) => l.discordId));
+
+  const summary = {
+    scanned: 0, already: 0, registered: 0, notFound: 0, conflicts: 0, failed: 0,
+    byKind: { member: 0, neutral: 0, banned: 0 },
+  };
+
+  for (const member of guild.members.cache.values()) {
+    if (member.user.bot) continue;
+    summary.scanned += 1;
+    if (linkedDiscord.has(member.id)) {
+      summary.already += 1;
+      continue;
+    }
+
+    const rawNick = member.nickname || member.user.username;
+    const res = await performLink({
+      client: guild.client,
+      guildId: guild.id,
+      targetDiscordId: member.id,
+      targetMember: member,
+      rawNick,
+      actorId,
+      force: false,
+      silent: true,
+    });
+
+    if (res.ok) {
+      summary.registered += 1;
+      summary.byKind[res.kind] = (summary.byKind[res.kind] ?? 0) + 1;
+    } else if (res.code === 'not_found' || res.code === 'invalid_nick') {
+      summary.notFound += 1;
+    } else if (res.code === 'conflict') {
+      summary.conflicts += 1;
+    } else {
+      summary.failed += 1;
+    }
+  }
+
+  return summary;
 }
 
 export function panelPayload() {
