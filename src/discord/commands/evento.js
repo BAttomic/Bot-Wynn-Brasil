@@ -11,6 +11,7 @@ import {
   refreshScores,
   scoreboard,
   scoreCount,
+  scoreTotal,
   memberScore,
   renderEvent,
   ensureEventPanel,
@@ -178,6 +179,7 @@ async function ranking(interaction) {
 
   const rows = await scoreboard(event.eventId, 15);
   const total = await scoreCount(event.eventId);
+  const sum = await scoreTotal(event.eventId);
 
   // Posição de quem pediu, se estiver vinculado e pontuando.
   let me = null;
@@ -187,7 +189,7 @@ async function ranking(interaction) {
     if (mine) me = { rank: mine.rank, value: mine.value };
   }
 
-  return interaction.editReply({ embeds: [renderEvent(event, rows, { me, total })] });
+  return interaction.editReply({ embeds: [renderEvent(event, rows, { me, total, sum })] });
 }
 
 async function listar(interaction) {

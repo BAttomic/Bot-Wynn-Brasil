@@ -541,6 +541,25 @@ export function scoreCount(eventId) {
 }
 
 /**
+ * Somatório da métrica entre TODOS os participantes.
+ *
+ * Não dá para somar as linhas do painel: `scoreboard` corta no top 10/15, e o
+ * total tem que contar quem ficou de fora do recorte. Sai da tabela apurada, e
+ * não do livro-razão, para o número bater exatamente com o que está na tela —
+ * inclusive já sem quem está na lista negra.
+ *
+ * @param {string} eventId
+ * @returns {Promise<number>}
+ */
+export async function scoreTotal(eventId) {
+  const [row] = await collections
+    .eventScores()
+    .aggregate([{ $match: { eventId } }, { $group: { _id: null, sum: { $sum: '$value' } } }])
+    .toArray();
+  return row?.sum ?? 0;
+}
+
+/**
  * Pontos da posição: o 1º leva `points`, e cada posição abaixo leva metade da
  * anterior. Zero significa "sem prêmio em pontos".
  * @param {number} points @param {number} rank
@@ -558,7 +577,7 @@ export function podiumPoints(points, rank) {
  * @param {{rank:number, value:number}} [opts.me]  posição de quem pediu
  * @param {number} [opts.total]                    participantes na tabela
  */
-export function renderEvent(event, rows, { me = null, total = null } = {}) {
+export function renderEvent(event, rows, { me = null, total = null, sum = null } = {}) {
   const metric = METRICS[event.metric] ?? { label: event.metric, emoji: '🏆', unit: '' };
   const encerrado = event.status !== 'active';
   const comecou = hasStarted(event);
@@ -570,6 +589,14 @@ export function renderEvent(event, rows, { me = null, total = null } = {}) {
         return `${pos} **${r.username}** — ${formatValue(r.value, metric)} ${metric.unit}${premiado}`;
       })
     : [comecou ? 'Ninguém pontuou ainda.' : '_A contagem começa quando o evento abrir._'];
+
+  // Somatório de TODO MUNDO, logo acima do primeiro lugar: o painel mostra só o
+  // topo, então sem esta linha não dá para ver o esforço da guilda inteira —
+  // nem perceber que o 1º lugar responde por metade do total.
+  const somatorio =
+    sum > 0
+      ? `${metric.emoji ? `${metric.emoji} ` : ''}**${formatValue(sum, metric)} ${metric.unit}** no total\n\n`
+      : '';
 
   // A descrição da staff vem antes da tabela, com as quebras que ela pediu.
   const descricao = multiline(event.description);
@@ -612,7 +639,7 @@ export function renderEvent(event, rows, { me = null, total = null } = {}) {
 
   return {
     title: `${encerrado ? '🏁' : comecou ? '🏆' : '📅'} ${event.name}`,
-    description: (descricao ? `${descricao}\n\n` : '') + lines.join('\n'),
+    description: (descricao ? `${descricao}\n\n` : '') + somatorio + lines.join('\n'),
     color: encerrado ? 0x95a5a6 : comecou ? 0xe67e22 : 0x3498db,
     fields,
     // O id não entra aqui: o painel é para os membros, e rodapé de embed nem
@@ -669,7 +696,8 @@ export async function ensureEventPanel(client, event) {
 
   const rows = await scoreboard(event.eventId, 10);
   const total = await scoreCount(event.eventId);
-  const embed = renderEvent(event, rows, { total });
+  const sum = await scoreTotal(event.eventId);
+  const embed = renderEvent(event, rows, { total, sum });
   const payload = { embeds: [embed] };
 
   if (event.messageId) {
