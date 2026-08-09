@@ -5,27 +5,50 @@ import { recordEvent } from './points.js';
 import { optional } from '../config/env.js';
 import { log } from '../util/log.js';
 
-// Ignora deltas negativos (reset/troca de UUID) ou absurdamente grandes.
+// Progresso novo de um contador de VIDA, medido contra a MARCA D'ÁGUA — o maior
+// valor já visto para aquele membro —, nunca contra o snapshot anterior.
 //
-// MÉTRICA AUSENTE NO SNAPSHOT ANTERIOR CONTA ZERO. Um snapshot tirado por uma
-// versão do bot que ainda não gravava aquele campo não diz nada sobre o delta —
-// e as duas saídas ingênuas são desastrosas: tratar o ausente como 0 credita a
-// VIDA INTEIRA do membro de uma vez (era o que acontecia com `guildRaids`, via
-// `?? 0`, e caía direto no ranking da season como delta normal, sem nem ser
-// marcado como baseline); deixar `undefined` propagar dá `NaN`, que atravessa
-// as duas comparações abaixo e chega ao `$inc` do Mongo, envenenando o contador
-// de vez.
+// `globalData.wars`, `raids` e `currentGuildRaids` só podem subir. Mas a API do
+// Wynncraft às vezes devolve o campo zerado ou parcial, e a série gravada
+// desce. Comparando com o snapshot ANTERIOR, a recuperação depois da queda
+// vira progresso novo: um contador que pisca 122 → 0 → 122 quatro vezes acumula
+// 488. Foi exatamente o que aconteceu — o HunterAlas ficou com 488 guerras
+// tendo 122 na vida inteira, 4,0x cravado, e a soma de todo mundo estourou em
+// dezenas de milhares.
 //
-// Zero perde no máximo UM intervalo: o próximo snapshot já compara dois valores
-// gravados pela mesma versão, e volta a contar certo sozinho.
-function safeDelta(current, previous, cap) {
-  const c = Number(current);
-  const p = Number(previous);
-  if (!Number.isFinite(c) || !Number.isFinite(p)) return 0;
-  const d = c - p;
+// Contra a marca d'água isso não acontece: a queda para 0 não credita nada
+// (não é progresso), e a volta para 122 também não (a marca já é 122). Só um
+// 123 credita, e credita 1. O ruído fica matematicamente impossível, em vez de
+// filtrado por heurística de teto.
+//
+// Um dos lados sem número (campo novo, snapshot de versão antiga da API) conta
+// zero: não dá para afirmar nada, e o próximo snapshot já compara dois valores
+// bons. As alternativas ingênuas são piores — tratar o ausente como 0 credita a
+// vida inteira, e deixar `undefined` propagar dá NaN, que envenena o `$inc`.
+//
+// @param {number} atual   valor de agora
+// @param {number} marca   maior valor já visto
+// @param {number} cap     teto por apuração; salto acima disso é dado ruim
+function novoProgresso(atual, marca, cap) {
+  const c = Number(atual);
+  const m = Number(marca);
+  if (!Number.isFinite(c) || !Number.isFinite(m)) return 0;
+  const d = c - m;
   if (d <= 0) return 0;
   if (cap && d > cap) return 0;
   return d;
+}
+
+/**
+ * Maior valor já visto, para a comparação nunca andar para trás.
+ * @param {object} stats     documento de guildStats (marcas gravadas)
+ * @param {object} snapshot  metrics do snapshot anterior
+ * @param {string} campo     nome em metrics (ex.: 'wars')
+ * @param {string} chave     nome da marca em guildStats (ex.: 'warsHigh')
+ */
+function marcaDagua(stats, snapshot, campo, chave) {
+  const candidatos = [Number(stats?.[chave]), Number(snapshot?.[campo])].filter(Number.isFinite);
+  return candidatos.length ? Math.max(...candidatos) : null;
 }
 
 // Uma apuração por vez, no processo inteiro.
@@ -94,6 +117,10 @@ async function runSnapshots() {
       .sort({ takenAt: -1 })
       .limit(1)
       .next();
+    const atual = await stats.findOne(
+      { uuid: m.uuid },
+      { projection: { warsHigh: 1, raidsHigh: 1, guildRaidsHigh: 1, contributedHigh: 1 } },
+    );
 
     await snaps.insertOne({
       uuid: m.uuid,
@@ -118,18 +145,37 @@ async function runSnapshots() {
     // `wars` NÃO entra: o contador da API é da conta inteira, somando guerras de
     // outras guildas. E `weekly` não tem histórico nenhum na API. Esses dois só
     // passam a contar do primeiro snapshot em diante.
+    // A marca d'água sai do maior entre o que já está gravado e o último
+    // snapshot. O segundo cobre quem ainda não tem marca (membro de antes desta
+    // versão): a primeira apuração adota o valor de então e segue daí, em vez
+    // de tratar todo mundo como novato.
+    const marcaWars = marcaDagua(atual, last?.metrics, 'wars', 'warsHigh');
+    const marcaRaids = marcaDagua(atual, last?.metrics, 'raids', 'raidsHigh');
+    const marcaGuildRaids = marcaDagua(atual, last?.metrics, 'guildRaids', 'guildRaidsHigh');
+    const marcaContrib = marcaDagua(atual, last?.metrics, 'contributed', 'contributedHigh');
+
     const baseline = !last?.metrics;
     if (baseline) {
       dContrib = metrics.contributed;
       dGuildRaids = metrics.guildRaids;
     } else {
-      dWars = safeDelta(metrics.wars, last.metrics.wars, 2000);
-      dRaids = safeDelta(metrics.raids, last.metrics.raids, 2000);
-      dGuildRaids = safeDelta(metrics.guildRaids, last.metrics.guildRaids, 500);
+      dWars = novoProgresso(metrics.wars, marcaWars, 2000);
+      dRaids = novoProgresso(metrics.raids, marcaRaids, 2000);
+      dGuildRaids = novoProgresso(metrics.guildRaids, marcaGuildRaids, 500);
       // Sem teto: Guild XP sobe aos milhões por dia, qualquer cap plausível
       // recusaria uma contribuição legítima.
-      dContrib = safeDelta(metrics.contributed, last.metrics.contributed, 0);
+      dContrib = novoProgresso(metrics.contributed, marcaContrib, 0);
     }
+
+    // A marca só anda para a frente. Um campo que a API devolveu zerado nesta
+    // resposta não pode rebaixá-la — é justamente isso que fecha o furo.
+    const subir = (marca, valor) => Math.max(Number(marca) || 0, Number(valor) || 0);
+    const marcas = {
+      warsHigh: subir(marcaWars, metrics.wars),
+      raidsHigh: subir(marcaRaids, metrics.raids),
+      guildRaidsHigh: subir(marcaGuildRaids, metrics.guildRaids),
+      contributedHigh: subir(marcaContrib, metrics.contributed),
+    };
 
     // Quantidades brutas viram eventos. `snapshotAt` torna a gravação idempotente.
     const meta = { snapshotAt: now, ...(baseline && { baseline: true }) };
@@ -146,12 +192,16 @@ async function runSnapshots() {
       {
         $set: {
           username: m.username,
-          lastWars: metrics.wars,
-          lastRaids: metrics.raids,
-          contributed: metrics.contributed,
+          // As marcas d'água, não o valor cru desta resposta. Quando a API
+          // devolve o campo zerado, o cru faria a coluna 🛡️ do painel e a conta
+          // de aspects caírem para 0 até a próxima apuração; a marca não desce.
+          ...marcas,
+          lastWars: marcas.warsHigh,
+          lastRaids: marcas.raidsHigh,
+          contributed: marcas.contributedHigh,
           contributionRank: m.contributionRank,
           // Absoluto e já escopado à guilda pela API — não precisa acumular.
-          guildRaids: metrics.guildRaids,
+          guildRaids: marcas.guildRaidsHigh,
           weeklyStreak: metrics.weeklyStreak,
           // Data REAL de entrada na guilda (API), usada na regra dos 7 dias de
           // Tomes/aspects. Só grava quando a API traz a data.
