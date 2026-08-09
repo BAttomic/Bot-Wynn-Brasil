@@ -118,6 +118,67 @@ async function main() {
   check('online nunca é expulsável', inat.evaluate({ username: 'On', lastJoin: offline10, online: true }, 0, ip).kickable, false);
   check('sem lastJoin não é expulsável', inat.evaluate({ username: '?', lastJoin: null, online: false }, 0, ip).kickable, false);
 
+  section('6b. Check-in: ninguém entra na lista de kick sem ter sido perguntado');
+  const { inactivityStatus } = await import('../src/services/inactivityCheck.js');
+  const cp = { ...ip, inactivityCheckHours: 24, inactivityReturnDays: 3 };
+  const agora = Date.now();
+  const hMs = 3_600_000;
+  const off = (d) => new Date(agora - d * 86_400_000);
+
+  // Todos abaixo estão offline além do limite; o que muda é a resposta ao check-in.
+  const membros = [
+    { uuid: 'u-mudo', username: 'Mudo', lastJoin: off(30), online: false },
+    { uuid: 'u-novo', username: 'RecemPerguntado', lastJoin: off(20), online: false },
+    { uuid: 'u-saiu', username: 'Desistiu', lastJoin: off(15), online: false },
+    { uuid: 'u-fica', username: 'QuerFicar', lastJoin: off(40), online: false },
+    { uuid: 'u-furou', username: 'PrometeuENaoLogou', lastJoin: off(25), online: false },
+    { uuid: 'u-semdm', username: 'SemDM', lastJoin: off(12), online: false },
+    { uuid: 'u-virgem', username: 'AindaNaoPerguntado', lastJoin: off(9), online: false },
+    { uuid: 'u-ativo', username: 'Ativo', lastJoin: off(1), online: false },
+  ];
+  const semPontos = new Map();
+  const registros = [
+    { uuid: 'u-mudo', status: 'pending', sentAt: new Date(agora - 25 * hMs) },
+    { uuid: 'u-novo', status: 'pending', sentAt: new Date(agora - 2 * hMs) },
+    { uuid: 'u-saiu', status: 'quit', sentAt: new Date(agora - 2 * hMs) },
+    // Disse que voltaria há 2h: dentro dos 3 dias para logar.
+    { uuid: 'u-fica', status: 'stay', sentAt: new Date(agora - 3 * hMs), respondedAt: new Date(agora - 2 * hMs) },
+    // Disse o mesmo há 4 dias e não logou (senão não estaria expulsável).
+    { uuid: 'u-furou', status: 'stay', sentAt: new Date(agora - 100 * hMs), respondedAt: new Date(agora - 96 * hMs) },
+    { uuid: 'u-semdm', status: 'unreachable', sentAt: new Date(agora - 2 * hMs) },
+    // Voltou a jogar depois de perguntado: o registro sobrou, mas não vale nada.
+    { uuid: 'u-ativo', status: 'pending', sentAt: new Date(agora - 99 * hMs) },
+  ];
+  const st = inactivityStatus(membros, semPontos, cp, registros, agora);
+  const nomes = st.kick.map((k) => k.username);
+
+  check('quem passou das 24h sem responder entra', nomes.includes('Mudo'), true);
+  check('quem disse que perdeu o interesse entra', nomes.includes('Desistiu'), true);
+  check('quem não tem como receber DM entra', nomes.includes('SemDM'), true);
+  check('quem prometeu voltar e não logou em 3 dias entra', nomes.includes('PrometeuENaoLogou'), true);
+  check('quem ainda está no prazo de resposta NÃO entra', nomes.includes('RecemPerguntado'), false);
+  check('quem prometeu voltar e ainda tem prazo NÃO entra', nomes.includes('QuerFicar'), false);
+  check('quem nunca foi perguntado NÃO entra', nomes.includes('AindaNaoPerguntado'), false);
+  check('quem voltou a jogar NÃO entra', nomes.includes('Ativo'), false);
+  check('lista sai do mais inativo para o menos', nomes, ['Mudo', 'PrometeuENaoLogou', 'Desistiu', 'SemDM']);
+  check('o motivo acompanha cada nick', st.kick.map((k) => k.reason), ['não respondeu', 'disse que voltaria e não logou', 'sem interesse', 'não recebe DM']);
+  check('os dois prazos aparecem como "aguardando"', st.waiting.map((w) => w.username), ['RecemPerguntado', 'QuerFicar']);
+  check('e a staff vê o que está esperando de cada um', st.waiting.map((w) => w.note), ['responde até', 'precisa logar até']);
+
+  // O prazo dos 3 dias corre da RESPOSTA, não do envio da DM.
+  const respostaVelha = registros.map((c) => (c.uuid === 'u-fica' ? { ...c, sentAt: new Date(agora - 200 * hMs) } : c));
+  check('DM antiga + resposta recente continua protegido', inactivityStatus(membros, semPontos, cp, respostaVelha, agora).kick.map((k) => k.username).includes('QuerFicar'), false);
+
+  // Logar é o que reseta o contador: com lastJoin renovado, o membro deixa de
+  // ser expulsável e some da lista, mesmo com o prazo dos 3 dias vencido.
+  const logou = membros.map((m) => (m.uuid === 'u-furou' ? { ...m, lastJoin: off(1) } : m));
+  check('logar dentro do prazo tira da lista', inactivityStatus(logou, semPontos, cp, registros, agora).kick.map((k) => k.username).includes('PrometeuENaoLogou'), false);
+
+  // A margem comprada com pontos vence o check-in: sem estourar o limite, nem a
+  // resposta "perdi o interesse" coloca alguém na lista.
+  const ricos = new Map([['u-saiu', 10_000]]);
+  check('contribuição protege mesmo quem respondeu que saiu', inactivityStatus(membros, ricos, cp, registros, agora).kick.map((k) => k.username).includes('Desistiu'), false);
+
   section('7. Ordenação de cargos (peakRank)');
   check('capitão > recruta', gd.isHigherRank('captain', 'recruit'), true);
   check('recruta não > capitão', gd.isHigherRank('recruit', 'captain'), false);

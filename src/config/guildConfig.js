@@ -70,6 +70,8 @@ export const PARAM_KEYS = Object.freeze([
   'inactivityDays',
   'inactivityForgivenessPerPoints',
   'inactivityForgivenessMaxDays',
+  'inactivityCheckHours',
+  'inactivityReturnDays',
   'verifyHourUTC',
   'territoryDigestMinutes',
   'aspectsPerGuildRaid',
@@ -117,6 +119,8 @@ export const PARAM_KEYS = Object.freeze([
  * @property {number}         inactivityDays        limite BASE de dias offline
  * @property {number}         inactivityForgivenessPerPoints  pontos que compram +1 dia
  * @property {number}         inactivityForgivenessMaxDays    teto de dias de perdão
+ * @property {number}         inactivityCheckHours  prazo de resposta do check-in por DM
+ * @property {number}         inactivityReturnDays  prazo para LOGAR depois de dizer "ainda quero jogar"
  * @property {number}         verifyHourUTC         hora do relatório de verificação
  * @property {number}         territoryDigestMinutes intervalo do resumo de território (anti-spam)
  * @property {number}         aspectsPerGuildRaid   aspects que cada membro nosso rende por guild raid
@@ -166,6 +170,16 @@ const DEFAULT_PARAMS = Object.freeze({
   // semanais rendem margem tanto quanto o Guild XP.
   inactivityForgivenessPerPoints: 1000,
   inactivityForgivenessMaxDays: 30,
+  // Quem estoura a margem recebe UMA DM perguntando se ainda tem interesse. Sem
+  // resposta neste prazo, o silêncio conta como desinteresse e o nick entra na
+  // lista de kick do /verificar.
+  inactivityCheckHours: 24,
+  // Clicar em "ainda quero jogar" compra este prazo para ENTRAR no jogo — não é
+  // um passe livre. Entrou, o contador de inatividade zera sozinho (o login
+  // renova o `lastJoin`) e o check-in é descartado. Não entrou, o nick cai na
+  // lista de kick igual a quem não respondeu: a intenção conta, mas o slot só é
+  // ocupado de verdade por quem loga.
+  inactivityReturnDays: 3,
   verifyHourUTC: 12,
   // Capturas/perdas de território saem num único aviso agrupado, no máximo a
   // cada X minutos. Além do anti-spam, a espera deixa o contador de guerra

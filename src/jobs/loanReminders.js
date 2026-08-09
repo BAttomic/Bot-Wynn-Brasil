@@ -55,10 +55,15 @@ export async function runLoanReminders(client) {
     .toArray();
 
   for (const loan of dueSoon) {
-    await channel.send({
+    const msg = await channel.send({
       content: `⏰ <@${loan.borrowerDiscordId}>, seu empréstimo (**${describe(loan)}**) vence <t:${Math.floor(new Date(loan.dueAt).getTime() / 1000)}:R>.`,
     });
-    await loans.updateOne({ _id: loan._id }, { $set: { dueSoonNotified: true, lastReminderAt: now } });
+    await loans.updateOne(
+      { _id: loan._id },
+      // O id fica guardado para o loanCleanup apagar a cobrança do canal 48h
+      // depois de o empréstimo fechar (ver jobs/loanCleanup.js).
+      { $set: { dueSoonNotified: true, lastReminderAt: now }, $push: { channelMessageIds: msg.id } },
+    );
   }
 
   // Atrasados: no máximo uma cobrança por dia, e no máximo MAX_OVERDUE_REMINDERS.
@@ -77,10 +82,13 @@ export async function runLoanReminders(client) {
   for (const loan of overdue) {
     const sent = (loan.overdueReminders ?? 0) + 1;
     const last = sent >= MAX_OVERDUE_REMINDERS ? '\n-# Último aviso automático. A staff assume daqui.' : '';
-    await channel.send({
+    const msg = await channel.send({
       content: `🚨 <@${loan.borrowerDiscordId}>, seu empréstimo (**${describe(loan)}**) está **atrasado**! (aviso ${sent}/${MAX_OVERDUE_REMINDERS})${last}`,
     });
-    await loans.updateOne({ _id: loan._id }, { $set: { overdueReminders: sent, lastReminderAt: now } });
+    await loans.updateOne(
+      { _id: loan._id },
+      { $set: { overdueReminders: sent, lastReminderAt: now }, $push: { channelMessageIds: msg.id } },
+    );
   }
 
   if (dueSoon.length || overdue.length) {

@@ -45,6 +45,7 @@ export const collections = {
   eventBlacklist: () => getDb().collection('eventBlacklist'),
   giveaways: () => getDb().collection('giveaways'),
   giveawayEntries: () => getDb().collection('giveawayEntries'),
+  inactivityChecks: () => getDb().collection('inactivityChecks'),
 };
 
 async function ensureIndexes() {
@@ -107,6 +108,10 @@ async function ensureIndexes() {
   await collections.giveaways().createIndex({ status: 1, endAt: 1 });
   // Uma participação por pessoa por sorteio — o índice é a própria regra.
   await collections.giveawayEntries().createIndex({ giveawayId: 1, discordId: 1 }, { unique: true });
+  // Um check-in de inatividade por membro: o índice é o que garante "uma única
+  // mensagem" por episódio, mesmo se o job rodar duas vezes.
+  await collections.inactivityChecks().createIndex({ uuid: 1 }, { unique: true });
+  await collections.inactivityChecks().createIndex({ status: 1, sentAt: 1 });
 }
 
 export async function closeMongo() {

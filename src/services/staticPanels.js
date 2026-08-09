@@ -43,6 +43,8 @@ function rulesPayload(params) {
   const base = params.inactivityDays;
   const per = params.inactivityForgivenessPerPoints;
   const maxDays = params.inactivityForgivenessMaxDays;
+  const checkHoras = params.inactivityCheckHours;
+  const voltaDias = params.inactivityReturnDays;
   const streakPct = Math.round(params.weeklyStreakBonusPerWeek * 100);
   // Exemplo de 10 dias de perdão, escrito a partir do divisor real.
   const exemploPts = per * 10;
@@ -114,6 +116,10 @@ No canal de status da guilda, o botão **Meus pontos** mostra os seus, sua posi�
 > **Quem contribui ganha margem:** a cada **${fmt(per)} pontos**, você ganha **+1 dia** de perdão, até **+${maxDays} dias**.
 > Exemplo: ${fmt(exemploPts)} pontos = ${base} + ${exemploDias} = **${exemploTotal} dias** de tolerância.
 > O bot <@${BOT_ID}> calcula isso sozinho. Ninguém precisa pedir: o botão **Meus pontos** te diz quantos dias ainda restam.
+
+**Ninguém é expulso sem ser perguntado.** Ao atingir o seu limite, o bot te chama **no privado** com dois botões: *ainda quero jogar* ou *perdi o interesse*. Quem não responde em ${checkHoras}h entra na lista da staff. Quem responde que quer ficar ganha **${voltaDias} dias para entrar no jogo** — um login zera o contador e encerra o assunto; se o prazo passar sem login, a vaga volta para a fila do mesmo jeito.
+
+**Isso não é punição.** A guilda tem um número limitado de slots, e um slot parado é um slot que um membro ativo não pode ocupar — liberar a vaga é o único motivo da regra existir.
 
 **Expulsão por inatividade não é banimento.** Você pode voltar quando quiser, refazendo o processo em <#${RECRUIT_CHANNEL}>.
 
@@ -254,7 +260,7 @@ Reservamo-nos o direito de negar empréstimo a jogadores desconhecidos ou inativ
 
 [**Wynncraft Rules**](https://forums.wynncraft.com/threads/game-forum-rules.111874/#post-3525357) — Seção 7 + Spoiler: *Information about loaning*
 
--# Cada empréstimo vira um tópico próprio, onde a staff registra os itens. Lembretes automáticos são enviados perto do vencimento.`,
+-# Cada empréstimo vira um tópico próprio, onde a staff registra os itens. Lembretes automáticos são enviados perto do vencimento e somem deste canal 48h depois da devolução — o tópico fica como registro.`,
       },
     ],
     components: [

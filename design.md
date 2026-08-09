@@ -252,7 +252,24 @@ tomeQueue                     // um doc por membro na fila
 
 loans
   borrowerUuid, type (emeralds|item), amount|itemDesc,
-  createdAt, dueAt, status, remindersSent, notes
+  createdAt, dueAt, status, remindersSent, notes,
+  threadId, messageId,        // o acordo vive no tópico
+  channelMessageIds: [...]    // cobranças postadas no CANAL; apagadas 48h
+                              // depois de closedAt (jobs/loanCleanup.js).
+                              // O tópico nunca é apagado: é o registro.
+
+inactivityChecks              // um doc por membro, só enquanto o episódio dura
+  uuid, username, discordId,
+  status (pending|stay|quit|unreachable),
+  sentAt, respondedAt,
+  offline, allowance, points  // foto do momento da pergunta
+  // Quem estoura a margem (§ inatividade) recebe UMA DM com dois botões.
+  //   pending → tem inactivityCheckHours para clicar
+  //   stay    → clicou "ainda quero jogar": tem inactivityReturnDays para LOGAR
+  //   quit    → clicou "perdi o interesse"
+  //   unreachable → sem vínculo no Discord ou DM fechada
+  // Vencido o prazo (dos dois tipos), o nick entra na lista de `/gu kick` do
+  // /verificar. Logar apaga o doc e zera o ciclo — é o único "reset".
 
 config                       // um por guilda do Discord
   guildDiscordId, guildPrefix,
@@ -321,7 +338,10 @@ loans=`emprestimos`).
 
 **Concluído também:**
 - `/verificar` (comando) + **relatório automático** diário no canal `logs`
-  (`verifyHourUTC`).
+  (`verifyHourUTC`), fechando com a lista de `/gu kick <nick>` pronta para colar.
+- **Check-in de inatividade**: quem estoura a margem recebe uma DM com dois
+  botões antes de qualquer expulsão. Ninguém entra na lista de kick sem ter tido
+  a chance de responder.
 - `/membros` (lista por cargo + online + inativos ≥ `inactivityDays`).
 - `/profile` turbinado (dados ao vivo da API + pontos/guerras rastreados).
 - Comando extra ("Other") descartado — o dono não lembrava qual era.

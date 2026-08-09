@@ -41,10 +41,49 @@ Automático (jobs):
 - **Monitoramento em tempo real** (poller ~60s): painel ao vivo (`panel`), logs de atividade (`activity`), território + recursos (`territory`) e **auto-ping de guerra**
 - **Expiração de candidaturas** (fecha e apura no prazo)
 - **Snapshot diário**: progresso, placar de guerras e **pontos** (all-time + por season)
-- **Lembretes de empréstimo** (a vencer / atrasados)
+- **Lembretes de empréstimo** (a vencer / atrasados). As cobranças somem do canal
+  48h depois de o empréstimo fechar — o **tópico** com o acordo fica, é o registro
+- **Check-in de inatividade**: quem estoura a margem recebe **uma** DM com dois
+  botões antes de qualquer expulsão (ver abaixo)
 - **Eventos e sorteios**: painel do evento se atualiza sozinho, o evento fecha e
   anuncia o pódio no prazo, e o sorteio é apurado no minuto do vencimento
 - **Auditoria** (`logs`) e **erros do bot** (`errors`)
+
+## Check-in de inatividade
+
+Ninguém é expulso sem ser perguntado. Quando um membro estoura a **própria**
+margem (`inactivityDays` + o perdão que os pontos de contribuição compram), o bot
+manda **uma única** DM com dois botões:
+
+| Botão | O que acontece |
+|---|---|
+| 🎮 **Ainda quero jogar** | Ganha `inactivityReturnDays` (3) para **entrar no jogo**. Um login zera o contador e encerra o assunto |
+| 👋 **Perdi o interesse** | O slot é liberado; o nick vai para a lista de kick na hora |
+| *(sem resposta)* | Passadas `inactivityCheckHours` (24), o silêncio conta como desinteresse |
+
+A mensagem reforça o motivo da regra: o kick por inatividade existe **só** para
+liberar slot para quem está jogando. Não é banimento, não fica no histórico, e o
+membro pode voltar quando quiser refazendo o processo de entrada.
+
+O resultado sai no **`/verificar`** (e no relatório diário do canal `logs`), num
+bloco pronto para copiar e colar no jogo:
+
+```
+/gu kick Fulano
+/gu kick Ciclano
+```
+
+Quem ainda tem prazo correndo aparece numa lista separada, com o que se espera de
+cada um (clicar ou logar) e até quando — para a staff não expulsar antes da hora.
+
+Nunca entram na lista: quem voltou a jogar, quem a contribuição ainda protege, e
+quem sequer foi perguntado. Quem não tem vínculo no Discord (ou está com a DM
+fechada) entra direto, com o motivo à mostra — não há como perguntar.
+
+| Parâmetro | Padrão | Uso |
+|---|---|---|
+| `inactivityCheckHours` | `24` | Prazo para clicar num dos botões |
+| `inactivityReturnDays` | `3` | Prazo para logar depois de dizer que ainda quer jogar |
 
 ## Eventos de competição
 

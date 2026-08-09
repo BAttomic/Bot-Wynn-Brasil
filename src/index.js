@@ -8,10 +8,12 @@ import { runWarQueue } from './jobs/warQueue.js';
 import { runApplicationExpiry } from './jobs/applicationExpiry.js';
 import { runProgressSnapshot } from './jobs/progressSnapshot.js';
 import { runLoanReminders } from './jobs/loanReminders.js';
+import { runLoanCleanup } from './jobs/loanCleanup.js';
 import { runBoothReminders } from './jobs/boothReminders.js';
 import { runEventTick } from './jobs/eventTick.js';
 import { runGiveawayDraw } from './jobs/giveawayDraw.js';
 import { runVerificationReport } from './jobs/verificationReport.js';
+import { runInactivityCheck } from './services/inactivityCheck.js';
 import { runGuildWatch, flushTerritoryDigest } from './services/watcher.js';
 import { ensurePanels, attachRegistrationGuard } from './services/registration.js';
 import { ensureStaticPanels } from './services/staticPanels.js';
@@ -107,6 +109,13 @@ async function main() {
     // Anúncios de entrega de tome/aspect somem 3 dias depois (o painel fica).
     everyMinutes(60, 'tomeCleanup', () => runTomeCleanup(client), { runOnStart: true });
     everyMinutes(30, 'recruitCleanup', () => runRecruitCleanup(client), { runOnStart: true });
+    // Cobranças de empréstimo somem do canal 48h depois de o acordo fechar; o
+    // tópico com o acordo fica.
+    everyMinutes(60, 'loanCleanup', () => runLoanCleanup(client), { runOnStart: true });
+    // Check-in de inatividade: pergunta no privado antes de qualquer expulsão.
+    // De hora em hora (e não uma vez por dia) para que o prazo de resposta
+    // comece assim que a margem estoura, e não até 24h depois.
+    everyMinutes(60, 'inactivityCheck', () => runInactivityCheck(client), { runOnStart: true });
     // Vira a season (ou entra em off-season) assim que o jogo virar.
     everyMinutes(60, 'seasonSync', () => ensureActiveSeason(), { runOnStart: true });
     everyMinutes(minutes, 'roleSync', () => runRoleSync(client), { runOnStart: true });
