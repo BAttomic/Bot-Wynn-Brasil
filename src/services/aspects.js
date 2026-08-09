@@ -87,6 +87,32 @@ export async function deliverAspects(uuid, amount) {
 }
 
 /**
+ * Estorna (ou soma) aspects sobre o total já entregue.
+ *
+ * É a forma direta de desfazer uma entrega digitada errada: "passei 18 a mais"
+ * vira `-18`, sem precisar saber o acumulado da pessoa. `setAspectsDelivered`
+ * continua existindo para quando se sabe o total certo, mas exigir o acumulado
+ * é pedir uma consulta antes de cada correção — e o erro que estamos
+ * consertando nasceu justamente de uma conta feita às pressas.
+ *
+ * O total nunca fica negativo: entregue é "quanto saiu do baú", e isso não
+ * pode ser menos que zero. Quem fica negativo é o SALDO (gerado − entregue),
+ * calculado em listAspects.
+ *
+ * @param {string} uuid
+ * @param {number} delta  positivo soma, negativo estorna
+ * @returns {Promise<{antes:number, agora:number}|null>} null se não achou
+ */
+export async function adjustAspectsDelivered(uuid, delta) {
+  if (!Number.isFinite(delta) || delta === 0) return null;
+  const antes = await collections.guildStats().findOne({ uuid }, { projection: { aspectsDelivered: 1 } });
+  if (!antes) return null;
+  const agora = Math.max(0, (antes.aspectsDelivered ?? 0) + delta);
+  await collections.guildStats().updateOne({ uuid }, { $set: { aspectsDelivered: agora } });
+  return { antes: antes.aspectsDelivered ?? 0, agora };
+}
+
+/**
  * Corrige o total já entregue a alguém, para o caso de a staff ter digitado o
  * número errado no modal de entrega.
  *

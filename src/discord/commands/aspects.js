@@ -1,7 +1,12 @@
 import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
 import { collections } from '../../db/mongo.js';
 import { getConfig } from '../../config/guildConfig.js';
-import { listAspects, getAspectRate, setAspectsDelivered } from '../../services/aspects.js';
+import {
+  listAspects,
+  getAspectRate,
+  setAspectsDelivered,
+  adjustAspectsDelivered,
+} from '../../services/aspects.js';
 import { minGuildDays } from '../../services/eligibility.js';
 import { audit } from '../../services/audit.js';
 import { ensureTomePanel } from '../../services/tomes.js';
@@ -27,8 +32,18 @@ export default {
     .setDescription('(Staff) Aspects gerados e a entregar por guild raid')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addUserOption((o) => o.setName('user').setDescription('Ver os aspects de um jogador específico').setRequired(false))
-    // Correção de entrega digitada errada. Vive como OPÇÃO do /aspects, e não
+    // Correção de entrega digitada errada. Vivem como OPÇÕES do /aspects, e não
     // como subcomando, para o `/aspects` puro continuar funcionando como sempre.
+    //
+    // Duas formas porque as duas situações são diferentes: `estornar` para
+    // desfazer UMA entrega errada (não precisa saber o acumulado) e `entregues`
+    // para reescrever o total quando se sabe o número certo.
+    .addNumberOption((o) =>
+      o
+        .setName('estornar')
+        .setDescription('(Corrige) Quanto entregou A MAIS. Ex.: digitou 20 e eram 2 → 18. Exige "user".')
+        .setRequired(false),
+    )
     .addNumberOption((o) =>
       o
         .setName('entregues')
@@ -50,8 +65,18 @@ export default {
     const user = interaction.options.getUser('user');
 
     const corrigir = interaction.options.getNumber('entregues');
-    if (corrigir !== null && !user) {
-      return interaction.editReply('Para corrigir, informe também o **user**: `/aspects user:@fulano entregues:2`.');
+    const estornar = interaction.options.getNumber('estornar');
+    if (corrigir !== null && estornar !== null) {
+      return interaction.editReply(
+        'Use **uma** das duas: `estornar` (quanto passou a mais) ou `entregues` (o total certo).',
+      );
+    }
+    if ((corrigir !== null || estornar !== null) && !user) {
+      return interaction.editReply(
+        'Para corrigir, informe também o **user**:\n' +
+          '• `/aspects user:@fulano estornar:18` — tira 18 do que já foi entregue\n' +
+          '• `/aspects user:@fulano entregues:2` — reescreve o total para 2',
+      );
     }
 
     // Um jogador específico.
@@ -60,9 +85,20 @@ export default {
       if (!link) return interaction.editReply(`<@${user.id}> não está vinculado a nenhuma conta.`);
 
       // ---- Correção ----
-      if (corrigir !== null) {
-        const res = await setAspectsDelivered(link.uuid, corrigir);
-        if (!res) return interaction.editReply(`**${link.username}** não tem registro em guildStats.`);
+      if (corrigir !== null || estornar !== null) {
+        // `estornar: 18` significa "tira 18", então o sinal é invertido aqui —
+        // quem digita não precisa lembrar de pôr o menos.
+        const res =
+          estornar !== null
+            ? await adjustAspectsDelivered(link.uuid, -estornar)
+            : await setAspectsDelivered(link.uuid, corrigir);
+        if (!res) {
+          return interaction.editReply(
+            estornar === 0
+              ? 'Estornar zero não faz nada. Informe quanto foi entregue a mais.'
+              : `**${link.username}** não tem registro em guildStats.`,
+          );
+        }
 
         // Relê depois da escrita: `pending` já reflete a correção, inclusive
         // negativo se o total informado passar do que a pessoa gerou.
