@@ -26,9 +26,15 @@ import { log } from '../util/log.js';
  * descartado). Quem não entra cai na lista de kick igual a quem não respondeu —
  * senão bastaria clicar num botão para segurar um slot parado para sempre.
  *
- * Uma mensagem por EPISÓDIO de inatividade, nunca uma cobrança recorrente: o
- * registro só é apagado quando a pessoa volta a jogar (ou ganha margem nova), e
- * é isso que permite perguntar outra vez numa inatividade futura sem nunca
+ * No máximo DUAS mensagens por episódio, nunca uma cobrança recorrente:
+ *   1. o check-in, quando a margem estoura;
+ *   2. só para quem clicou em "ainda quero jogar" e deixou o prazo vencer sem
+ *      logar — avisando que o nick caiu na lista da staff.
+ * Quem não respondeu nada não recebe a segunda: silêncio já é resposta, e
+ * insistir é exatamente o que a primeira mensagem promete não fazer.
+ *
+ * O registro só é apagado quando a pessoa volta a jogar (ou ganha margem nova),
+ * e é isso que permite perguntar outra vez numa inatividade futura sem nunca
  * insistir na atual.
  *
  * @typedef {'pending'|'stay'|'quit'|'unreachable'} CheckStatus
@@ -36,6 +42,9 @@ import { log } from '../util/log.js';
  *   stay        — clicou em "Ainda quero jogar"; corre o prazo para logar
  *   quit        — clicou em "Perdi o interesse"
  *   unreachable — sem vínculo no Discord, ou DM fechada: não deu para perguntar
+ *
+ * `farewellSentAt` marca que a segunda mensagem já foi tentada, para o job não
+ * reenviá-la a cada hora enquanto a staff não roda a lista.
  */
 
 const HOUR_MS = 3_600_000;
@@ -127,7 +136,7 @@ Só precisamos saber em que pé você está:
 
 Se ninguém clicar até <t:${prazo}:f> (<t:${prazo}:R>), vamos considerar que você seguiu em frente e liberar a vaga.
 
--# Esta é a **única** mensagem que você recebe sobre isso — não vamos ficar te cobrando.`,
+-# Não vamos ficar te cobrando: sem resposta, esta é a **única** mensagem que você recebe sobre isso.`,
         footer: { text: `${guildName} — sair por inatividade não fecha a porta.` },
         timestamp: new Date().toISOString(),
       },
@@ -151,7 +160,7 @@ function answeredPayload(status, returnBy) {
 
 **Só falta a parte que depende de você:** entre no jogo até <t:${unix(returnBy)}:f> (<t:${unix(returnBy)}:R>). Um login já basta — o contador zera sozinho e o assunto morre aqui.
 
-Se o prazo passar sem nenhum login, a vaga volta para a fila: um slot só está de fato ocupado por quem joga. Você continua podendo voltar depois, sem banimento e sem ressentimento.
+Se o prazo passar sem nenhum login, eu te aviso **uma última vez** e a vaga volta para a fila: um slot só está de fato ocupado por quem joga. Mesmo aí, você continua podendo voltar depois — sem banimento e sem ressentimento.
 
 -# Quando conseguir jogar de verdade, **objetivo semanal** é o que mais rende ponto por tempo gasto — e ponto vira margem de inatividade.`,
       }
@@ -168,14 +177,46 @@ Se o prazo passar sem nenhum login, a vaga volta para a fila: um slot só está 
 }
 
 /**
- * Envia o check-in no privado. Falha calada de propósito: DM fechada é uma
- * resposta em si (`unreachable`), tratada por quem chama.
+ * Segunda (e última) mensagem, só para quem clicou em "ainda quero jogar" e
+ * deixou o prazo passar sem logar. Avisar aqui é o que impede a surpresa: a
+ * pessoa se comprometeu, e merece saber que o compromisso venceu antes de o
+ * nick aparecer na lista da staff.
+ *
+ * Ainda dá tempo, e o texto diz isso: a expulsão não é automática, alguém
+ * precisa rodar a lista. Um login antes disso apaga o check-in e tira o nome.
+ *
+ * @param {{params: object}} ctx
+ */
+function farewellPayload({ params }) {
+  const volta = Number(params?.inactivityReturnDays) || 0;
+  return {
+    embeds: [
+      {
+        title: '⏳ O prazo acabou — seu nick foi para a lista',
+        color: 0xe67e22,
+        description:
+`Você disse que ainda queria jogar e a gente segurou a sua vaga por **${volta} dias**. O prazo passou sem nenhum login, então seu nome entrou na lista de liberação de slot da staff.
+
+**Ainda dá tempo.** A expulsão não é automática: alguém da staff precisa rodar a lista. Se você entrar no jogo antes disso, o contador zera sozinho e seu nome sai na hora.
+
+E se não rolar, tudo bem — de novo: **não é banimento e não fica no seu histórico.** Quando quiser voltar, é só refazer o processo em <#${RECRUIT_CHANNEL}>.
+
+-# Última mensagem automática sobre isso. Prometido.`,
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  };
+}
+
+/**
+ * Envia uma DM. Falha calada de propósito: DM fechada é uma resposta em si
+ * (`unreachable`), tratada por quem chama.
  * @returns {Promise<boolean>} true se a mensagem saiu
  */
-async function sendCheckIn(client, discordId, ctx) {
+async function sendDM(client, discordId, payload) {
   const user = await client.users.fetch(discordId).catch(() => null);
   if (!user) return false;
-  const msg = await user.send(checkInPayload(ctx)).catch(() => null);
+  const msg = await user.send(payload).catch(() => null);
   return !!msg;
 }
 
@@ -207,7 +248,9 @@ export async function runInactivityCheck(client) {
   const linkByUuid = new Map(links.map((l) => [l.uuid, l]));
 
   const now = Date.now();
-  let enviadas = 0;
+  let tentativas = 0; // orçamento de DMs da volta (perguntas + avisos de prazo)
+  let perguntas = 0;
+  let avisos = 0;
   let semDM = 0;
 
   for (const m of res.members) {
@@ -228,24 +271,51 @@ export async function runInactivityCheck(client) {
       continue;
     }
 
-    // Já perguntado neste episódio: uma mensagem, e só. O prazo (de resposta ou
-    // de login) corre no relatório, não em outra DM.
-    if (prev) continue;
+    // Já perguntado neste episódio. A regra é uma mensagem por episódio; a
+    // ÚNICA exceção é quem prometeu voltar e furou o prazo — esse recebe a
+    // segunda e última, avisando que caiu na lista. Quem não respondeu nada não
+    // ganha uma segunda: silêncio já é resposta, e insistir é o que a gente
+    // prometeu não fazer.
+    if (prev) {
+      const venceu = prev.status === 'stay'
+        && !prev.farewellSentAt
+        && now >= new Date(prev.respondedAt ?? prev.sentAt).getTime() + returnMs(params);
+      if (venceu && prev.discordId && tentativas < MAX_DMS_PER_RUN) {
+        const saiu = await sendDM(client, prev.discordId, farewellPayload({ params }));
+        // Marca mesmo se a DM não saiu: uma tentativa por episódio, sem loop.
+        await checks.updateOne({ uuid: m.uuid }, { $set: { farewellSentAt: new Date(now) } });
+        tentativas += 1;
+        if (saiu) {
+          avisos += 1;
+          await sleep(DM_GAP_MS);
+        }
+        await audit(
+          client,
+          guildDiscordId,
+          `⏳ **${m.username}** (<@${prev.discordId}>) disse que voltaria e não logou em ${params.inactivityReturnDays} dias. Avisado, e na lista de kick do /verificar.`,
+        );
+      }
+      continue;
+    }
 
     // Estourou o teto da volta: fica para a próxima hora, sem registro — assim
     // ninguém é dado como "não respondeu" a uma pergunta que não foi feita.
-    if (enviadas >= MAX_DMS_PER_RUN) continue;
+    if (tentativas >= MAX_DMS_PER_RUN) continue;
 
     const discordId = link?.discordId ?? null;
     const deadline = new Date(now + waitMs(params));
     const entregue = discordId
-      ? await sendCheckIn(client, discordId, {
-          guildName: `${res.guild.name} [${res.guild.prefix}]`,
-          uuid: m.uuid,
-          deadline,
-          r,
-          params,
-        })
+      ? await sendDM(
+          client,
+          discordId,
+          checkInPayload({
+            guildName: `${res.guild.name} [${res.guild.prefix}]`,
+            uuid: m.uuid,
+            deadline,
+            r,
+            params,
+          }),
+        )
       : false;
 
     await checks.replaceOne(
@@ -267,11 +337,12 @@ export async function runInactivityCheck(client) {
     );
 
     if (entregue) {
-      enviadas += 1;
+      tentativas += 1;
+      perguntas += 1;
       await sleep(DM_GAP_MS);
     } else {
       semDM += 1;
-      if (discordId) enviadas += 1; // a tentativa custou rate limit do mesmo jeito
+      if (discordId) tentativas += 1; // a tentativa custou rate limit do mesmo jeito
     }
   }
 
@@ -280,8 +351,10 @@ export async function runInactivityCheck(client) {
   const orfaos = saved.filter((c) => !naGuilda.has(c.uuid)).map((c) => c.uuid);
   if (orfaos.length) await checks.deleteMany({ uuid: { $in: orfaos } });
 
-  if (enviadas || semDM) {
-    log.info(`Check-in de inatividade: ${enviadas} DM(s) enviada(s), ${semDM} sem canal de DM.`);
+  if (tentativas || semDM) {
+    log.info(
+      `Check-in de inatividade: ${perguntas} pergunta(s), ${avisos} aviso(s) de prazo vencido, ${semDM} sem canal de DM.`,
+    );
   }
 }
 

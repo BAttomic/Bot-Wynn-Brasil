@@ -53,13 +53,23 @@ Automático (jobs):
 
 Ninguém é expulso sem ser perguntado. Quando um membro estoura a **própria**
 margem (`inactivityDays` + o perdão que os pontos de contribuição compram), o bot
-manda **uma única** DM com dois botões:
+manda **uma** DM com dois botões:
 
 | Botão | O que acontece |
 |---|---|
 | 🎮 **Ainda quero jogar** | Ganha `inactivityReturnDays` (3) para **entrar no jogo**. Um login zera o contador e encerra o assunto |
 | 👋 **Perdi o interesse** | O slot é liberado; o nick vai para a lista de kick na hora |
 | *(sem resposta)* | Passadas `inactivityCheckHours` (24), o silêncio conta como desinteresse |
+
+**Quantas mensagens?** No máximo **duas** por episódio de inatividade:
+
+1. o check-in acima, quando a margem estoura;
+2. só para quem clicou em *ainda quero jogar* e deixou os 3 dias passarem sem
+   logar — avisando que o nick caiu na lista, que a expulsão não é automática e
+   que um login ainda tira o nome de lá.
+
+Quem simplesmente não responde **não** recebe a segunda: silêncio já é resposta, e
+insistir é exatamente o que a primeira mensagem promete não fazer.
 
 A mensagem reforça o motivo da regra: o kick por inatividade existe **só** para
 liberar slot para quem está jogando. Não é banimento, não fica no histórico, e o

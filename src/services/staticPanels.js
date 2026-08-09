@@ -117,7 +117,7 @@ No canal de status da guilda, o botão **Meus pontos** mostra os seus, sua posi�
 > Exemplo: ${fmt(exemploPts)} pontos = ${base} + ${exemploDias} = **${exemploTotal} dias** de tolerância.
 > O bot <@${BOT_ID}> calcula isso sozinho. Ninguém precisa pedir: o botão **Meus pontos** te diz quantos dias ainda restam.
 
-**Ninguém é expulso sem ser perguntado.** Ao atingir o seu limite, o bot te chama **no privado** com dois botões: *ainda quero jogar* ou *perdi o interesse*. Quem não responde em ${checkHoras}h entra na lista da staff. Quem responde que quer ficar ganha **${voltaDias} dias para entrar no jogo** — um login zera o contador e encerra o assunto; se o prazo passar sem login, a vaga volta para a fila do mesmo jeito.
+**Ninguém é expulso sem ser perguntado.** Ao atingir o seu limite, o bot te chama **no privado** com dois botões: *ainda quero jogar* ou *perdi o interesse*. Quem não responde em ${checkHoras}h entra na lista da staff. Quem responde que quer ficar ganha **${voltaDias} dias para entrar no jogo** — um login zera o contador e encerra o assunto. Se o prazo passar sem login, o bot avisa **uma última vez** e a vaga volta para a fila do mesmo jeito.
 
 **Isso não é punição.** A guilda tem um número limitado de slots, e um slot parado é um slot que um membro ativo não pode ocupar — liberar a vaga é o único motivo da regra existir.
 

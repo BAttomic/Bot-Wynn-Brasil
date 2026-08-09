@@ -261,7 +261,7 @@ loans
 inactivityChecks              // um doc por membro, só enquanto o episódio dura
   uuid, username, discordId,
   status (pending|stay|quit|unreachable),
-  sentAt, respondedAt,
+  sentAt, respondedAt, farewellSentAt,
   offline, allowance, points  // foto do momento da pergunta
   // Quem estoura a margem (§ inatividade) recebe UMA DM com dois botões.
   //   pending → tem inactivityCheckHours para clicar
@@ -270,6 +270,9 @@ inactivityChecks              // um doc por membro, só enquanto o episódio dur
   //   unreachable → sem vínculo no Discord ou DM fechada
   // Vencido o prazo (dos dois tipos), o nick entra na lista de `/gu kick` do
   // /verificar. Logar apaga o doc e zera o ciclo — é o único "reset".
+  // No máximo DUAS DMs por episódio: o check-in e, só para quem prometeu voltar
+  // e furou o prazo, o aviso de que caiu na lista (farewellSentAt trava o
+  // reenvio). Quem ficou calado não recebe a segunda.
 
 config                       // um por guilda do Discord
   guildDiscordId, guildPrefix,
