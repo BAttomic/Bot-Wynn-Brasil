@@ -1,8 +1,10 @@
 import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
 import { collections } from '../../db/mongo.js';
 import { getConfig } from '../../config/guildConfig.js';
-import { listAspects, getAspectRate } from '../../services/aspects.js';
+import { listAspects, getAspectRate, setAspectsDelivered } from '../../services/aspects.js';
 import { minGuildDays } from '../../services/eligibility.js';
+import { audit } from '../../services/audit.js';
+import { ensureTomePanel } from '../../services/tomes.js';
 
 const TOP = 25; // linhas mostradas; os totais sempre somam todo mundo
 
@@ -25,6 +27,15 @@ export default {
     .setDescription('(Staff) Aspects gerados e a entregar por guild raid')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addUserOption((o) => o.setName('user').setDescription('Ver os aspects de um jogador específico').setRequired(false))
+    // Correção de entrega digitada errada. Vive como OPÇÃO do /aspects, e não
+    // como subcomando, para o `/aspects` puro continuar funcionando como sempre.
+    .addNumberOption((o) =>
+      o
+        .setName('entregues')
+        .setDescription('(Corrige) Novo TOTAL já entregue a esse jogador. Exige "user".')
+        .setMinValue(0)
+        .setRequired(false),
+    )
     .toJSON(),
 
   async execute(interaction) {
@@ -38,17 +49,55 @@ export default {
     const all = await listAspects(interaction.guildId);
     const user = interaction.options.getUser('user');
 
+    const corrigir = interaction.options.getNumber('entregues');
+    if (corrigir !== null && !user) {
+      return interaction.editReply('Para corrigir, informe também o **user**: `/aspects user:@fulano entregues:2`.');
+    }
+
     // Um jogador específico.
     if (user) {
       const link = await collections.members().findOne({ discordId: user.id });
       if (!link) return interaction.editReply(`<@${user.id}> não está vinculado a nenhuma conta.`);
+
+      // ---- Correção ----
+      if (corrigir !== null) {
+        const res = await setAspectsDelivered(link.uuid, corrigir);
+        if (!res) return interaction.editReply(`**${link.username}** não tem registro em guildStats.`);
+
+        // Relê depois da escrita: `pending` já reflete a correção, inclusive
+        // negativo se o total informado passar do que a pessoa gerou.
+        const depois = (await listAspects(interaction.guildId)).find((x) => x.uuid === link.uuid);
+        const saldo = depois?.pending ?? 0;
+        const nota =
+          saldo < 0
+            ? `\n-# ⚠️ Saldo **negativo**: ${fmt(-saldo)} a mais do que gerou. As próximas raids quitam isso antes de render aspect de novo.`
+            : '';
+
+        await audit(
+          interaction.client,
+          interaction.guildId,
+          `✏️ <@${interaction.user.id}> corrigiu os aspects entregues de **${link.username}**: ` +
+            `${fmt(res.antes)} → **${fmt(res.agora)}** (saldo ${fmt(saldo)}).`,
+        );
+        await ensureTomePanel(interaction.client, interaction.guildId).catch(() => null);
+
+        return interaction.editReply(
+          `✏️ **${link.username}** — entregues: ${fmt(res.antes)} → **${fmt(res.agora)}**\n` +
+            `-# Gerou ${fmt(depois?.earned ?? 0)} em ${depois?.raids ?? 0} raids · saldo agora **${fmt(saldo)}**.${nota}`,
+        );
+      }
+
       const a = all.find((x) => x.uuid === link.uuid);
       if (!a || (a.earned === 0 && a.delivered === 0)) {
         return interaction.editReply(`**${link.username}** ainda não gerou aspects (a contagem começa do zero).`);
       }
       const gate = a.eligible ? '' : `\n-# ⏳ ${a.days ?? '?'} dia(s) na guilda — só recebe a partir de ${min} dias.`;
+      const devendo =
+        a.pending < 0
+          ? `\n-# ⚠️ Saldo negativo: recebeu ${fmt(-a.pending)} a mais do que gerou.`
+          : '';
       return interaction.editReply(
-        `✨ **${a.username}** — **${fmt(a.pending)}** a entregar\n-# Gerou ${fmt(a.earned)} em ${a.raids} raids · já recebeu ${fmt(a.delivered)} · ${rate}/raid.${gate}`,
+        `✨ **${a.username}** — **${fmt(a.pending)}** a entregar\n-# Gerou ${fmt(a.earned)} em ${a.raids} raids · já recebeu ${fmt(a.delivered)} · ${rate}/raid.${gate}${devendo}`,
       );
     }
 

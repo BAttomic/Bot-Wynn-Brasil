@@ -9,7 +9,13 @@ import { getConfig } from '../config/guildConfig.js';
 //   raids desde 0 = max(0, guildRaids − aspectBaseRaids)
 //   gerado        = aspectsPerGuildRaid × (raids desde 0)
 //   entregue      = guildStats.aspectsDelivered
-//   pendente      = max(0, gerado − entregue)
+//   pendente      = gerado − entregue     (PODE SER NEGATIVO, de propósito)
+//
+// O pendente negativo é a correção de erro de digitação embutida na conta. Quem
+// entregou 20 onde eram 2 fica com −18: a pessoa parou de aparecer na lista de
+// entrega (o filtro é `pending > 0`) e as próximas 36 raids dela apenas quitam
+// o excedente antes de voltar a gerar aspect. Com o antigo `max(0, …)` o erro
+// sumia de vista e virava presente permanente, sem ninguém saber que houve.
 
 export async function getAspectRate(guildId) {
   const { params } = await getConfig(guildId);
@@ -59,7 +65,7 @@ export async function listAspects(guildId) {
       raids,
       earned,
       delivered,
-      pending: Math.max(0, earned - delivered),
+      pending: earned - delivered,
       days,
       eligible: days !== null && days >= minDays,
     };
@@ -78,4 +84,33 @@ export async function deliverAspects(uuid, amount) {
   if (!(amount > 0)) return false;
   await collections.guildStats().updateOne({ uuid }, { $inc: { aspectsDelivered: amount } });
   return true;
+}
+
+/**
+ * Corrige o total já entregue a alguém, para o caso de a staff ter digitado o
+ * número errado no modal de entrega.
+ *
+ * É um SET, não um $inc, e isso é deliberado: quem está corrigindo sabe quanto
+ * a pessoa recebeu de verdade, não quanto errou. "Entreguei 2, não 20" é
+ * direto; "subtraia 18" exige fazer a conta de cabeça e erra de novo.
+ *
+ * Não mexe em `aspectBaseRaids` — o gerado continua saindo das raids reais.
+ * Se o novo total passar do gerado, o pendente fica negativo, e as próximas
+ * raids quitam a diferença antes de voltar a render aspect.
+ *
+ * @param {string} uuid
+ * @param {number} total  novo valor de aspectsDelivered (>= 0)
+ * @returns {Promise<{antes:number, agora:number}|null>} null se não achou
+ */
+export async function setAspectsDelivered(uuid, total) {
+  if (!(total >= 0)) return null;
+  const antes = await collections
+    .guildStats()
+    .findOneAndUpdate(
+      { uuid },
+      { $set: { aspectsDelivered: total } },
+      { returnDocument: 'before', projection: { aspectsDelivered: 1 } },
+    );
+  if (!antes) return null;
+  return { antes: antes.aspectsDelivered ?? 0, agora: total };
 }
