@@ -34,6 +34,9 @@ import giveaway from './commands/giveaway.js';
 const commands = [link, unlink, config, apply, season, leaderboard, profile, war, tome, loan, calc, points, verificar, reconciliar, membros, registro, missao, ban, warn, forcelink, uniforme, modpack, booth, apelacao, aspects, evento, giveaway];
 const byName = new Map(commands.map((c) => [c.data.name, c]));
 
+/** Só para o selftest conferir os limites do Discord sem ligar o bot. */
+export const COMMANDS = commands;
+
 export async function registerCommands() {
   const token = required('DISCORD_TOKEN');
   const clientId = required('DISCORD_CLIENT_ID');
@@ -80,7 +83,20 @@ export function attachHandlers(client, ctx) {
   client.on('interactionCreate', async (interaction) => {
     // Botões, menus e modais são roteados para o comando "dono".
     if (!interaction.isChatInputCommand()) {
-      if (interaction.isAutocomplete?.()) return; // não é componente
+      // Autocomplete não é componente: não tem customId, e vai direto para o
+      // comando que o declarou. Sem resposta em 3s o campo fica vazio para quem
+      // está digitando, então um erro aqui só pode ser logado — o Discord não
+      // aceita uma segunda tentativa.
+      if (interaction.isAutocomplete?.()) {
+        const dono = byName.get(interaction.commandName);
+        if (typeof dono?.autocomplete !== 'function') return;
+        try {
+          await dono.autocomplete(interaction, ctx);
+        } catch (e) {
+          log.error(`Erro no autocomplete de /${interaction.commandName}:`, e);
+        }
+        return;
+      }
 
       const owner = ownerOf(interaction);
       if (!owner) {

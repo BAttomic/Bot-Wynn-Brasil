@@ -32,6 +32,26 @@ async function main() {
   const gd = await import('../src/services/guildData.js');
   const { detectGuildRaids } = await import('../src/services/watcher.js');
 
+  // ------------------------------------------------- Comandos construíveis
+  //
+  // Esta seção vem PRIMEIRO porque a falha que ela pega mata o bot no boot,
+  // antes do login: os builders são avaliados no import do módulo, e
+  // `addChoices` rejeita mais de 25 opções ali mesmo. Foi assim que PARAM_KEYS
+  // passar de 25 derrubou tudo, com o painel de status parado como único
+  // sintoma visível. O import abaixo é metade do teste — se algum comando
+  // estourar um limite do Discord, ele nem chega no primeiro check.
+  section('0. Todo comando cabe nos limites do Discord');
+  const { COMMANDS } = await import('../src/discord/commandLoader.js');
+  const estouros = [];
+  for (const c of COMMANDS) {
+    const opcoes = [...(c.data.options ?? []), ...(c.data.options ?? []).flatMap((o) => o.options ?? [])];
+    for (const o of opcoes) {
+      if ((o.choices?.length ?? 0) > 25) estouros.push(`/${c.data.name} ${o.name}: ${o.choices.length} choices`);
+    }
+  }
+  check('nenhuma opção passa de 25 choices', estouros, []);
+  check('todos os comandos foram construídos', COMMANDS.length > 0, true);
+
   // ---------------------------------------------------------------- API
   section('1. API do Wynncraft responde');
   const wnbr = await wynn.guildByPrefix('WnBR');

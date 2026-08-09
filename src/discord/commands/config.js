@@ -32,6 +32,20 @@ function choices(keys) {
   return keys.map((k) => ({ name: k, value: k }));
 }
 
+// O Discord aceita no máximo 25 `choices` por opção, e `addChoices` VALIDA isso
+// na construção do comando — ou seja, no import do módulo, antes do login. Foi
+// exatamente assim que o bot entrou em crash-loop: PARAM_KEYS passou de 25 ao
+// ganhar `inactivityCheckHours` e `inactivityReturnDays`, e o processo morria no
+// boot com "expected <= 25". Nada no bot funcionava, e o sintoma visível era o
+// painel de status parado.
+//
+// Listas que crescem (parâmetros, canais) usam AUTOCOMPLETE, que não tem teto de
+// cadastro: o handler devolve até 25 sugestões FILTRADAS pelo que a pessoa
+// digitou, o que aliás é mais usável que rolar 27 itens. Só ROLE_KEYS (5, e
+// estável por natureza — são os cargos que o bot aplica) continua com choices.
+const AUTOCOMPLETE_KEYS = { channel: CHANNEL_KEYS, param: PARAM_KEYS };
+const MAX_SUGESTOES = 25;
+
 export default {
   data: new SlashCommandBuilder()
     .setName('config')
@@ -42,7 +56,7 @@ export default {
         .setName('channel')
         .setDescription('Define um canal')
         .addStringOption((o) =>
-          o.setName('key').setDescription('Chave do canal').setRequired(true).addChoices(...choices(CHANNEL_KEYS)),
+          o.setName('key').setDescription('Chave do canal').setRequired(true).setAutocomplete(true),
         )
         .addChannelOption((o) =>
           o.setName('channel').setDescription('Canal').addChannelTypes(ChannelType.GuildText).setRequired(true),
@@ -62,7 +76,7 @@ export default {
         .setName('param')
         .setDescription('Define um parâmetro')
         .addStringOption((o) =>
-          o.setName('key').setDescription('Chave do parâmetro').setRequired(true).addChoices(...choices(PARAM_KEYS)),
+          o.setName('key').setDescription('Chave do parâmetro').setRequired(true).setAutocomplete(true),
         )
         .addStringOption((o) =>
           o.setName('value').setDescription('Valor (texto, número ou JSON)').setRequired(true),
@@ -70,6 +84,19 @@ export default {
     )
     .addSubcommand((s) => s.setName('show').setDescription('Mostra a configuração atual'))
     .toJSON(),
+
+  /**
+   * Sugestões da opção `key`, filtradas pelo que já foi digitado. O Discord dá
+   * 3s para responder e não aceita segunda resposta, então isto não toca banco
+   * nem rede — é só filtro em memória sobre as listas de guildConfig.js.
+   * @param {import('discord.js').AutocompleteInteraction} interaction
+   */
+  autocomplete(interaction) {
+    const keys = AUTOCOMPLETE_KEYS[interaction.options.getSubcommand()] ?? [];
+    const digitado = interaction.options.getFocused().toLowerCase();
+    const achados = keys.filter((k) => k.toLowerCase().includes(digitado));
+    return interaction.respond(choices(achados.slice(0, MAX_SUGESTOES)));
+  },
 
   async execute(interaction) {
     await interaction.deferReply({ ephemeral: true });
