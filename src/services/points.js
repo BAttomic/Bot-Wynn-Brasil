@@ -99,6 +99,12 @@ export function eventPoints(event, params = {}) {
       return event.qty * (w.weekly || 0) * weeklyStreakFactor(event.meta?.streak, params);
     case 'contribution':
       return (event.qty / 1_000_000) * (w.contribPerMillion || 0);
+    // LEGADO. Nada produz eventos de território desde que a atribuição por
+    // janela de tempo foi removida (ver o bloco de atribuição em
+    // services/watcher.js): a API não diz quem capturou, e o palpite creditava
+    // guerra a quem não guerreou. O caso continua aqui porque `eventPoints` é o
+    // intérprete do livro-razão — tirá-lo zeraria em silêncio os eventos já
+    // gravados de quem ainda não rodou o reset.
     case 'territory': {
       // `qty` é o multiplicador CRU da captura (1 + 0.3×conexões, e os externals
       // no QG). A GUERRA já pagou a base, então aqui entra só o excedente:

@@ -106,7 +106,7 @@ Tudo que você faz pela guilda vira ponto. Os pontos definem a **fila de Tomes**
 
 > \`1.000.000\` de Guild XP → **${w.contribPerMillion} ponto**
 > \`1\` Guild Raid → **${w.guildRaid} pontos**, para cada membro do grupo
-> \`1\` Guerra → **${w.war} pontos**, multiplicados pelas fronteiras que o defensor tinha
+> \`1\` Guerra → **${w.war} pontos**, contados pelo seu próprio contador de guerra no jogo
 > \`1\` Objetivo Semanal → **${w.weekly} pontos**, +${streakPct}% por semana seguida (até o dobro)
 
 No canal de status da guilda, o botão **Meus pontos** mostra os seus, sua posição e quantos dias de tolerância eles te dão.
@@ -133,7 +133,7 @@ Toda atividade abaixo vira ponto, e ponto vira margem de inatividade e prioridad
 > **Objetivos Semanais** — a forma mais barata de pontuar. Um objetivo por semana dá \`${w.weekly}\` pontos, e manter a sequência aumenta o valor em ${streakPct}% a cada semana. É o que mais rende por tempo gasto.
 > **Guild XP** (\`/guild xp 100\`) — cada \`1.000.000\` vira \`${w.contribPerMillion}\` ponto. Sobe o nível da guilda, o que libera mais membros e slots de baú.
 > **Guild Raids** — \`${w.guildRaid}\` pontos para **cada um** dos participantes. Geram buffs e recompensas coletivas.
-> **Guerras** — \`${w.war}\` pontos, multiplicados pelas fronteiras que o defensor tinha. Território dá bônus para a guilda inteira.
+> **Guerras** — \`${w.war}\` pontos por guerra, lidos do **seu** contador de guerra no jogo. Território conquistado é conquista da guilda inteira e entra no histórico, mas não pontua ninguém em separado: o jogo não informa quem tomou o quê, e chutar isso já creditou guerra a quem não guerreou.
 > **Farm em Grupo** — não pontua, mas rende amizade, dicas e progresso mais rápido.
 
 **Dúvidas ou sugestões?** Procure um membro da <@&${STAFF_ROLE}>. Estamos aqui para ajudar!`,

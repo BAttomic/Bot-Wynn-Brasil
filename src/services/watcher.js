@@ -5,7 +5,9 @@ import { optional } from '../config/env.js';
 import { shortNumber, membersLimit, calcExperience, getByPath, diffPaths } from '../util/format.js';
 import { xpBarEmoji, EMOJI } from '../util/emojis.js';
 import { captureValue, recordCapture } from './territories.js';
-import { recordEvent, eventPoints, recordWeeklyCompletion } from './points.js';
+// Território não pontua mais ninguém individualmente, então este arquivo não
+// escreve no livro-razão de guerra — só o snapshot escreve.
+import { recordWeeklyCompletion } from './points.js';
 import { creditGuildRaid } from './events.js';
 import { communityRow } from './leaderboardPanel.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
@@ -27,26 +29,33 @@ const iso = () => new Date().toISOString();
 let prevGuild = null;
 let prevTerritory = null;
 
-// A API não diz quem capturou um território. O contador de guerras de cada
-// membro subir é a melhor aproximação disponível. Mas o endpoint de guilda é
-// MUITO cacheado: quando o território troca de dono (endpoint quase em tempo
-// real), o contador de guerra do membro ainda não subiu. Por isso a atribuição
-// não é feita na hora — é feita no flush horário, quando o contador já alcançou.
+// ATRIBUIÇÃO DE GUERRA — o que dá para afirmar, e o que não dá.
 //
-// Guardamos um LOG de incrementos de guerra com horário, e no flush cada captura
-// leva os guerreiros cujo incremento caiu perto do horário dela.
-// A JANELA É ASSIMÉTRICA, e isso é o ponto todo.
+// DÁ: que um jogador guerreou. O contador `globalData.wars` dele subiu entre
+// dois polls, e isso é fato verificável. É daqui que saem os pontos de guerra,
+// pelo delta do contador no snapshot (services/progress.js) — sem janela, sem
+// palpite, sem chance de creditar guerra a quem não guerreou.
 //
-// O território vem de um endpoint quase em tempo real; o contador de guerra vem
-// do endpoint de guilda, que o Wynncraft cacheia pesado. Então o incremento é
-// SEMPRE visto depois da captura — nunca muito antes. Uma janela simétrica de
-// ±15 min (como era) descartava todo mundo sempre que o cache demorava mais que
-// isso: o incremento estava no log, só caía fora da janela, e o resumo saía com
-// "nenhum guerreiro detectado" mesmo com a guerra ganha.
+// NÃO DÁ: quem capturou qual território. A API do Wynncraft não expõe isso em
+// endpoint nenhum. E os dois sinais que temos nem chegam juntos: o território
+// vem de um endpoint quase em tempo real, o contador de guerra vem do endpoint
+// de guilda, que o Wynncraft cacheia pesado — o incremento aparece SEMPRE
+// depois da captura, com atraso variável.
 //
-// O `depois` acompanha o intervalo do resumo (que já espera justamente para o
-// contador alcançar) com um teto, para as duas esperas não saírem de sincronia
-// de novo. O `antes` é curto: só cobre a ordem entre dois polls vizinhos.
+// Este arquivo já tentou fechar essa ligação por janela de tempo, e o resultado
+// era crédito errado: cada captura levava TODO guerreiro da janela, então três
+// capturas numa hora davam três créditos a cada um dos cinco que guerrearam —
+// inclusive a quem lutou por outro território, ou por outra guilda. Um palpite
+// virava ponto, e ponto virava fila de tome e margem de inatividade.
+//
+// Hoje a captura é registro da GUILDA (territoryCaptures + anúncio) e não
+// pontua ninguém individualmente. O log abaixo sobrevive só para o resumo poder
+// LISTAR quem guerreou no intervalo — sem contagem por pessoa, porque essa
+// contagem nunca foi conhecível.
+//
+// A janela continua assimétrica pelo motivo do cache: o incremento é visto
+// depois, nunca muito antes. O `antes` é curto, só cobre a ordem entre dois
+// polls vizinhos.
 const ATTRIB_BEFORE_MS = 5 * 60_000;
 const ATTRIB_AFTER_MAX_MS = 45 * 60_000;
 const FLUSH_GRACE_MS = 6 * 60_000; // idade mínima da captura antes de anunciar
@@ -92,14 +101,16 @@ function trackWarParticipants(prev, curr, retentionMs = warLogRetentionMs()) {
 }
 
 /**
- * Guerreiros cujo contador subiu perto do horário da captura. Dedup por uuid.
- * @param {number} capAt    horário da captura
- * @param {number} afterMs  quanto tempo DEPOIS da captura ainda conta
+ * Quem teve o contador de guerra subindo numa janela de tempo. Dedup por uuid.
+ * Serve para LISTAR os guerreiros do intervalo no resumo — não para dizer quem
+ * capturou o quê, que não é conhecível (ver o bloco de atribuição acima).
+ * @param {number} desde    início da janela
+ * @param {number} afterMs  quanto tempo DEPOIS de `desde` ainda conta
  */
-function attributeWarriors(capAt, afterMs = ATTRIB_AFTER_MAX_MS) {
+function warriorsInWindow(desde, afterMs = ATTRIB_AFTER_MAX_MS) {
   const seen = new Map();
   for (const w of warriorLog) {
-    const d = w.at - capAt;
+    const d = w.at - desde;
     if (d >= -ATTRIB_BEFORE_MS && d <= afterMs) seen.set(w.uuid, w.username);
   }
   return [...seen].map(([uuid, username]) => ({ uuid, username }));
@@ -423,7 +434,7 @@ function truncate(s, max = 1000) {
 }
 
 // Monta o único aviso agrupado do intervalo.
-function digestPayload({ gains, losses, warriorCaps, totalPoints, ourCount, minutes }) {
+function digestPayload({ gains, losses, warriors, ourCount, minutes }) {
   const capLine = (c) => (c.multiplier > 1 ? `${c.name} \`x${c.multiplier.toFixed(2)}\`` : c.name);
   const fields = [];
   if (gains.length) {
@@ -432,12 +443,15 @@ function digestPayload({ gains, losses, warriorCaps, totalPoints, ourCount, minu
   if (losses.length) {
     fields.push({ name: `🚨 Perdidos (${losses.length})`, value: truncate(losses.map((c) => c.name).join(', ')) });
   }
-  const warriors = [...warriorCaps.entries()].sort((a, b) => b[1] - a[1]);
+  // Lista SEM contagem por pessoa. O contador de guerra de cada um subiu — isso
+  // é fato. Quem tomou qual território, não dá para saber (ver o bloco sobre
+  // atribuição no topo do arquivo), e o "N capturas" que ficava aqui era um
+  // palpite exibido em público como se fosse placar.
   fields.push({
-    name: ':crossed_swords: Guerreiros',
+    name: ':crossed_swords: Guerrearam neste intervalo',
     value: warriors.length
-      ? truncate(warriors.map(([n, c]) => `**${n}** — ${c} captura${c > 1 ? 's' : ''}`).join('\n'))
-      : 'Nenhum guerreiro detectado na janela.',
+      ? truncate(warriors.map((n) => `**${n}**`).join(', '))
+      : 'Nenhum contador de guerra subiu na janela.',
   });
 
   return {
@@ -445,10 +459,13 @@ function digestPayload({ gains, losses, warriorCaps, totalPoints, ourCount, minu
       {
         title: '🗺️ Guerra de Território — resumo',
         color: 0x2ecc71,
-        description:
-`Temos agora \`${ourCount}\` territórios.${totalPoints ? `\nDistribuídos \`~${totalPoints}\` pts entre os guerreiros (entram na apuração diária).` : ''}`,
+        description: `Temos agora \`${ourCount}\` territórios.`,
         fields,
-        footer: { text: `Agrupado para evitar spam — no máx. 1 aviso a cada ${minutes} min.` },
+        footer: {
+          text:
+            `Agrupado para evitar spam — no máx. 1 aviso a cada ${minutes} min. ` +
+            'Pontos de guerra saem do contador de cada jogador, não desta lista.',
+        },
         timestamp: iso(),
       },
     ],
@@ -456,9 +473,11 @@ function digestPayload({ gains, losses, warriorCaps, totalPoints, ourCount, minu
   };
 }
 
-// Solta UM aviso agrupado por intervalo (padrão 60 min). Como espera, o contador
-// de guerra — cacheado — já subiu, e a atribuição de guerreiros fica correta.
-// Chamado por um job frequente; ele mesmo decide se já é hora.
+// Solta UM aviso agrupado por intervalo (padrão 60 min). A espera existe para o
+// contador de guerra — pesadamente cacheado — já ter subido quando o resumo
+// sair, e assim a LISTA de quem guerreou no intervalo sair completa. Ela não
+// tenta mais dizer quem pegou o quê. Chamado por um job frequente; ele mesmo
+// decide se já é hora.
 export async function flushTerritoryDigest(client) {
   const guildDiscordId = optional('DISCORD_GUILD_ID');
   const prefix = optional('WYNN_GUILD_PREFIX');
@@ -486,12 +505,8 @@ export async function flushTerritoryDigest(client) {
   // exatamente dar tempo do contador cacheado alcançar.
   const afterMs = Math.min(intervalMs, ATTRIB_AFTER_MAX_MS);
 
-  const params = cfg.params || {};
-  const base = Number(params.pointsWeights?.war) || 0;
   const gains = [];
   const losses = [];
-  const warriorCaps = new Map(); // username -> nº de capturas
-  let totalPoints = 0;
 
   for (const c of ready) {
     if (c.lost) {
@@ -499,21 +514,13 @@ export async function flushTerritoryDigest(client) {
       continue;
     }
     const raw = c.value || { multiplier: 1 };
-    const participants = attributeWarriors(c.at, afterMs);
-    if (!participants.length) {
-      log.warn(
-        `Captura de ${c.name} sem guerreiro atribuído — ${warriorLog.length} incremento(s) no log, ` +
-          `janela de -${ATTRIB_BEFORE_MS / 60_000} a +${Math.round(afterMs / 60_000)} min.`,
-      );
-    }
-    // O evento de território paga só o excedente; a base vem da guerra.
-    const bonus = eventPoints({ type: 'territory', qty: raw.multiplier }, params);
-    const points = Math.round(base + bonus);
-    totalPoints += points * participants.length;
-    for (const p of participants) warriorCaps.set(p.username, (warriorCaps.get(p.username) || 0) + 1);
     gains.push({ name: c.name, multiplier: raw.multiplier });
 
     try {
+      // A captura entra no histórico da GUILDA, sem lista de participantes.
+      // Ver o bloco sobre atribuição no topo deste arquivo: a API não diz quem
+      // capturou, e gravar um palpite como se fosse registro é pior que não
+      // gravar nada.
       await recordCapture({
         territory: c.name,
         defender: raw.defender ?? null,
@@ -521,19 +528,26 @@ export async function flushTerritoryDigest(client) {
         connections: raw.connections ?? 0,
         externals: raw.externals ?? 0,
         multiplier: raw.multiplier,
-        participants,
       });
-      const meta = { territory: c.name, defender: raw.defender ?? null, isHq: !!raw.isHq, connections: raw.connections ?? 0 };
-      for (const p of participants) {
-        await recordEvent({ uuid: p.uuid, username: p.username, type: 'territory', qty: raw.multiplier, meta });
-      }
     } catch (e) {
       log.error('Falha ao registrar captura de território:', e);
     }
   }
 
+  // Quem guerreou na janela. Isto é FATO — o contador de guerra da pessoa subiu
+  // — e é tudo que dá para afirmar. Quantas capturas cada um fez, não: ninguém
+  // sabe, e o número que aparecia aqui era a janela inteira multiplicada por
+  // cada captura do lote.
+  const warriors = warriorsInWindow(now - intervalMs, intervalMs + afterMs).map((w) => w.username);
+  if (gains.length && !warriors.length) {
+    log.warn(
+      `Resumo com ${gains.length} captura(s) e nenhum incremento de contador na janela — ` +
+        `${warriorLog.length} no log. O endpoint de guilda pode estar atrasado.`,
+    );
+  }
+
   const ourCount = Object.values(prevTerritory || {}).filter((t) => t?.guild?.prefix === prefix).length;
-  const payload = digestPayload({ gains, losses, warriorCaps, totalPoints, ourCount, minutes });
+  const payload = digestPayload({ gains, losses, warriors, ourCount, minutes });
 
   // Mesmo canal em war e territory? Envia uma vez só (dedup por id).
   const byId = new Map();
