@@ -1,8 +1,10 @@
 // Zera a contagem de GUERRAS e RAIDS: eventos, contadores crus e capturas de
 // território. Tudo passa a contar do zero a partir do próximo snapshot.
 //
-//   node scripts/reset-stats.js --dry     # mostra o que apagaria, sem tocar
-//   node scripts/reset-stats.js           # apaga e reapura
+//   node scripts/reset-stats.js --dry        # mostra o que apagaria, sem tocar
+//   node scripts/reset-stats.js              # apaga guerra + raid, e reapura
+//   node scripts/reset-stats.js --only=war   # só guerra (e território junto)
+//   node scripts/reset-stats.js --only=raid  # só raid
 //
 // O QUE SOBREVIVE (de propósito):
 //   • XP contribuído e objetivos semanais — os pontos deles continuam valendo.
@@ -38,17 +40,102 @@ import { recomputePoints, rebuildLeaderboards } from '../src/services/points.js'
 const DRY = process.argv.includes('--dry');
 const p = (s) => console.log(`${DRY ? '[dry] ' : ''}${s}`);
 
-/** Tipos de evento que somem. Ver eventPoints() em services/points.js. */
-const TYPES = ['war', 'territory', 'raid', 'guildRaid'];
+/**
+ * Grupos que podem ser zerados em separado. Território anda junto com guerra
+ * porque o evento de captura pagava só o EXCEDENTE do multiplicador, contando
+ * com a base vinda da guerra: apagar a guerra e manter a captura deixaria no
+ * ranking um resto de ponto sem a metade que lhe dava sentido.
+ */
+const GRUPOS = {
+  war: {
+    types: ['war', 'territory'],
+    stats: ['guildWars'],
+    season: ['warsFought'],
+    capturas: true,
+  },
+  raid: {
+    types: ['raid', 'guildRaid'],
+    stats: ['raidsInGuild'],
+    season: ['raidsDelta', 'guildRaidsDelta'],
+    capturas: false,
+  },
+};
 
-/** Contadores crus por membro, em guildStats. */
-const STATS_FIELDS = ['guildWars', 'raidsInGuild'];
+// --only=war  ou  --only=war,raid. Sem a flag, os dois.
+const onlyArg = process.argv.find((a) => a.startsWith('--only='));
+const escolhidos = onlyArg
+  ? onlyArg
+      .split('=')[1]
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => GRUPOS[s])
+  : Object.keys(GRUPOS);
 
-/** Contadores crus por season, em seasonParticipation. */
-const SEASON_FIELDS = ['warsFought', 'raidsDelta', 'guildRaidsDelta'];
+if (!escolhidos.length) {
+  console.error(`--only aceita: ${Object.keys(GRUPOS).join(', ')}`);
+  process.exit(1);
+}
+
+const junta = (chave) => escolhidos.flatMap((g) => GRUPOS[g][chave]);
+const TYPES = junta('types');
+const STATS_FIELDS = junta('stats');
+const SEASON_FIELDS = junta('season');
+const LIMPAR_CAPTURAS = escolhidos.some((g) => GRUPOS[g].capturas);
 
 /** @param {string[]} fields @returns {Record<string, 0>} */
 const zerar = (fields) => Object.fromEntries(fields.map((f) => [f, 0]));
+
+/**
+ * Semeia as marcas d'água a partir do MÁXIMO histórico de cada contador nos
+ * snapshots.
+ *
+ * Sem isto o reset se desfaz sozinho. A partir de agora o snapshot mede
+ * progresso contra a marca d'água (ver novoProgresso em services/progress.js),
+ * e um membro sem marca gravada cai no valor do ÚLTIMO snapshot. Se justamente
+ * esse último for uma das respostas zeradas da API, a marca nasce em 0 e a
+ * primeira leitura boa credita a vida inteira do jogador de uma vez — o mesmo
+ * furo, de volta, minutos depois de zerar tudo.
+ *
+ * O máximo histórico é imune a isso: é o maior valor que a API já afirmou, e
+ * nenhuma resposta ruim posterior o rebaixa.
+ */
+async function semearMarcas(stats, snaps) {
+  const maximos = await snaps
+    .aggregate([
+      {
+        $group: {
+          _id: '$uuid',
+          wars: { $max: '$metrics.wars' },
+          raids: { $max: '$metrics.raids' },
+          guildRaids: { $max: '$metrics.guildRaids' },
+          contributed: { $max: '$metrics.contributed' },
+        },
+      },
+    ])
+    .toArray();
+
+  let tocados = 0;
+  for (const m of maximos) {
+    if (DRY) {
+      tocados += 1;
+      continue;
+    }
+    // Pipeline de update com $max: a marca só sobe, nunca desce, e um valor
+    // ausente é ignorado em vez de virar zero.
+    const { modifiedCount } = await stats.updateOne({ uuid: m._id }, [
+      {
+        $set: {
+          warsHigh: { $max: ['$warsHigh', m.wars ?? 0] },
+          raidsHigh: { $max: ['$raidsHigh', m.raids ?? 0] },
+          guildRaidsHigh: { $max: ['$guildRaidsHigh', m.guildRaids ?? 0] },
+          contributedHigh: { $max: ['$contributedHigh', m.contributed ?? 0] },
+        },
+      },
+    ]);
+    tocados += modifiedCount;
+  }
+  return { membros: maximos.length, tocados };
+}
 
 async function main() {
   loadEnv();
@@ -58,6 +145,13 @@ async function main() {
   const stats = collections.guildStats();
   const part = collections.seasonParticipation();
   const caps = collections.territoryCaptures();
+  const snaps = collections.progressSnapshots();
+
+  console.log(
+    `Escopo: ${escolhidos.join(' + ')} — eventos ${TYPES.join('/')}, ` +
+      `campos ${[...STATS_FIELDS, ...SEASON_FIELDS].join('/')}` +
+      `${LIMPAR_CAPTURAS ? ', + capturas de território' : ''}.\n`,
+  );
 
   // ---- Retrato do que será apagado ----
   const porTipo = await events
@@ -131,7 +225,9 @@ async function main() {
   }
 
   if (DRY) {
-    p('\nnada foi alterado.');
+    const marcas = await semearMarcas(stats, snaps);
+    p(`\nsemearia marca d'água em ${marcas.membros} membro(s), do máximo histórico dos snapshots.`);
+    p('nada foi alterado.');
     await closeMongo();
     return;
   }
@@ -153,8 +249,16 @@ async function main() {
   // `aspectBaseRaids` e `aspectsDelivered` NÃO são tocados. Aspect é dívida da
   // guilda com o membro, não pontuação: quem já fez as raids continua com o que
   // tem a receber, independente de a apuração de pontos ter sido zerada.
-  const delCaps = await caps.deleteMany({});
-  console.log(`${delCaps.deletedCount} captura(s) de território apagada(s).`);
+  if (LIMPAR_CAPTURAS) {
+    const delCaps = await caps.deleteMany({});
+    console.log(`${delCaps.deletedCount} captura(s) de território apagada(s).`);
+  }
+
+  // SEM ISTO O RESET SE DESFAZ SOZINHO. Ver semearMarcas() acima.
+  const marcas = await semearMarcas(stats, snaps);
+  console.log(
+    `Marcas d'água semeadas do máximo histórico: ${marcas.tocados} de ${marcas.membros} membro(s).`,
+  );
 
   const { members, seasonRows } = await recomputePoints();
   const { categories, seasons } = await rebuildLeaderboards();
