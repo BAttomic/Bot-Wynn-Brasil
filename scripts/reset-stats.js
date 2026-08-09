@@ -102,6 +102,34 @@ async function main() {
     }
   }
 
+  // Guild raid da season, lado a lado com o total ABSOLUTO da API. Quando o
+  // delta da season é igual (ou quase) ao absoluto, aquela linha é um despejo
+  // da vida inteira do membro, não o que ele fez nesta season — a assinatura
+  // das duas falhas que levaram a este reset (baseline entrando na season e
+  // snapshot antigo sem o campo `guildRaids`).
+  const raidsSeason = await part
+    .find({ guildRaidsDelta: { $gt: 0 } })
+    .sort({ guildRaidsDelta: -1 })
+    .limit(10)
+    .toArray();
+  if (raidsSeason.length) {
+    const absoluto = new Map(
+      (await stats.find({}, { projection: { uuid: 1, guildRaids: 1 } }).toArray()).map((r) => [
+        r.uuid,
+        r.guildRaids ?? 0,
+      ]),
+    );
+    console.log('\nGuild raids contados na season (vs. total da API):');
+    for (const r of raidsSeason) {
+      const total = absoluto.get(r.uuid) ?? 0;
+      const suspeito = total > 0 && r.guildRaidsDelta >= total;
+      console.log(
+        `  ${r.username} [${r.seasonId}]: ${r.guildRaidsDelta} na season / ${total} no total` +
+          `${suspeito ? '  <- despejo do histórico' : ''}`,
+      );
+    }
+  }
+
   if (DRY) {
     p('\nnada foi alterado.');
     await closeMongo();
