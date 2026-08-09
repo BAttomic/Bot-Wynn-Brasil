@@ -13,15 +13,44 @@ function safeDelta(current, previous, cap) {
   return d;
 }
 
-// Tira um snapshot diário de progresso de TODOS os membros da guilda e
-// registra os deltas de guerras/raids/contribuição como eventos de pontos.
-// O snapshot NÃO calcula pontos: quem converte quantidade em ponto é o
-// recompute, usando os pesos vigentes na hora (ver services/points.js).
+// Uma apuração por vez, no processo inteiro.
 //
-// Devolve um resumo, ou `null` se não deu para apurar (sem prefixo configurado
-// ou API fora do ar). Quem cria um evento precisa saber disso: o corte entre o
-// "antes" e o "depois" do evento é justamente este lançamento.
+// `takeSnapshots` é chamado de três lugares com cadências diferentes: o job de
+// progresso (60 min), o eventTick (1 min, na abertura de um evento) e o
+// /points apurar. Uma apuração de 83 membros são centenas de idas ao Mongo e
+// leva segundos — tempo de sobra para uma segunda começar no meio.
+//
+// E aí o estrago é PERMANENTE: as duas leem o MESMO snapshot anterior, calculam
+// o MESMO delta e as duas aplicam `$inc: { guildWars: dWars }`. O contador de
+// guerra dobra e nada o conserta depois, porque `guildWars` não deriva do
+// livro-razão — só é somado. O índice único de pointsEvents também não segura:
+// o `meta.snapshotAt` das duas é diferente, então as duas inserções passam e os
+// pontos dobram junto.
+//
+// Quem chega no meio de uma apuração recebe o resultado DELA, em vez de abrir
+// outra: para o eventTick, o corte de um snapshot que acabou de sair serve
+// igual, e é isso que o `countFrom` precisa.
+let emCurso = null;
+
+/**
+ * Tira um snapshot de progresso de TODOS os membros da guilda e registra os
+ * deltas de guerras/raids/contribuição como eventos de pontos.
+ * O snapshot NÃO calcula pontos: quem converte quantidade em ponto é o
+ * recompute, usando os pesos vigentes na hora (ver services/points.js).
+ *
+ * Devolve um resumo, ou `null` se não deu para apurar (sem prefixo configurado
+ * ou API fora do ar). Quem cria um evento precisa saber disso: o corte entre o
+ * "antes" e o "depois" do evento é justamente este lançamento.
+ */
 export async function takeSnapshots() {
+  if (emCurso) return emCurso;
+  emCurso = runSnapshots().finally(() => {
+    emCurso = null;
+  });
+  return emCurso;
+}
+
+async function runSnapshots() {
   const prefix = optional('WYNN_GUILD_PREFIX');
   if (!prefix) return null;
 
@@ -121,7 +150,14 @@ export async function takeSnapshots() {
       { upsert: true },
     );
 
-    if (season && (dWars > 0 || dRaids > 0 || dGuildRaids > 0 || dContrib > 0)) {
+    // O BASELINE NÃO ENTRA NA SEASON. Ele carrega a vida inteira do membro na
+    // guilda (317 guild raids, bilhões de XP) e existe para o placar ACUMULADO
+    // não zerar um veterano. Somado ao delta da season, dava a quem apareceu no
+    // primeiro snapshot um saldo de season que ele não fez nesta season — e o
+    // ranking de season saía errado sem nunca se corrigir, porque
+    // `guildRaidsDelta` e `contributedDelta` só são incrementados, jamais
+    // recomputados a partir do livro-razão.
+    if (season && !baseline && (dWars > 0 || dRaids > 0 || dGuildRaids > 0 || dContrib > 0)) {
       await part.updateOne(
         { seasonId: season.seasonId, uuid: m.uuid },
         {

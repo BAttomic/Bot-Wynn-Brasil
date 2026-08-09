@@ -146,7 +146,12 @@ export async function recomputePoints({ uuid = null } = {}) {
     if (ev.username) t.username = ev.username;
     totals.set(ev.uuid, t);
 
-    if (!ev.seasonId) continue;
+    // Baseline fica FORA da season, como já ficava fora da apuração de evento
+    // (ver refreshScores em services/events.js). Ele é o passado inteiro do
+    // membro na guilda, carregado no primeiro snapshot para o placar acumulado
+    // não zerar um veterano — creditá-lo à season em que o membro apareceu
+    // daria a ele um saldo que ele não fez nesta season.
+    if (!ev.seasonId || ev.meta?.baseline) continue;
     const key = `${ev.seasonId}|${ev.uuid}`;
     const s = seasons.get(key) || {
       seasonId: ev.seasonId,

@@ -352,19 +352,25 @@ export async function ensureLeaderboardPanel(client, guildDiscordId) {
  */
 export async function handleLeaderboardControl(interaction) {
   const id = interaction.customId;
-  const state = await currentState();
 
+  // ACK PRIMEIRO, ANTES DE QUALQUER I/O. O Discord invalida o token da interação
+  // em 3 segundos: com uma leitura no Mongo aqui na frente, um hipo de latência
+  // do banco fazia o clique morrer sem erro nenhum — o botão simplesmente não
+  // respondia, e nem "Interação falhou" aparecia. Ler o estado depois do ack não
+  // tem prazo.
+  if (!id.startsWith(VIEW_PREFIX) && !id.startsWith(SCOPE_PREFIX) && id !== SELECT_ID) {
+    return interaction.reply({ content: 'Controle desconhecido.', ephemeral: true });
+  }
+  await interaction.deferUpdate();
+
+  const state = await currentState();
   if (id.startsWith(VIEW_PREFIX)) state.view = id.slice(VIEW_PREFIX.length);
   else if (id.startsWith(SCOPE_PREFIX)) state.scope = id.slice(SCOPE_PREFIX.length);
-  else if (id === SELECT_ID) state.view = interaction.values?.[0];
-  else return interaction.reply({ content: 'Controle desconhecido.', ephemeral: true });
+  else state.view = interaction.values?.[0];
 
-  if (state.view !== DEFAULT_VIEW && !CATEGORIES[state.view]) {
-    return interaction.reply({ content: 'Ranking desconhecido.', ephemeral: true });
-  }
-
+  // Ranking desconhecido cai no padrão em vez de virar erro: o clique já foi
+  // aceito, e um followUp de reclamação só polui a tela de quem clicou.
   const next = { view: validView(state.view), scope: validScope(state.scope) };
-  await interaction.deferUpdate();
   await saveState(next);
   await interaction.editReply(await buildLeaderboardPanel(next.view, next.scope));
 }

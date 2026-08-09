@@ -317,7 +317,11 @@ async function updatePanel(client, cfg, guild) {
       // canal). Se a mensagem ainda não tem o logo, anexamos NESTA edição; as
       // seguintes omitem o arquivo e o Discord preserva o anexo.
       const needsFiles = msg.attachments.size === 0;
-      await msg.edit(needsFiles ? { ...payload, files: [logoAttachment()] } : payload).catch(() => {});
+      // Logado, nunca engolido: ver o mesmo motivo em services/panels.js.
+      const erro = await msg
+        .edit(needsFiles ? { ...payload, files: [logoAttachment()] } : payload)
+        .then(() => null, (e) => e);
+      if (erro) log.error('Falha ao editar o painel de informações:', erro);
       return;
     }
   }

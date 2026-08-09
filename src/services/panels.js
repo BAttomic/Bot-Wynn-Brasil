@@ -26,7 +26,13 @@ export async function ensurePanel(client, channelId, stateId, payload, label, fi
       // incluímos o arquivo NESTA edição (o Discord anexa). As edições seguintes
       // omitem o arquivo e o Discord preserva o anexo, sem reenviar nada.
       const needsFiles = files.length && msg.attachments.size === 0;
-      await msg.edit(needsFiles ? { ...payload, files } : payload).catch(() => {});
+      // O erro é LOGADO, não engolido: um painel que para de atualizar em
+      // silêncio (embed acima do limite, permissão retirada do canal) é
+      // indistinguível de um bot fora do ar, e foi assim que a última quebra
+      // passou despercebida. Continua sem propagar — um painel não pode
+      // derrubar o job que cuida dos outros.
+      const erro = await msg.edit(needsFiles ? { ...payload, files } : payload).then(() => null, (e) => e);
+      if (erro) log.error(`Falha ao editar o painel de ${label}:`, erro);
       return msg.id;
     }
   }

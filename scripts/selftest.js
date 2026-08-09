@@ -464,6 +464,21 @@ async function main() {
     const comPontos = await collections.guildStats().countDocuments({ points: { $gt: 0 } });
     check('membros já entram com pontos', comPontos > 0, true);
 
+    // A linha de base é o passado INTEIRO do membro na guilda. Ela existe para o
+    // placar acumulado não zerar um veterano — creditá-la à season em que o
+    // membro apareceu daria a ele um saldo de season que ele não fez.
+    const { getActiveSeason } = await import('../src/services/seasons.js');
+    const ativa = (await getActiveSeason())?.seasonId ?? null;
+    const vazouParaSeason = await collections.seasonParticipation().countDocuments({
+      seasonId: ativa,
+      $or: [
+        { points: { $gt: 0 } },
+        { guildRaidsDelta: { $gt: 0 } },
+        { contributedDelta: { $gt: 0 } },
+      ],
+    });
+    check('linha de base não entra na season ativa', vazouParaSeason, 0);
+
     const topo = await collections.guildStats().find({}).sort({ points: -1 }).limit(1).next();
     console.log(`       (topo: ${topo.username} = ${topo.points} pts de ${(topo.contributed / 1e6).toFixed(0)}M de XP)`);
     check('pontos do topo batem com XP + guild raids', topo.points, Math.round(topo.contributed / 1e6) + topo.guildRaids * 10);

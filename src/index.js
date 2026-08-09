@@ -96,14 +96,29 @@ async function main() {
     const verifyH = Number(cfg.params?.verifyHourUTC) || 12;
 
     // Se alguém apagar um painel fixo, ele volta no próximo ciclo.
+    //
+    // Cada painel roda ISOLADO. Encadeados com await, um texto que estourasse o
+    // limite de embed (ou um canal sem permissão) abortava a cadeia inteira, e
+    // os painéis da fila — justamente os do canal de status, que são os últimos
+    // — paravam de atualizar sem que nada no log apontasse para eles.
     everyMinutes(5, 'panels', async () => {
-      await ensurePanels(client, guildId);
-      await ensureStaticPanels(client, guildId);
-      await ensurePingRolePanels(client, guildId);
-      await ensureTomePanel(client, guildId);
-      // Ordem no canal de status: info (ao vivo) → downloads → leaderboard.
-      await ensureDownloadsPanel(client, guildId);
-      await ensureLeaderboardPanel(client, guildId);
+      const passos = [
+        ['registro', () => ensurePanels(client, guildId)],
+        ['estáticos', () => ensureStaticPanels(client, guildId)],
+        ['pings', () => ensurePingRolePanels(client, guildId)],
+        ['tomes', () => ensureTomePanel(client, guildId)],
+        // Ordem no canal de status: info (ao vivo) → downloads → leaderboard.
+        ['downloads', () => ensureDownloadsPanel(client, guildId)],
+        ['leaderboard', () => ensureLeaderboardPanel(client, guildId)],
+      ];
+      for (const [nome, passo] of passos) {
+        try {
+          await passo();
+        } catch (e) {
+          log.error(`Painel "${nome}" falhou neste ciclo:`, e);
+          reportError(`Painel ${nome}`, e);
+        }
+      }
     }, { runOnStart: true });
     everyMinutes(60, 'pingsCleanup', () => runPingsCleanup(client), { runOnStart: true });
     // Anúncios de entrega de tome/aspect somem 3 dias depois (o painel fica).
