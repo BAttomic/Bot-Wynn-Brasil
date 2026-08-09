@@ -6,8 +6,23 @@ import { optional } from '../config/env.js';
 import { log } from '../util/log.js';
 
 // Ignora deltas negativos (reset/troca de UUID) ou absurdamente grandes.
+//
+// MÉTRICA AUSENTE NO SNAPSHOT ANTERIOR CONTA ZERO. Um snapshot tirado por uma
+// versão do bot que ainda não gravava aquele campo não diz nada sobre o delta —
+// e as duas saídas ingênuas são desastrosas: tratar o ausente como 0 credita a
+// VIDA INTEIRA do membro de uma vez (era o que acontecia com `guildRaids`, via
+// `?? 0`, e caía direto no ranking da season como delta normal, sem nem ser
+// marcado como baseline); deixar `undefined` propagar dá `NaN`, que atravessa
+// as duas comparações abaixo e chega ao `$inc` do Mongo, envenenando o contador
+// de vez.
+//
+// Zero perde no máximo UM intervalo: o próximo snapshot já compara dois valores
+// gravados pela mesma versão, e volta a contar certo sozinho.
 function safeDelta(current, previous, cap) {
-  const d = current - previous;
+  const c = Number(current);
+  const p = Number(previous);
+  if (!Number.isFinite(c) || !Number.isFinite(p)) return 0;
+  const d = c - p;
   if (d <= 0) return 0;
   if (cap && d > cap) return 0;
   return d;
@@ -110,8 +125,10 @@ async function runSnapshots() {
     } else {
       dWars = safeDelta(metrics.wars, last.metrics.wars, 2000);
       dRaids = safeDelta(metrics.raids, last.metrics.raids, 2000);
-      dGuildRaids = safeDelta(metrics.guildRaids, last.metrics.guildRaids ?? 0, 500);
-      dContrib = Math.max(0, metrics.contributed - (last.metrics.contributed ?? 0));
+      dGuildRaids = safeDelta(metrics.guildRaids, last.metrics.guildRaids, 500);
+      // Sem teto: Guild XP sobe aos milhões por dia, qualquer cap plausível
+      // recusaria uma contribuição legítima.
+      dContrib = safeDelta(metrics.contributed, last.metrics.contributed, 0);
     }
 
     // Quantidades brutas viram eventos. `snapshotAt` torna a gravação idempotente.
