@@ -85,19 +85,69 @@ function trackWarParticipants(prev, curr, retentionMs = warLogRetentionMs()) {
   const now = Date.now();
   // Poda o log pela frente (sempre inserido em ordem cronológica).
   while (warriorLog.length && now - warriorLog[0].at > retentionMs) warriorLog.shift();
-  if (!prev) return; // primeiro poll: só baseline
+  if (!prev) return []; // primeiro poll: só baseline
   const before = membersByUuid(prev);
-  let novos = 0;
+  const novos = [];
   for (const [uuid, m] of membersByUuid(curr)) {
     const old = before.get(uuid);
     if (old && m.wars > old.wars) {
       warriorLog.push({ uuid, username: m.username, at: now });
-      novos += 1;
+      novos.push({ uuid, username: m.username, delta: m.wars - old.wars });
     }
   }
   // Sem isto, "nenhum guerreiro detectado" é indistinguível de "o contador nunca
   // subiu" — foi o que dificultou achar o furo da janela na primeira vez.
-  if (novos) log.info(`Guerra: +${novos} incremento(s) de contador (log com ${warriorLog.length}).`);
+  if (novos.length) {
+    log.info(`Guerra: +${novos.length} incremento(s) de contador (log com ${warriorLog.length}).`);
+  }
+  return novos;
+}
+
+/**
+ * AUDITORIA: os dois contadores de guerra, lado a lado, a cada poll em que
+ * algum se move.
+ *
+ * A guerra do Wynncraft acaba na prática quando a torre cai — todo mundo vai
+ * para o /lobby e ninguém espera ela finalizar de fato. Se o
+ * `globalData.wars` de cada jogador só incrementa na finalização formal, ele
+ * deixa de contar justamente quem fez o trabalho, e nenhum ajuste de código
+ * conserta isso: o dado nunca chega.
+ *
+ * O contador da GUILDA (`guild.wars`) é um segundo sinal, independente. Se ele
+ * sobe 1 e nenhum contador de membro sobe junto, a tese está confirmada — e a
+ * razão entre os dois, ao longo de alguns dias, dá o tamanho exato do furo.
+ *
+ * É medição, não pontuação: nada aqui credita ponto a ninguém. A coleção expira
+ * em 30 dias.
+ */
+async function auditWar(prev, curr, incrementos) {
+  const antes = Number(prev?.wars);
+  const agora = Number(curr?.wars);
+  const guildDelta = Number.isFinite(antes) && Number.isFinite(agora) ? agora - antes : 0;
+  if (guildDelta <= 0 && !incrementos.length) return;
+
+  await collections
+    .warAudit()
+    .insertOne({
+      at: new Date(),
+      guildWars: Number.isFinite(agora) ? agora : null,
+      guildDelta,
+      // Soma dos incrementos individuais vistos NESTE poll.
+      membrosDelta: incrementos.reduce((s, i) => s + i.delta, 0),
+      membros: incrementos,
+      online: Object.values(curr.members || {}).reduce(
+        (s, g) => s + (g && typeof g === 'object' ? Object.values(g).filter((m) => m?.online).length : 0),
+        0,
+      ),
+    })
+    .catch(() => {});
+
+  if (guildDelta > 0 && !incrementos.length) {
+    log.warn(
+      `Guerra da guilda +${guildDelta}, e NENHUM contador de membro subiu neste poll. ` +
+        'É a assinatura de guerra que acabou na torre e ninguém esperou finalizar.',
+    );
+  }
 }
 
 /**
@@ -231,11 +281,12 @@ export async function runGuildWatch(client) {
     // Retenção derivada do intervalo do resumo: se a staff aumentar o
     // territoryDigestMinutes, o log tem que durar mais, senão a poda apaga o
     // incremento antes de o resumo usá-lo.
-    trackWarParticipants(
+    const incrementos = trackWarParticipants(
       prevGuild,
       guild,
       warLogRetentionMs((Number(cfg.params?.territoryDigestMinutes) || 60) * 60_000),
     );
+    if (prevGuild) await auditWar(prevGuild, guild, incrementos);
     const raids = detectGuildRaids(prevGuild, guild);
     if (raids.length) {
       // Creditar vem antes de anunciar: o evento é o que conta, o embed é

@@ -33,6 +33,7 @@ export const collections = {
   warCalls: () => getDb().collection('warCalls'),
   warQueue: () => getDb().collection('warQueue'),
   territoryCaptures: () => getDb().collection('territoryCaptures'),
+  warAudit: () => getDb().collection('warAudit'),
   bans: () => getDb().collection('bans'),
   warns: () => getDb().collection('warns'),
   pointsEvents: () => getDb().collection('pointsEvents'),
@@ -64,6 +65,12 @@ async function ensureIndexes() {
   await collections.warQueue().createIndex({ discordId: 1 }, { unique: true });
   await collections.warQueue().createIndex({ guildDiscordId: 1, queuedAt: 1 });
   await collections.territoryCaptures().createIndex({ at: -1 });
+  // Auditoria de guerra: um doc por poll em que algum sinal de guerra se moveu.
+  // Serve para MEDIR o quanto o contador por jogador deixa de contar (ver
+  // services/watcher.js). Expira sozinha em 30 dias — é instrumentação, não
+  // registro permanente.
+  await collections.warAudit().createIndex({ at: -1 });
+  await collections.warAudit().createIndex({ at: 1 }, { expireAfterSeconds: 30 * 86_400 });
   await collections.territoryCaptures().createIndex({ territory: 1, at: -1 });
   // Banimento pega pelos dois lados da identidade.
   await collections.bans().createIndex({ uuid: 1 }, { unique: true });
