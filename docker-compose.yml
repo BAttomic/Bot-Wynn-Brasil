@@ -1,6 +1,6 @@
 # Bot_Wynncraft — bot de Discord (guilda WynnCraft). Conecta pra fora (Discord +
-# API WynnCraft) e expõe modpack.battomic.com só para o download do modpack (o
-# servidor HTTP interno serve /health e /modpack em :8080). Buildado do repo pelo
+# API WynnCraft) e expõe bot.battomic.com para os arquivos públicos (o servidor
+# HTTP interno serve /health, /modpack e /gsw em :8080). Buildado do repo pelo
 # Dokploy (projeto "outros", branch main). bot-mongo dedicado e isolado em
 # net-bot-data; egress + entrada do Traefik via dokploy-network.
 
@@ -23,24 +23,24 @@ services:
       WYNN_GUILD_UUID: ${WYNN_GUILD_UUID}
       WYNN_API_KEY: ${WYNN_API_KEY}
       PORT: 8080
-      # Domínio público do /modpack. Defina PUBLIC_URL na aba Environment do
-      # Dokploy (= o Host das labels abaixo, com https).
+      # Domínio público do bot (/modpack, /gsw). Defina PUBLIC_URL na aba
+      # Environment do Dokploy (= o Host das labels abaixo, com https).
       PUBLIC_URL: ${PUBLIC_URL}
     networks:
       - net-bot-data
       - dokploy-network
-    # Traefik: expõe SÓ o HTTP interno (:8080) em modpack.battomic.com para o
-    # download do modpack. Mesmo padrão de churras/sr. O /health também responde
-    # aí, mas o healthcheck do Dokploy segue interno.
+    # Traefik: expõe SÓ o HTTP interno (:8080) em bot.battomic.com. Mesmo padrão
+    # de churras/sr. O /health também responde aí, mas o healthcheck do Dokploy
+    # segue interno.
     labels:
       - traefik.enable=true
       - traefik.docker.network=dokploy-network
-      - traefik.http.routers.wynn-modpack.rule=Host(`modpack.battomic.com`)
-      - traefik.http.routers.wynn-modpack.entrypoints=websecure
-      - traefik.http.routers.wynn-modpack.tls=true
-      - traefik.http.routers.wynn-modpack.tls.certresolver=letsencrypt
-      - traefik.http.routers.wynn-modpack.service=wynn-modpack
-      - traefik.http.services.wynn-modpack.loadbalancer.server.port=8080
+      - traefik.http.routers.wynn-web.rule=Host(`bot.battomic.com`)
+      - traefik.http.routers.wynn-web.entrypoints=websecure
+      - traefik.http.routers.wynn-web.tls=true
+      - traefik.http.routers.wynn-web.tls.certresolver=letsencrypt
+      - traefik.http.routers.wynn-web.service=wynn-web
+      - traefik.http.services.wynn-web.loadbalancer.server.port=8080
 
   bot-mongo:
     image: mongo:7

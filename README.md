@@ -184,6 +184,11 @@ pode antecipar com `/giveaway encerrar` ou refazer com `/giveaway reroll`
 - **Download do modpack:** o mesmo servidor HTTP serve o `mods.rar` em
   `:$PORT/modpack`. Exponha um domínio no Dokploy apontando para `:$PORT` e
   informe-o em `PUBLIC_URL` — o `/modpack` monta o link `${PUBLIC_URL}/modpack`.
+- **Dossiê GsW:** o mesmo servidor abre a página em `:$PORT/gsw` —
+  `${PUBLIC_URL}/gsw` no domínio público. É um HTML autocontido (os prints vão
+  embutidos em base64), gerado por `gsw/build.ps1` direto em `src/assets/`.
+  Editou o texto em `gsw/template.html` ou trocou print em `gsw/img/`? Roda
+  `powershell -ExecutionPolicy Bypass -File gsw/build.ps1` e sobe de novo.
 - **Backup:** agende `scripts/backup.sh` (mongodump gzip, mantém 14 dias). Veja o
   cabeçalho do script para as variáveis.
 

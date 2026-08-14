@@ -1,0 +1,1536 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dossiê GsW × Wynn Brasil — o meu lado</title>
+<meta name="description" content="Documento de contexto sobre o atrito entre a guilda Guardian of Wynn (GsW) e a Wynn Brasil (WnBR) no Wynncraft, 2021–2026.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Karla:ital,wght@0,300..800;1,300..800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════
+   DOSSIÊ — GsW × WnBR
+   Paleta: tinta / osso / ouro. Verde = WnBR. Violeta = GsW.
+   ═══════════════════════════════════════════════════════════ */
+:root{
+  --ink:#0a0b0d;
+  --ink-2:#101217;
+  --ink-3:#161920;
+  --bone:#eae5da;
+  --bone-dim:#a8a498;
+  --mute:#6f6d66;
+  --gold:#c9a227;
+  --gold-dim:#7d661c;
+  --green:#46c384;
+  --violet:#9b8ae6;
+  --red:#d4664f;
+  --rule:rgba(234,229,218,.13);
+  --rule-soft:rgba(234,229,218,.07);
+  --serif:'Instrument Serif',Constantia,'Palatino Linotype',Georgia,serif;
+  --sans:'Karla',Corbel,'Segoe UI',system-ui,sans-serif;
+  --mono:'JetBrains Mono',Consolas,'Courier New',monospace;
+  --pad:clamp(1.1rem,4vw,3.5rem);
+  --maxw:1180px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:5rem;-webkit-text-size-adjust:100%}
+body{
+  background:var(--ink);
+  color:var(--bone);
+  font-family:var(--sans);
+  font-size:clamp(15px,.42vw + 14px,17px);
+  line-height:1.62;
+  font-weight:380;
+  overflow-x:hidden;
+  position:relative;
+}
+/* atmosfera: grão + vinheta + malha fraca */
+body::before{
+  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(201,162,39,.09), transparent 60%),
+    radial-gradient(90% 60% at 100% 100%, rgba(155,138,230,.055), transparent 65%),
+    radial-gradient(90% 60% at 0% 90%, rgba(70,195,132,.045), transparent 65%);
+}
+#grain{
+  position:fixed;inset:-50%;z-index:1;pointer-events:none;opacity:.16;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
+  animation:grainshift 6s steps(6) infinite;
+}
+@keyframes grainshift{
+  0%{transform:translate(0,0)}20%{transform:translate(-3%,2%)}40%{transform:translate(2%,-3%)}
+  60%{transform:translate(-2%,-2%)}80%{transform:translate(3%,1%)}100%{transform:translate(0,0)}
+}
+@media (prefers-reduced-motion:reduce){#grain{animation:none}html{scroll-behavior:auto}}
+
+/* ── barra superior ───────────────────────────────────────── */
+#bar{
+  position:fixed;top:0;left:0;right:0;z-index:60;
+  display:flex;align-items:center;gap:1rem;
+  padding:.55rem var(--pad);
+  background:rgba(10,11,13,.82);
+  backdrop-filter:blur(14px) saturate(140%);
+  border-bottom:1px solid var(--rule);
+}
+#bar .sigil{
+  font-family:var(--mono);font-size:.62rem;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--gold);white-space:nowrap;
+}
+#bar .sigil b{color:var(--bone-dim);font-weight:400}
+#navwrap{flex:1;overflow-x:auto;scrollbar-width:none;mask-image:linear-gradient(90deg,transparent,#000 12px,#000 calc(100% - 12px),transparent)}
+#navwrap::-webkit-scrollbar{display:none}
+#nav{display:flex;gap:.15rem;justify-content:center;min-width:max-content;padding:0 .5rem}
+#nav a{
+  font-family:var(--mono);font-size:.6rem;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--mute);text-decoration:none;padding:.3rem .5rem;border-radius:2px;
+  transition:color .25s,background .25s;white-space:nowrap;
+}
+#nav a:hover{color:var(--bone)}
+#nav a.on{color:var(--ink);background:var(--gold);font-weight:600}
+#lang{display:flex;border:1px solid var(--rule);border-radius:2px;overflow:hidden;flex:none}
+#lang button{
+  font-family:var(--mono);font-size:.63rem;letter-spacing:.12em;font-weight:600;
+  background:transparent;color:var(--mute);border:0;padding:.35rem .6rem;cursor:pointer;
+  transition:background .2s,color .2s;
+}
+#lang button:hover{color:var(--bone)}
+#lang button.on{background:var(--bone);color:var(--ink)}
+
+/* ── estrutura ────────────────────────────────────────────── */
+main{position:relative;z-index:2}
+.wrap{max-width:var(--maxw);margin:0 auto;padding-inline:var(--pad)}
+section{position:relative}
+
+/* ── capa ─────────────────────────────────────────────────── */
+#hero{
+  min-height:84svh;display:flex;flex-direction:column;justify-content:center;
+  padding:7rem 0 4rem;position:relative;
+}
+#hero .eyebrow{
+  font-family:var(--mono);font-size:.68rem;letter-spacing:.34em;text-transform:uppercase;
+  color:var(--gold);margin-bottom:1.6rem;display:flex;align-items:center;gap:.9rem;
+}
+#hero .eyebrow::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--gold-dim),transparent)}
+#hero h1{
+  font-family:var(--serif);font-weight:400;
+  font-size:clamp(2.8rem,8.5vw,6.4rem);line-height:.92;letter-spacing:-.025em;
+  margin-bottom:1.4rem;
+}
+#hero h1 em{font-style:italic;color:var(--gold)}
+#hero .sub{
+  font-size:clamp(1.05rem,1.6vw,1.35rem);max-width:46ch;color:var(--bone-dim);
+  line-height:1.5;font-weight:300;
+}
+#hero .sub strong{color:var(--bone);font-weight:600}
+.scrollcue{
+  position:absolute;bottom:2rem;left:var(--pad);
+  font-family:var(--mono);font-size:.58rem;letter-spacing:.24em;text-transform:uppercase;color:var(--mute);
+  display:flex;align-items:center;gap:.6rem;
+}
+.scrollcue::after{content:'';width:44px;height:1px;background:var(--mute);animation:pull 2.4s ease-in-out infinite}
+@keyframes pull{0%,100%{transform:scaleX(.35);transform-origin:left}50%{transform:scaleX(1);transform-origin:left}}
+
+/* ── títulos de bloco ─────────────────────────────────────── */
+.blocktitle{
+  font-family:var(--mono);font-size:.63rem;letter-spacing:.3em;text-transform:uppercase;
+  color:var(--gold);display:flex;align-items:center;gap:1rem;margin-bottom:2.2rem;
+}
+.blocktitle::after{content:'';flex:1;height:1px;background:var(--rule)}
+h2.big{
+  font-family:var(--serif);font-weight:400;font-size:clamp(1.9rem,4.2vw,3.1rem);
+  line-height:1.06;letter-spacing:-.02em;margin-bottom:1.4rem;
+}
+
+/* ── como ler ─────────────────────────────────────────────── */
+#howto{padding:5.5rem 0 4rem;border-top:1px solid var(--rule)}
+.principles{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.principles article{background:var(--ink);padding:1.5rem 1.3rem;position:relative}
+.principles .n{
+  font-family:var(--mono);font-size:.58rem;color:var(--gold);letter-spacing:.2em;margin-bottom:.7rem;display:block;
+}
+.principles h3{font-family:var(--serif);font-weight:400;font-size:1.4rem;line-height:1.15;margin-bottom:.5rem}
+.principles p{font-size:.88rem;color:var(--bone-dim);line-height:1.55}
+
+/* ── elenco ───────────────────────────────────────────────── */
+#cast{padding:4.5rem 0;border-top:1px solid var(--rule)}
+.castnote{
+  font-size:.85rem;color:var(--bone-dim);max-width:62ch;margin-bottom:2rem;
+  border-left:2px solid var(--gold-dim);padding-left:1rem;
+}
+.castgroup{margin-bottom:2.4rem}
+.castgroup > h3{
+  font-family:var(--mono);font-size:.6rem;letter-spacing:.24em;text-transform:uppercase;
+  margin-bottom:1rem;display:flex;align-items:center;gap:.6rem;
+}
+.castgroup > h3::before{content:'';width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
+.g-me{color:var(--green)}.g-wnbr{color:var(--green)}.g-gsw{color:var(--violet)}.g-other{color:var(--bone-dim)}
+.people{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.people.solo{grid-template-columns:minmax(0,1fr)}
+.people.solo .person{padding:1.3rem 1.4rem}
+.people.solo .role{max-width:70ch}
+.person{background:var(--ink);padding:.95rem 1.05rem}
+.person .nick{font-family:var(--mono);font-size:.9rem;font-weight:600;letter-spacing:-.01em}
+.person .alias{
+  font-size:.74rem;color:var(--bone-dim);margin-top:.2rem;font-family:var(--mono);
+}
+.person .alias span{color:var(--gold)}
+.person .role{font-size:.8rem;color:var(--bone-dim);margin-top:.5rem;line-height:1.45}
+.person.is-me{background:linear-gradient(180deg,rgba(70,195,132,.07),transparent)}
+.person.is-me .nick{color:var(--green)}
+.person.is-gsw .nick{color:var(--violet)}
+.person.is-wnbr .nick{color:var(--green)}
+.person.is-other .nick{color:var(--bone-dim)}
+.guildkey{
+  display:flex;flex-wrap:wrap;gap:.4rem;margin-top:1.6rem;
+}
+.guildkey span{
+  font-family:var(--mono);font-size:.66rem;border:1px solid var(--rule);
+  padding:.28rem .55rem;color:var(--bone-dim);
+}
+.guildkey span b{color:var(--bone);font-weight:600}
+
+/* ── atos ─────────────────────────────────────────────────── */
+#acts{padding-top:3rem}
+.act{padding:4.2rem 0;border-top:1px solid var(--rule);position:relative}
+.act-inner{display:grid;grid-template-columns:132px 1fr;gap:clamp(1rem,3vw,3rem);align-items:start}
+.rail{position:sticky;top:5.2rem}
+.rail .num{
+  font-family:var(--serif);font-size:clamp(3.4rem,7vw,5.4rem);line-height:.8;
+  color:transparent;-webkit-text-stroke:1px var(--gold-dim);
+  display:block;margin-bottom:.5rem;
+}
+.rail .yr{
+  font-family:var(--mono);font-size:.63rem;letter-spacing:.16em;color:var(--gold);
+  display:block;padding-top:.4rem;border-top:1px solid var(--rule);
+}
+.rail .tag{
+  font-family:var(--mono);font-size:.56rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--mute);display:block;margin-top:.35rem;
+}
+.act h2{
+  font-family:var(--serif);font-weight:400;font-size:clamp(2rem,4.6vw,3.3rem);
+  line-height:1.02;letter-spacing:-.022em;margin-bottom:1.1rem;
+}
+.act .lede{
+  font-size:clamp(1.02rem,1.35vw,1.2rem);color:var(--bone);line-height:1.55;
+  max-width:56ch;margin-bottom:1.7rem;font-weight:300;
+  border-left:2px solid var(--gold);padding-left:1.1rem;
+}
+.act .body p{max-width:64ch;margin-bottom:1rem;color:var(--bone-dim)}
+.act .body p strong{color:var(--bone);font-weight:600}
+.act .body p em{color:var(--gold);font-style:italic}
+.noproof{
+  font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;color:var(--mute);
+  border:1px dashed var(--rule);padding:.6rem .9rem;margin:1.4rem 0;display:inline-block;
+}
+
+/* ── prova ────────────────────────────────────────────────── */
+.evi{margin-top:2.2rem;border:1px solid var(--rule);background:rgba(16,18,23,.55)}
+.evi-head{
+  display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;
+  padding:.6rem .9rem;border-bottom:1px solid var(--rule);background:rgba(201,162,39,.05);
+}
+.evi-head .badge{
+  font-family:var(--mono);font-size:.57rem;letter-spacing:.18em;text-transform:uppercase;
+  background:var(--gold);color:var(--ink);padding:.2rem .45rem;font-weight:600;
+}
+.evi-head .lbl{font-size:.84rem;color:var(--bone);flex:1;min-width:12ch}
+.evi-head .count{font-family:var(--mono);font-size:.65rem;color:var(--mute);letter-spacing:.1em}
+.slide{display:none;animation:fadein .35s ease}
+.slide.on{display:block}
+@keyframes fadein{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.slide-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:0}
+.slide-grid.nolines{grid-template-columns:minmax(0,1fr)}
+.slide-grid.nolines .shot{border-right:0;align-items:flex-start}
+.slide-grid.nolines .shot img{max-width:min(100%,560px)}
+.shot{border-right:1px solid var(--rule);padding:.9rem;display:flex;flex-direction:column;gap:.6rem;min-width:0}
+.shot img{
+  width:100%;height:auto;display:block;cursor:zoom-in;
+  border:1px solid var(--rule);background:#000;image-rendering:auto;
+}
+.shot .cap{font-size:.8rem;color:var(--bone-dim);line-height:1.5}
+.shot .missing{
+  border:1px dashed var(--red);color:var(--red);font-family:var(--mono);font-size:.7rem;
+  padding:2.5rem 1rem;text-align:center;line-height:1.6;
+}
+.script{padding:.9rem 1rem;min-width:0}
+.script .sh{
+  font-family:var(--mono);font-size:.55rem;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--mute);margin-bottom:.7rem;padding-bottom:.45rem;border-bottom:1px solid var(--rule-soft);
+}
+.line{display:flex;gap:.6rem;margin-bottom:.42rem;font-size:.845rem;line-height:1.48;align-items:baseline}
+.line .who{
+  font-family:var(--mono);font-size:.7rem;font-weight:600;white-space:nowrap;flex:none;
+  min-width:9.5ch;text-align:right;
+}
+.line .who em{
+  display:block;font-style:normal;font-weight:400;font-size:.6rem;
+  color:var(--mute);letter-spacing:-.02em;margin-top:.05rem;
+}
+.line .who em::before{content:'('}
+.line .who em::after{content:')'}
+.line.s-me .who{color:var(--green)}
+.line.s-wnbr .who{color:#7fd8ab}
+.line.s-gsw .who{color:var(--violet)}
+.line.s-other .who{color:var(--bone-dim)}
+.line .txt{color:var(--bone);min-width:0;overflow-wrap:anywhere}
+.line.sys{font-family:var(--mono);font-size:.72rem;color:var(--gold);opacity:.85}
+.line.sys .who{color:var(--gold-dim)}
+.line.note{font-size:.76rem;color:var(--mute);font-style:italic}
+.line.note .who{color:var(--mute)}
+.evi-nav{
+  display:flex;align-items:center;gap:.4rem;padding:.55rem .9rem;border-top:1px solid var(--rule);
+  background:rgba(10,11,13,.5);
+}
+.evi-nav button{
+  font-family:var(--mono);font-size:.7rem;background:transparent;color:var(--bone-dim);
+  border:1px solid var(--rule);padding:.28rem .6rem;cursor:pointer;transition:.2s;line-height:1;
+}
+.evi-nav button:hover:not(:disabled){background:var(--bone);color:var(--ink);border-color:var(--bone)}
+.evi-nav button:disabled{opacity:.28;cursor:default}
+.dots{display:flex;gap:.32rem;flex:1;justify-content:center;flex-wrap:wrap}
+.dots i{
+  width:22px;height:3px;background:var(--rule);cursor:pointer;transition:.25s;display:block;
+}
+.dots i:hover{background:var(--bone-dim)}
+.dots i.on{background:var(--gold)}
+.origtoggle{
+  font-family:var(--mono);font-size:.6rem;letter-spacing:.08em;color:var(--mute);
+  background:none;border:0;cursor:pointer;padding:.3rem 0;margin-top:.6rem;text-decoration:underline;
+  text-underline-offset:3px;
+}
+.origtoggle:hover{color:var(--gold)}
+.orig{display:none;margin-top:.5rem;padding-top:.6rem;border-top:1px dashed var(--rule)}
+.orig.on{display:block}
+
+/* ── admissões ────────────────────────────────────────────── */
+#owned{padding:5rem 0;border-top:1px solid var(--rule);position:relative}
+#owned .shellbox{border:1px solid var(--gold-dim);background:linear-gradient(180deg,rgba(201,162,39,.05),transparent 70%);padding:clamp(1.4rem,4vw,3rem)}
+#owned h2{font-family:var(--serif);font-weight:400;font-size:clamp(1.9rem,4.4vw,3rem);line-height:1.05;margin-bottom:1.1rem}
+#owned .intro{color:var(--bone-dim);max-width:60ch;margin-bottom:2rem}
+.owns{counter-reset:o;display:grid;gap:1px;background:var(--rule)}
+.owns li{
+  background:var(--ink);list-style:none;padding:1rem 1.1rem 1rem 3.4rem;position:relative;
+  font-size:.92rem;color:var(--bone);line-height:1.55;
+}
+.owns li::before{
+  counter-increment:o;content:counter(o,decimal-leading-zero);
+  position:absolute;left:1.1rem;top:1rem;font-family:var(--mono);font-size:.72rem;color:var(--gold);
+}
+
+/* ── pedido final ─────────────────────────────────────────── */
+#ask{padding:5rem 0 7rem;border-top:1px solid var(--rule)}
+.asks{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.asks article{background:var(--ink);padding:1.6rem 1.3rem}
+.asks h3{font-family:var(--mono);font-size:.6rem;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);margin-bottom:.8rem}
+.asks p{font-size:.92rem;color:var(--bone-dim);line-height:1.55}
+.sig{
+  font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;color:var(--mute);margin-top:3rem;
+  padding-top:1rem;border-top:1px solid var(--rule);display:inline-block;
+}
+
+/* ── lightbox ─────────────────────────────────────────────── */
+#lb{
+  position:fixed;inset:0;z-index:100;background:rgba(5,6,7,.96);
+  display:none;align-items:center;justify-content:center;padding:2rem;cursor:zoom-out;
+  backdrop-filter:blur(6px);
+}
+#lb.on{display:flex;animation:fadein .2s ease}
+#lb img{max-width:100%;max-height:92vh;border:1px solid var(--rule);object-fit:contain}
+#lb .x{
+  position:absolute;top:1rem;right:1.3rem;font-family:var(--mono);font-size:.7rem;
+  letter-spacing:.2em;color:var(--bone-dim);
+}
+
+/* ── reveal ───────────────────────────────────────────────────
+   O estado escondido só existe se o JS ligar a classe .anim no
+   <html>. Sem JS, sem IntersectionObserver ou com reduced-motion,
+   o documento aparece inteiro — nunca em branco. */
+.anim .rv{opacity:0;transform:translateY(16px);transition:opacity .7s cubic-bezier(.2,.7,.3,1),transform .7s cubic-bezier(.2,.7,.3,1)}
+.anim .rv.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.anim .rv{opacity:1;transform:none;transition:none}}
+@media print{.anim .rv{opacity:1;transform:none}.slide{display:block!important}#bar,.evi-nav{display:none!important}}
+
+/* ── responsivo ───────────────────────────────────────────── */
+@media (max-width:900px){
+  .slide-grid{grid-template-columns:1fr}
+  .shot{border-right:0;border-bottom:1px solid var(--rule)}
+}
+@media (max-width:760px){
+  #nav{display:none}
+  .act-inner{grid-template-columns:1fr;gap:1rem}
+  .rail{position:static;display:flex;align-items:baseline;gap:.9rem;border-bottom:1px solid var(--rule);padding-bottom:.7rem;margin-bottom:.4rem}
+  .rail .num{font-size:2.4rem;margin:0}
+  .rail .yr{border:0;padding:0}
+  .line{flex-direction:column;gap:.05rem;margin-bottom:.6rem}
+  .line .who{text-align:left;min-width:0}
+}
+</style>
+</head>
+<body>
+<div id="grain"></div>
+
+<header id="bar">
+  <div class="sigil">GsW <b>×</b> WnBR</div>
+  <div id="navwrap"><nav id="nav"></nav></div>
+  <div id="lang">
+    <button data-l="pt" class="on">PT</button><button data-l="en">EN</button>
+  </div>
+</header>
+
+<main id="app"></main>
+
+<div id="lb"><span class="x">ESC</span><img alt=""></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   1. PRINTS (base64, embutidos pelo build.ps1)
+   ═══════════════════════════════════════════════════════════ */
+const IMG = __IMG_DATA__;
+
+/* ═══════════════════════════════════════════════════════════
+   2. CONTEÚDO
+   Cada string tem { pt, en }. As IMAGENS nunca são traduzidas —
+   só a descrição e a transcrição.
+   ═══════════════════════════════════════════════════════════ */
+
+const T = (pt,en)=>({pt,en});
+
+/* Locutor. `who` é sempre o nickname canônico da pessoa; `raw` é o
+   apelido que aparece literalmente no print, quando for diferente.
+   me = eu | wnbr = Wynn Brasil | gsw = Guardian of Wynn | other  */
+const L = (who,side,pt,en,cls,raw)=>({who,side,pt,en,cls:cls||'',raw:raw||''});
+
+const DOC = {
+
+ui:{
+  navHero:T('Capa','Cover'),
+  navHow:T('Como ler','How to read'),
+  navCast:T('Quem é quem','Who is who'),
+  navOwned:T('Onde eu errei','Where I was wrong'),
+  navAsk:T('O que eu peço','What I ask'),
+  actWord:T('Ato','Act'),
+  evidence:T('Prova','Exhibit'),
+  transcript:T('Transcrição','Transcript'),
+  ofN:T('de','of'),
+  prev:T('◀ anterior','◀ prev'),
+  next:T('próximo ▶','next ▶'),
+  showOrig:T('ver texto original em português','show original Portuguese text'),
+  hideOrig:T('esconder original','hide original'),
+  missing:T('PRINT INDISPONÍVEL\nO link do Discord expirou antes do arquivamento.','SCREENSHOT UNAVAILABLE\nThe Discord link expired before archiving.'),
+  noproof:T('Sem print — relato meu, tratem como relato.','No screenshot — my account only, treat it as such.')
+},
+
+hero:{
+  eyebrow:T('Dossiê · 2021 — 2026 · Wynncraft','Case file · 2021 — 2026 · Wynncraft'),
+  title:T('O meu lado<br>da <em>história</em>','My side<br>of the <em>story</em>'),
+  sub:T('<strong>Guardian of Wynn</strong> × <strong>Wynn Brasil</strong>: cinco anos de atrito, contados com print, data e nome. Inclusive as partes em que o errado sou eu.',
+        '<strong>Guardian of Wynn</strong> × <strong>Wynn Brasil</strong>: five years of friction, told with screenshots, dates and names. Including the parts where I am the one in the wrong.'),
+  cue:T('role para começar','scroll to begin')
+},
+
+howto:{
+  kicker:T('Antes de ler','Before you read'),
+  title:T('Quatro coisas, pra ninguém perder tempo.','Four things, so nobody wastes their time.'),
+  items:[
+    {n:'01',
+     h:T('É o meu lado.','This is my side.'),
+     p:T('Não é neutro e não finge ser. Eu escrevi. Mas todo print está aqui inteiro, com data e horário, pra você julgar sozinho — inclusive contra mim.',
+         'It is not neutral and does not pretend to be. I wrote it. But every screenshot is here in full, with date and time, so you can judge for yourself — including against me.')},
+    {n:'02',
+     h:T('Print, não boato.','Screenshots, not hearsay.'),
+     p:T('Cada afirmação pesada tem imagem do lado. Onde eu não tenho prova, está escrito que eu não tenho prova. Isso acontece mais de uma vez aqui.',
+         'Every heavy claim has an image next to it. Where I have no proof, it says so. That happens more than once in here.')},
+    {n:'03',
+     h:T('Inclui os meus erros.','It includes my own mistakes.'),
+     p:T('Tem ato aqui em que o errado sou eu, sem atenuante. Está incluído de propósito: relato que só acusa não vale nada.',
+         'There is an act here where I am simply wrong, with no excuse. It is included on purpose: an account that only accuses is worth nothing.')},
+    {n:'04',
+     h:T('Não é chamado pra guerra.','This is not a call to arms.'),
+     p:T('Não estou pedindo raid, ban, nem cancelamento de ninguém. Se alguém da WnBR usar isso pra atacar alguém, está indo contra o motivo do documento.',
+         'I am not asking for a raid, a ban, or anyone getting cancelled. If a WnBR member uses this to attack someone, they are going against the point of this document.')}
+  ]
+},
+
+cast:{
+  kicker:T('Quem é quem','Who is who'),
+  title:T('Apelido, conta e lado.','Nickname, account and side.'),
+  note:T('Um aviso antes de ler os prints: vários nomes diferentes são a mesma pessoa — no Wynncraft cada classe pode ter o seu apelido, então <b>Fatal_Addicted</b>, <b>Warrer</b> e <b>AsymptomaticSlowness</b> são todos eu, na mesma conta.',
+         'One warning before reading the screenshots: several different names are the same person — in Wynncraft each class can carry its own nickname, so <b>Fatal_Addicted</b>, <b>Warrer</b> and <b>AsymptomaticSlowness</b> are all me, on the same account.'),
+  groups:[
+    {side:'me',label:T('Eu','Me'),people:[
+      {nick:'B_Attomic',alias:'Fatal_Addicted · Warrer · AsymptomaticSlowness · "attomico"',
+       role:T('Autor do documento. Fundador da WnBR. <b>Warrer</b>, <b>AsymptomaticSlowness</b> e <b>Fatal_Addicted</b> são apelidos de classe — <em>mesma pessoa, mesma conta</em>. Quando o nome muda no meio de uma conversa, continua sendo eu falando.',
+              'Author of this document. Founder of WnBR. <b>Warrer</b>, <b>AsymptomaticSlowness</b> and <b>Fatal_Addicted</b> are class nicknames — <em>same person, same account</em>. When the name changes mid-conversation, it is still me talking.')}
+    ]},
+    {side:'gsw',label:T('Guardian of Wynn (GsW)','Guardian of Wynn (GsW)'),people:[
+      {nick:'RafaelGomes',alias:'rafaelgomes',
+       role:T('<b>Chief da GsW — dono atual da guilda.</b>','<b>GsW chief — current owner of the guild.</b>')},
+      {nick:'Bigouslino',alias:'Bigo · Bigos',
+       role:T('<b>Chief da GsW.</b> É com ele a conversa do Ato I, em 2021. É ele quem me bane do Discord da GsW em 2025.',
+              '<b>GsW chief.</b> The Act I conversation, in 2021, is with him. He is the one who bans me from the GsW Discord in 2025.')},
+      {nick:'iMonoYasuo',alias:'iYasuo_ · Yasuo',
+       role:T('<b>Chief da GsW.</b> Quem ofereceu a fusão das guildas, e com quem eu tentei fechar neutralidade três vezes.',
+              '<b>GsW chief.</b> The one who offered the guild merge, and the one I tried to settle neutrality with three times.')},
+      {nick:'Volkzz101',alias:'Volkzz',
+       role:T('<b>Chief da GsW.</b> Interlocutor do Ato V — a conversa do "gigante contra minion".',
+              '<b>GsW chief.</b> The other side of Act V — the "giant versus minion" conversation.')},
+      {nick:'radicchi',alias:'rad',
+       role:T('<b>Chief da GsW.</b> Me convidou pro Discord deles, e é quem aparece divulgando e recrutando dentro do Discord da Wynn Brasil.',
+              '<b>GsW chief.</b> Invited me to their Discord, and is the one seen advertising and recruiting inside the Wynn Brasil Discord.')},
+      {nick:'SoggyKwte',alias:'Kwte',
+       role:T('<b>Chief da GsW.</b> Estava na call em que o assunto do Ato XII foi comentado.',
+              '<b>GsW chief.</b> Was in the call where the Act XII matter was brought up.')},
+      {nick:'CloseRapha',alias:'Closerapha',
+       role:T('<b>Chief da GsW.</b> Primeiro contato da GsW com a WyBR. Tivemos um desentendimento já resolvido — por isso não exponho print dele. Me ensinou muito de build e loot spot.',
+              '<b>GsW chief.</b> First GsW contact with WyBR. We had a disagreement that is already settled — which is why I post no screenshot of it. He taught me a lot about builds and loot spots.')},
+      {nick:'victo',alias:'—',
+       role:T('GsW. Autor do "a gente tá aqui só pra captar os players" e do "temos várias alts aqui".',
+              'GsW. Author of "we are only here to capture the players" and "we have several alts here".')},
+      {nick:'Frame',alias:'—',
+       role:T('GsW. Responde ao griefing da thread de recrutamento no Ato XI.',
+              'GsW. Replies to the recruitment-thread griefing in Act XI.')},
+      {nick:'Skickle',alias:'—',
+       role:T('Membro da GsW em 2021. Estopim da minha saída. Hoje eu nem lembro quem é — e isso é parte do ponto.',
+              'GsW member in 2021. The trigger for my exit. Today I do not even remember who he is — and that is part of the point.')},
+      {nick:'67sugestivo67',alias:'—',
+       role:T('<b>Strategist da GsW</b> à época, 14 anos. Protagonista do Ato XII — o ato em que eu erro. <b>Depois foi banido da própria GsW.</b>',
+              '<b>GsW Strategist</b> at the time, 14 years old. Central to Act XII — the act where I am the one in the wrong. <b>He was later banned from GsW itself.</b>')}
+    ]},
+    {side:'wnbr',label:T('Wynn Brasil (WnBR) e Wynncraft Brazil (WyBR)','Wynn Brasil (WnBR) and Wynncraft Brazil (WyBR)'),people:[
+      {nick:'Mark_Wolf_ · MidnightSP_',alias:'—',role:T('Membros da WnBR. Aparecem no Ato IX.','WnBR members. They appear in Act IX.')},
+      {nick:'Nomineraven',alias:'—',role:T('Membro da nossa comunidade abordado por DM dentro do nosso próprio servidor.','A member of our community approached by DM inside our own server.')},
+      {nick:'YReaper___',alias:'—',role:T('Owner e cofundador da <b>WyBR</b>, a primeira guilda brasileira que eu ajudei a montar. <b>Nunca fez parte da WnBR</b> — parou de jogar depois que a guilda foi recriada.','Owner and co-founder of <b>WyBR</b>, the first Brazilian guild I helped build. <b>Never part of WnBR</b> — he stopped playing after the guild was recreated.')},
+      {nick:'ReformedLuxuoso',alias:'—',role:T('Cofundador da <b>WyBR</b>, banido da GsW por roubo — foi ao ver o nome dele que a GsW mudou de tom com a gente. <b>Banido da Wynn Brasil.</b>','<b>WyBR</b> co-founder, banned from GsW for stealing — it was on seeing his name that GsW changed its tone with us. <b>Banned from Wynn Brasil.</b>')},
+      {nick:'Mr_Pogu',alias:'—',role:T('<b>WyBR</b>, amigo do Luxuoso. Mesmo tipo de atrito de limite que eu já tinha tido em 2021. <b>Banido da Wynn Brasil.</b>','<b>WyBR</b>, friend of Luxuoso. Same kind of boundary friction I had already had in 2021. <b>Banned from Wynn Brasil.</b>')}
+    ]},
+    {side:'other',label:T('Fora das duas guildas','Outside both guilds'),people:[
+      {nick:'1nfinity',alias:'infinity1111',role:T('Eden (EDN), <b>ex-membro da GsW</b>. Autor do episódio do caractere bugado que apagava a tela.','Eden (EDN), <b>former GsW member</b>. Author of the broken-character episode that whited out the screen.')},
+      {nick:'xX_NoScope_Xx',alias:'—',role:T('Player sem relação prévia com a gente. Soltou o shout dos "fascist dictators" e disse ter feito <b>a pedido de um amigo</b> que se recusou a nomear.','Player with no prior connection to us. Dropped the "fascist dictators" shout and said he did it <b>on a friend’s request</b>, refusing to name them.')}
+    ]}
+  ],
+  guilds:[
+    ['GsW','Guardian of Wynn'],['WnBR','Wynn Brasil'],['WyBR','Wynncraft Brazil'],
+    ['EDN','Eden'],['DUDE','KongoBoys'],['ESI','Empire of Sindria']
+  ]
+},
+
+acts:[
+
+/* ── I ─────────────────────────────────────────────────── */
+{
+ id:'ato1',num:'I',yr:'2021',date:T('31 de março de 2021','March 31, 2021'),
+ tag:T('A saída','The exit'),
+ title:T('Eu saí. Não fui banido.','I left. I was not banned.'),
+ lede:T('Tudo começa aqui. Eu era membro da GsW e saí por conta própria — por uma brincadeira que passou do meu limite e, principalmente, pelo peso diferente que a regra teve pra mim e pra ele.',
+        'Everything starts here. I was a GsW member and I left on my own — over a joke that crossed my line and, above all, over how differently the rule weighed on me and on him.'),
+ body:[
+  T('O <b>Skickle</b> fez uma brincadeira comigo que eu não achei brincadeira. A gente não era amigo, nunca tinha trocado uma palavra. Hoje eu nem lembro direito quem ele era e, sinceramente, não me importo mais. O que me incomodou não foi a piada em si — foi ela ter vindo de alguém que nunca tinha falado comigo antes.',
+    '<b>Skickle</b> made a joke at me that I did not take as a joke. We were not friends, we had never exchanged a word. Today I barely remember who he was and, honestly, I no longer care. What bothered me was not the joke itself — it was that it came from someone who had never spoken to me before.'),
+  T('O que travou de vez foi a régua. Eu tinha acabado de tomar um <b>warn por zoar a ESI durante uma guerra</b>. Comigo foram rígidos. Com o Skickle, que quebrou a regra de respeito que está escrita na própria guilda, não foram. <em>Esse</em> era o ponto — não a piada.',
+    'What really locked it in was the double standard. I had just taken a <b>warning for trash-talking ESI during a war</b>. With me they were strict. With Skickle, who broke the respect rule written in the guild’s own rules, they were not. <em>That</em> was the point — not the joke.'),
+  T('Eu não fui expulso e não fui banido: eu digitei <b>confirm</b> e saí, da guilda e do Discord. Fui pra <b>Eden (EDN)</b> e continuei guerreando. Era a época em que Fatal + Morph ainda era usável.',
+    'I was not kicked and I was not banned: I typed <b>confirm</b> and left, the guild and the Discord. I went to <b>Eden (EDN)</b> and kept warring. That was back when Fatal + Morph was still usable.'),
+  T('Oito minutos depois de eu sair, o <b>Bigouslino</b> me chamou. A conversa inteira está abaixo. Ela é importante por dois motivos: ele reconhece publicamente que ninguém é obrigado a compactuar com a zoeira, e no fim ele mesmo admite que <em>"skickle é um caso complicado"</em>.',
+    'Eight minutes after I left, <b>Bigouslino</b> messaged me. The whole conversation is below. It matters for two reasons: he publicly acknowledges that nobody is obliged to go along with the jokes, and in the end he himself admits that <em>"skickle is a complicated case"</em>.')
+ ],
+ evidence:[{
+  label:T('A saída e a conversa com o Bigouslino — 31/03/2021','The exit and the conversation with Bigouslino — 31/03/2021'),
+  slides:[
+   {img:'saida', cap:T('Discord da GsW, 14:12. Eu me despeço no canal e o jogo confirma: <b>"You have left Guardian of Wynn!"</b> Logo abaixo, o Bigouslino avisa a guilda.',
+                       'GsW Discord, 14:12. I say goodbye in the channel and the game confirms: <b>"You have left Guardian of Wynn!"</b> Right below, Bigouslino addresses the guild.'),
+    lines:[
+     L('B_Attomic','me','Vlw ai a todos','Thanks, everyone'),
+     L('[jogo]','other','WARNING — You will need to be re-invited to rejoin the guild. Are you sure you want to leave? To leave the guild Guardian of Wynn type "confirm" (or cancel). You have left Guardian of Wynn!','WARNING — You will need to be re-invited to rejoin the guild. Are you sure you want to leave? To leave the guild Guardian of Wynn type "confirm" (or cancel). You have left Guardian of Wynn!','sys'),
+     L('Bigouslino','gsw','pessoal acho meio desnecessário a atitude dele, mas assim visto esse ocorrido talvez eu tenha que avisar.','guys I think his attitude was kind of unnecessary, but given what happened maybe I have to say something.'),
+     L('Bigouslino','gsw','Tem um pessoal da guilda que gosta bastante de zoas os outros e etc','There are people in the guild who really like messing with others and so on'),
+     L('Bigouslino','gsw','E sim, ngm é obrigado a gostar dessa zoeira e compactuar','And yes, nobody is obliged to like that joking around or go along with it'),
+     L('Bigouslino','gsw','então se você não se sente confortável, não tome essa atitude por favor fale conosco, a gente vai resolver tudo na conversa, principalmente se um de nós não conseguir enxergar o que está acontecendo, visto que como a maioria da gente se envolve também com as brincadeiras as vezes e acaba deixando a gente cego.','so if you are not comfortable, do not do what he did, please talk to us, we will sort everything out by talking, especially if one of us cannot see what is going on, since most of us join in on the jokes too and that ends up blinding us.')
+    ]},
+   {img:'bigo1', cap:T('DM com o Bigouslino, 14:18. Ele pede desculpas — e eu respondo com o que realmente me incomodava: a regra não valeu igual pros dois.',
+                       'DM with Bigouslino, 14:18. He apologises — and I answer with what actually bothered me: the rule did not apply equally to both of us.'),
+    lines:[
+     L('Bigo','gsw','ó se liga, vou falar só uma coisa. Eu sei que nem todo mundo gosta de brincadeiras e se sente confortável, principalmente pessoas mais sensíveis, por um lado eu achei desnecessário o que vc fez mas por outro eu sei que vc ta certo tbm, afinal nem todo mundo tem o senso de humor que alguns da guilda tem, então to pedindo dsclp caso vc tenha ficado ofendido','look, let me just say one thing. I know not everyone likes joking around or feels comfortable with it, especially more sensitive people. On one hand I thought what you did was unnecessary, but on the other I know you are right too, after all not everyone has the sense of humour some people in the guild have, so I am apologising in case you got offended'),
+     L('Bigo','gsw','não só pelo skickle mas tbm por todas vzs q vc n se sentiu confortável','not just about skickle but about every time you did not feel comfortable'),
+     L('Bigo','gsw','como aquele dia la da esi','like that day with esi'),
+     L('Bigo','gsw','e pela forma q eu te expliquei la no chat principal','and the way I explained it to you in the main chat'),
+     L('Bigo','gsw','Boa gameplay se vc for continuar jogando','Good gameplay if you keep playing'),
+     L('Bigo','gsw','um dia nois ainda vem x1 no xadrez pra tu me da outro pastor KKKKKKK','one day we will 1v1 in chess again so you can scholar’s-mate me KKKKKKK'),
+     L('B_Attomic','me','Cara, tu claramente concorda com o Skickle e para mim tu ta agindo igual um hipocrita','Man, you clearly agree with Skickle and to me you are acting like a hypocrite'),
+     L('B_Attomic','me','Ele respondeu que eu tenho que PEDIR POR RESPEITO','He replied that I have to ASK FOR RESPECT'),
+     L('B_Attomic','me','E msm assim, n foi kickado, sendo que nas regras, está escrito para respeitar','And even so he was not kicked, when the rules literally say to be respectful'),
+     L('B_Attomic','me','Logo a regra de vocês funcionam, para quem vocês querem','So your rule works only for whoever you want it to'),
+     L('B_Attomic','me','Isso ao meu ver é hipocrisia, e eu não concordo com isso','In my view that is hypocrisy, and I do not agree with it'),
+     L('B_Attomic','me','Já citei exemplos de outras vezes que aconteceu','I already gave examples of other times it happened'),
+     L('Bigo','gsw','Mano vc entre seus amigos nunca se xingam?','Dude, do you and your friends never curse at each other?'),
+     L('B_Attomic','me','Vocês me disseram sobre zuar clan, nunca mais aconteceu','You told me off about trash-talking a clan, and it never happened again')
+    ]},
+   {img:'bigo2', cap:T('14:21 — o centro da coisa. Se a guilda inteira "se considera muito próxima", isso vale de mão dupla ou só quando convém?',
+                       '14:21 — the heart of it. If the whole guild "considers itself very close", does that cut both ways or only when convenient?'),
+    lines:[
+     L('B_Attomic','me','Ai que ta','That is exactly it'),
+     L('B_Attomic','me','Eu sou amigo do Scickle?','Am I Skickle’s friend?'),
+     L('Bigo','gsw','vc é da guilda todo mundo la se considera muito próximo','you are in the guild, everyone there considers themselves very close'),
+     L('Bigo','gsw','todo mundo qja entrou tem esse sentimento','everyone who has joined feels that way'),
+     L('Bigo','gsw','pode perguntar para qlqr um','you can ask anyone'),
+     L('B_Attomic','me','Eu considerava','I used to'),
+     L('Bigo','gsw','agr vc foi diferenciado e tudo bem','now you got singled out and that is fine'),
+     L('Bigo','gsw','existe várias pessoas','there are all kinds of people')
+    ]},
+   {img:'bigo3', cap:T('14:23 — eu explico exatamente o que quebrou, e ele fecha admitindo: <b>"skickle é um caso complicado"</b>. É a mesma pessoa que, minutos antes, achou minha saída desnecessária.',
+                       '14:23 — I spell out exactly what broke, and he closes by admitting: <b>"skickle is a complicated case"</b>. Same person who, minutes earlier, found my exit unnecessary.'),
+    lines:[
+     L('Bigo','gsw','Mano oq eu n tendi foi oq aconteceu, foi pq','Dude what I did not get was what actually happened, why was it'),
+     L('Bigo','gsw','ele mandou o vsf?','did he tell you to f off?'),
+     L('B_Attomic','me','o "Eu tenho que pedir por respeito?" e ele respondeu "sim"','the "Do I have to ask for respect?" and he answered "yes"'),
+     L('B_Attomic','me','me tiltou','that tilted me'),
+     L('B_Attomic','me','E isso quebra as regras','And that breaks the rules'),
+     L('B_Attomic','me','Você NÃO ter kickado ele, ou pelo menos ter dado um aviso formal','You NOT kicking him, or at least giving a formal warning'),
+     L('B_Attomic','me','Tbm me tiltou','Tilted me too'),
+     L('B_Attomic','me','Pelo fato de isso ser hipocrisia','Because that is hypocrisy'),
+     L('B_Attomic','me','Logo to fora','So I am out'),
+     L('B_Attomic','me','Isso eu considero toxicidade','I consider that toxicity'),
+     L('B_Attomic','me','Desprezando a minha falta de conhecimento pelo jogo','Looking down on my lack of knowledge about the game'),
+     L('B_Attomic','me','eu NÃO TENHO que PEDIR por RESPEITO','I do NOT HAVE to ASK for RESPECT'),
+     L('Bigo','gsw','não tem','you do not'),
+     L('Bigo','gsw','mas ele falou zombando da sua cara pq vc tava tiltado com o vsf mas sim tu ta certo','but he was mocking you because you were tilted about the f-off, but yeah you are right'),
+     L('Bigo','gsw','skickle é um caso complicado','skickle is a complicated case'),
+     L('Bigo','gsw','so vim esclarecer as coisas','I just came to clear things up'),
+     L('Bigo','gsw','apesar de eu concordo com td q vc falou achei que faltou um pouco de "levar na brincadeira" do seu lado tbm','even though I agree with everything you said, I think a bit of "taking it as a joke" was missing on your side too')
+    ]}
+  ]
+ }]
+},
+
+/* ── II ────────────────────────────────────────────────── */
+{
+ id:'ato2',num:'II',yr:'2021—2024',date:T('Três anos e três meses','Three years and three months'),
+ tag:T('O intervalo','The gap'),
+ title:T('Três anos sem nenhum contato.','Three years without any contact.'),
+ lede:T('Pra mim o episódio de 2021 tinha morrido ali. Troquei de guilda, continuei jogando e não falei com ninguém da GsW até 2024. Isso importa, porque a versão que circula é a de que eu carrego mágoa desde 2021.',
+        'For me the 2021 episode had died right there. I changed guilds, kept playing, and did not speak to anyone from GsW until 2024. This matters, because the version going around is that I have been holding a grudge since 2021.'),
+ body:[
+  T('Fui pra <b>Eden (EDN)</b> e fiquei. Quando a Eden esvaziou, passei um tempo na <b>KongoBoys (DUDE)</b>. Nada disso tem a ver com a GsW — é só o que eu estava fazendo da minha vida no jogo.',
+    'I went to <b>Eden (EDN)</b> and stayed. When Eden went quiet, I spent some time in <b>KongoBoys (DUDE)</b>. None of this has anything to do with GsW — it is just what I was doing with my time in the game.')
+ ],
+ evidence:[]
+},
+
+/* ── III ───────────────────────────────────────────────── */
+{
+ id:'ato3',num:'III',yr:'2024',date:T('12 de julho de 2024','July 12, 2024'),
+ tag:T('A WyBR nasce','WyBR is born'),
+ title:T('Uma guilda brasileira nova — e o primeiro contato foi bom.','A new Brazilian guild — and the first contact was friendly.'),
+ lede:T('Encontrei dois brasileiros dispostos a montar uma guilda e a gente criou a WyBR. Registro isso porque a GsW chegou primeiro em paz: o CloseRapha veio na nossa comunidade dizer que o pessoal já sabia de nós, sem problema nenhum em existir outra guilda BR.',
+        'I found two Brazilians willing to build a guild and we created WyBR. I record this because GsW came in peace first: CloseRapha showed up in our community to say people already knew about us, with no problem at all with another BR guild existing.'),
+ body:[
+  T('Os dois eram o <b>YReaper___</b> e o <b>ReformedLuxuoso</b>. Criamos a <b>WyBR — Wynncraft Brazil</b> em <b>12/07/2024</b>, com o YReaper de owner e eu e o Luxuoso como chiefs. Peguei o trabalho de guilda no braço: XP grind, recrutamento, criação da comunidade, builds. Do zero mesmo.',
+    'The two were <b>YReaper___</b> and <b>ReformedLuxuoso</b>. We created <b>WyBR — Wynncraft Brazil</b> on <b>12/07/2024</b>, with YReaper as owner and me and Luxuoso as chiefs. I took the guild work on my back: XP grind, recruitment, community building, builds. From absolute zero.'),
+  T('E aí vem a parte que eu faço questão de deixar registrada: <b>a primeira pessoa a digitar qualquer coisa no chat do nosso Discord foi o CloseRapha, da GsW</b>. Um GIF de "hello chat", às 16:29 do mesmo dia da criação. Não foi hostilidade, não foi espionagem — foi um cara sendo simpático.',
+    'And here comes the part I make a point of recording: <b>the first person to type anything in our Discord chat was CloseRapha, from GsW</b>. A "hello chat" GIF, at 16:29 on the same day the guild was created. It was not hostility, it was not spying — it was a guy being friendly.'),
+  T('Ele comentou, numa boa, que o pessoal da GsW já sabia de nós. Zero problema em existir outra guilda brasileira. <em>Foi genuinamente cordial — e é por isso que este ato existe separado do próximo.</em>',
+    'He mentioned, in a friendly way, that GsW already knew about us. Zero problem with another Brazilian guild existing. <em>It was genuinely cordial — and that is why this act stands apart from the next one.</em>')
+ ],
+ evidence:[{
+  label:T('Discord da WyBR, dia da criação — 12/07/2024','WyBR Discord, founding day — 12/07/2024'),
+  slides:[
+   {img:'primeiro',cap:T('A primeira mensagem do servidor. O carimbo de data confirma <b>12/07/2024</b>, e quem digitou primeiro foi um membro da <b>GsW</b> — de boa, com um meme.',
+                         'The server’s first message. The timestamp confirms <b>12/07/2024</b>, and the first person to type was a <b>GsW</b> member — friendly, with a meme.'),
+    lines:[
+     L('[servidor]','other','12 de julho de 2024 — hiro. pulou para o servidor · 16:28','12 de julho de 2024 — hiro. pulou para o servidor · 16:28','sys'),
+     L('[servidor]','other','Todos são bem-vindos Closerapha! · 16:28','Todos são bem-vindos Closerapha! · 16:28','sys'),
+     L('Closerapha','gsw','[GIF] hello chat','[GIF] hello chat')
+    ]}
+  ]
+ }]
+},
+
+/* ── IV ────────────────────────────────────────────────── */
+{
+ id:'ato4',num:'IV',yr:'2024',date:T('Julho de 2024','July 2024'),
+ tag:T('O tom muda','The tone changes'),
+ title:T('Até verem quem estava com a gente.','Until they saw who was with us.'),
+ lede:T('O tom mudou quando viram o nome do ReformedLuxuoso na nossa lista — ele tinha sido banido da GsW por roubo. A partir dali começaram as farpas, e elas não pararam mais até 2026.',
+        'The tone changed when they saw ReformedLuxuoso’s name on our roster — he had been banned from GsW for stealing. From there the jabs began, and they did not stop until 2026.'),
+ body:[
+  T('Primeiro: <b>shouts soltos por cima dos nossos</b>, atrapalhando o recrutamento, sempre. Esse é o comportamento que volta em todos os atos seguintes deste documento — em 2025, e de novo em 2026 assim que a gente voltou a jogar.',
+    'First: <b>shouts fired right on top of ours</b>, breaking our recruitment, every time. This is the behaviour that comes back in every following act of this document — in 2025, and again in 2026 as soon as we came back to the game.'),
+  T('Segundo: toda vez que a gente pegava um território de FFA — e a gente era noob mesmo — eles vinham em cima só de sacanagem. <em>Essa parte eu entendo. É resenha de guerra e eu faria o mesmo.</em> Deixo registrado exatamente porque não é disso que eu estou reclamando.',
+    'Second: whenever we took an FFA territory — and we were genuinely noobs — they came down on us purely to mess with us. <em>That part I understand. It is war banter and I would have done the same.</em> I record it precisely because this is not what I am complaining about.'),
+  T('E teve o episódio do <b>1nfinity</b>, que soltou um caractere bugado que deixava a tela branca. Eu tinha acabado de dar um shout: "ai paizão", "segura essa flashbang" — e a tela apagou. Eu ri pra caralho. Reportei, mas ri.',
+    'And there was the <b>1nfinity</b> episode, where he sent a broken character that whited out your screen. I had just shouted "there you go boss", "hold this flashbang" — and the screen went blank. I laughed my ass off. I reported it, but I laughed.'),
+  T('O motivo eu não preciso deduzir: o <b>Volkzz101</b> disse com todas as letras, numa conversa bem posterior. Segundo ele, o problema nunca fui eu — <em>"você não é um luxuoso ou outros bozo da vida"</em> — e sim quem estava na lista: <em>"era literalmente a nata de ban da gsw"</em>. Ele cita o roubo de item do Luxuoso e membros banidos por homofobia.',
+    'I do not need to guess the reason: <b>Volkzz101</b> spelled it out, in a much later conversation. According to him, the problem was never me — <em>"you are not a luxuoso or one of those other clowns"</em> — but who was on the roster: <em>"it was literally gsw’s ban pile"</em>. He cites Luxuoso stealing guild items and members banned for homophobia.'),
+  T('Eu não contesto isso. <b>Concordo</b> — tanto que os dois nomes que ele cita eu mesmo bani, e é exatamente o que acontece no ato seguinte. O que eu contesto é o resto: pagar por isso com shout em cima do recrutamento durante dois anos, mesmo depois de eu ter tirado essas pessoas de perto.',
+    'I do not dispute that. <b>I agree</b> — so much so that the two names he cites are people I banned myself, which is exactly what happens in the next act. What I dispute is the rest: paying for it with shouts over our recruitment for two years, even after I had removed those people.')
+ ],
+ evidence:[{
+  label:T('Volkzz101 explicando o motivo, em conversa posterior','Volkzz101 explaining the reason, in a later conversation'),
+  slides:[
+   {img:'motivo1',cap:T('20:18. Ele separa explicitamente eu do resto da lista — e diz o que a GsW via quando olhava pra WyBR.',
+                        '20:18. He explicitly separates me from the rest of the roster — and says what GsW saw when it looked at WyBR.'),
+    lines:[
+     L('Volkzz','gsw','É que você não é um luxuoso ou outros bozo da vida, tirando aquela treta com o closerapha, mas o povo que tava na tua guilda... Era literalmente a nata de ban da gsw por fazer muita merda','It is that you are not a luxuoso or one of those other clowns, apart from that mess with closerapha, but the people who were in your guild... It was literally gsw’s ban pile for doing a lot of dumb stuff')
+    ]},
+   {img:'motivo2',cap:T('20:19. Ele reconhece que o Luxuoso trata todo mundo bem — e mesmo assim não anula o roubo. Eu confirmo na sequência que o Pogu também levou ban do <b>meu</b> lado.',
+                        '20:19. He acknowledges Luxuoso treats everyone well — and that still does not cancel out the theft. I confirm right after that Pogu was banned on <b>my</b> side too.'),
+    lines:[
+     L('Volkzz','gsw','Ele trata todo mundo bem, até eu falo com ele, sempre perguntava de build','He treats everyone well, I even talk to him, he was always asking about builds'),
+     L('Volkzz','gsw','Mas N anula ele ter roubado item da guilda','But that does not cancel out him stealing guild items'),
+     L('Volkzz','gsw','Ou outros membros daquela sua guilda antiga de terem sido banidos por homofobia e outras','Or other members of that old guild of yours having been banned for homophobia and so on'),
+     L('B_Attomic','me','O Pagu?','Pagu?'),
+     L('B_Attomic','me','Ele foi de ban aqui tbm','He got banned here too')
+    ]}
+  ]
+ }]
+},
+
+/* ── V ─────────────────────────────────────────────────── */
+{
+ id:'ato5',num:'V',yr:'2024',date:T('24 de julho de 2024','July 24, 2024'),
+ tag:T('WyBR → WnBR','WyBR → WnBR'),
+ title:T('Doze dias depois, eu refundei tudo.','Twelve days later, I refounded everything.'),
+ lede:T('O problema que me fez explodir não era a GsW — era interno, e era o mesmo de 2021. Em vez de resolver conversando, eu saí da WyBR, criei a WnBR numa conta alt, bani os dois do Discord e puxei todo mundo. Não é bonito. É o que aconteceu.',
+        'The problem that made me snap was not GsW — it was internal, and it was the same as 2021. Instead of solving it by talking, I left WyBR, created WnBR on an alt account, banned the two of them from the Discord and pulled everyone over. It is not pretty. It is what happened.'),
+ body:[
+  T('Ao mesmo tempo em que a GsW azedava por fora, por dentro eu estava tendo problema com o <b>Luxuoso</b> e um amigo dele, o <b>Mr_Pogu</b> — <b>pelo mesmo motivo de 2021</b>. Piadas que passavam do meu limite, ao ponto de eu ficar me perguntando se o cara era de fato aquilo que falava ou se estava só brincando.',
+    'At the same time GsW was souring on the outside, on the inside I was having trouble with <b>Luxuoso</b> and a friend of his, <b>Mr_Pogu</b> — <b>for the same reason as 2021</b>. Jokes that went past my line, to the point where I started wondering whether the guy actually meant what he was saying or was just kidding.'),
+  T('Aí eu fiz a doidera. Saí da <b>WyBR</b> e criei a <b>WnBR — Wynn Brasil</b> em <b>24/07/2024</b>, numa conta alt. Como eu era o owner do Discord, bani o <b>ReformedLuxuoso</b> e o <b>Mr_Pogu</b> — e foi fácil puxar os membros, porque a comunidade era a mesma. <em>Detalhe: eu odeio o título "owner".</em>',
+    'So I did the reckless thing. I left <b>WyBR</b> and created <b>WnBR — Wynn Brasil</b> on <b>24/07/2024</b>, on an alt account. Since I was the Discord owner, I banned <b>ReformedLuxuoso</b> and <b>Mr_Pogu</b> — and pulling the members over was easy, because the community was the same. <em>Side note: I hate the "owner" title.</em>'),
+  T('<b>Doze dias.</b> É esse o tempo de vida inteiro da WyBR — de 12 a 24 de julho de 2024. Ela hoje nem existe mais. Todo o atrito do ato anterior aconteceu dentro dessa janela, e a guilda que a GsW encara desde então é a WnBR.',
+    '<b>Twelve days.</b> That is the entire lifespan of WyBR — from 12 to 24 July 2024. It does not even exist anymore. All the friction in the previous act happened inside that window, and the guild GsW has been facing ever since is WnBR.'),
+  T('Depois disso eu também tive um desentendimento de limites com o <b>CloseRapha</b>, que participava ativamente da comunidade. <b>Não vou expor print dele</b>, porque a gente já se resolveu. Ele nunca me deu dor de cabeça — pelo contrário, me ensinou muito sobre build e loot spot, na época em que grind de mythic em mob totem prestava. Saudade das Avicia em Corkus.',
+    'After that I also had a boundary disagreement with <b>CloseRapha</b>, who was an active part of the community. <b>I will not post any screenshot of him</b>, because we have already settled it. He never gave me any trouble — quite the opposite, he taught me a lot about builds and loot spots, back when mythic grinding on totem mobs was worth it. I miss the Avicia runs in Corkus.'),
+  T('Guardem este ato. Ele explica por que, meses depois, a palavra <b>"fork"</b> apareceu na conversa: a maioria da WnBR já tinha passado pela GsW em algum momento, e <b>do meu ponto de vista era isso que incomodava eles</b> — tratavam a gente como se tivéssemos saído de lá pra montar a nossa.',
+    'Keep this act in mind. It explains why, months later, the word <b>"fork"</b> came up: most of WnBR had passed through GsW at some point, and <b>from my point of view that is what bothered them</b> — they treated us as if we had walked out of there to start our own.')
+ ],
+ evidence:[]
+},
+
+/* ── VI ────────────────────────────────────────────────── */
+{
+ id:'ato6',num:'VI',yr:'2025',date:T('11 de janeiro de 2025','January 11, 2025'),
+ tag:T('A fusão','The merge'),
+ title:T('"Gigante contra minion."','"A giant against a minion."'),
+ lede:T('O iMonoYasuo ofereceu fundir as guildas, e faço questão de dizer isto primeiro: <b>a oferta foi educada</b>. Longa, explicada, com cargo de HR na mesa e "caso não queira aceitar, respeitamos sua decisão". Eu recusei. A conversa que veio depois, com o Volkzz101, é que é o retrato do problema.',
+        'iMonoYasuo offered to merge the guilds, and I want to say this first: <b>the offer was courteous</b>. Long, explained, with an HR rank on the table and "if you do not want to accept, we respect your decision". I declined. It is the conversation that followed, with Volkzz101, that is the portrait of the problem.'),
+ body:[
+  T('A oferta inteira está abaixo, sem corte. Ele conta que os HR da GsW estavam discutindo as duas guildas, que o que existe de ruim entre nós é do passado e envolve <em>"pessoas que nem sequer jogam mais"</em>, e propõe que a WnBR se junte à GsW — eu entrando direto como HR, podendo levar quem eu quisesse e sem precisar deletar a guilda. É uma proposta séria, e eu não vou fingir que não foi.',
+    'The full offer is below, uncut. He explains that GsW’s HR had been discussing the two guilds, that whatever is bad between us is in the past and involves <em>"people who do not even play anymore"</em>, and proposes that WnBR join GsW — me coming in directly as HR, free to bring whoever I wanted, without having to delete the guild. It is a serious proposal, and I am not going to pretend otherwise.'),
+  T('Minha resposta foi curta e é a mesma até hoje: <b>"Eu tenho banidos da Wynn Brasil na GsW"</b> e <b>"não tenho interesse em unificar"</b>. Não é orgulho — é que fundir significaria conviver com gente que eu tinha acabado de tirar de perto, e o Ato V explica por quê.',
+    'My answer was short and it is still the same today: <b>"I have people banned from Wynn Brasil sitting in GsW"</b> and <b>"I am not interested in unifying"</b>. It is not pride — merging would mean living with people I had just removed, and Act V explains why.'),
+  T('E tinha o momento. A essa altura eles mandavam <b>shout por cima dos nossos recrutamentos toda hora</b>, e quando a gente ia pra uma guerra FFA fazer o mínimo, tinha eles dando <b>dry snipe</b> e ainda soltando shout provocando: <em>"Defenda melhor o território aí Wynn Brasil"</em>. Parabéns — deram dry snipe em um FFA. Eu já estava incomodado com o comportamento hostil de alguns em específico.',
+    'And there was the timing. By then they were <b>shouting over our recruitment constantly</b>, and when we went into an FFA war to do the bare minimum, there they were <b>dry sniping</b> and still shouting to provoke: <em>"Defend your territory better, Wynn Brasil"</em>. Congratulations — you dry sniped an FFA. I was already fed up with the hostile behaviour of a few specific people.'),
+  T('Fui eu quem trouxe a palavra <b>"fork"</b> pra mesa — não porque me incomodasse, mas porque, do meu ponto de vista, era isso que incomodava <em>eles</em>: a maioria da WnBR já tinha passado pela GsW, e eles tratavam a gente como se tivéssemos saído de lá pra montar a nossa. Eu estava justamente negando isso. Do outro lado veio a palavra <b>"segregação"</b> — como se manter duas guildas brasileiras fosse separatismo.',
+    'I was the one who brought the word <b>"fork"</b> to the table — not because it bothered me, but because, from my point of view, that is what bothered <em>them</em>: most of WnBR had passed through GsW, and they treated us as if we had walked out of there to start our own. I was denying exactly that. From the other side came the word <b>"segregation"</b> — as if keeping two Brazilian guilds was separatism.'),
+  T('E então veio a frase que resume cinco anos: <em>"não existe comparação quando você pega um gigante contra um minion"</em>. Fusão não é convite entre iguais quando um dos lados já decidiu qual dos dois é o minion.',
+    'And then came the line that sums up five years: <em>"there is no comparison when you take a giant against a minion"</em>. A merge is not an invitation between equals when one side has already decided which of the two is the minion.'),
+  T('A conversa termina com ele dizendo que morre ali a vontade de incluir a gente nas wars e na comunidade — e eu respondendo que ia continuar incluindo a GsW no <b>meu</b> Discord, porque a gente nunca limitou a comunidade à guilda. Isso vai ser importante lá no Ato XIII.',
+    'The conversation ends with him saying that any will to include us in wars and in their community dies right there — and me replying that I would keep including GsW in <b>my</b> Discord, because we never limited the community to the guild. That will matter in Act XIII.')
+ ],
+ evidence:[
+ {label:T('A oferta — DM do iMonoYasuo, 13:00','The offer — DM from iMonoYasuo, 13:00'),
+  slides:[
+   {img:'oferta',cap:T('A proposta na íntegra e a minha recusa, 49 minutos depois. Deixo o texto dele inteiro de propósito: é a versão mais generosa da GsW neste documento.',
+                       'The full proposal and my refusal, 49 minutes later. I leave his text complete on purpose: it is the most generous version of GsW in this document.'),
+    lines:[
+     L('iMonoYasuo','gsw','Então, meu mano Attomic. Estava tendo uma discussão sobre a guilda com os HR da GsW, discussão essa que eu só fiquei sabendo há poucos minutos. Eles estavam conversando sobre a sua guilda e a minha, discutindo sobre algumas coisas do passado e principalmente sobre hoje em dia. E o foco principal é de como todos nós mudamos durante esse tempo e a única coisa que existe de "ruim" entre nós é algo totalmente do passado, relacionado a pessoas que nem sequer jogam mais.','So, my man Attomic. There was a discussion about the guild with GsW’s HR, one I only found out about a few minutes ago. They were talking about your guild and mine, discussing some things from the past and mainly about the present day. And the main focus is how we have all changed in that time, and the only "bad" thing between us is entirely in the past, involving people who do not even play anymore.'),
+     L('iMonoYasuo','gsw','O ponto dessa discussão ter sido gerada é que basicamente nós admiramos a ideia de vocês (Wynnbr) se juntarem conosco (GsW), porque achamos que isso pode beneficiar ambas as guildas, tanto em questão de conhecimento geral do game, atividade, etc.','The point of that discussion is that we basically like the idea of you (Wynnbr) joining us (GsW), because we think it can benefit both guilds, in terms of general game knowledge, activity, and so on.'),
+     L('iMonoYasuo','gsw','Você poderá vir já com o cargo de HR e terá a mesma voz de todos do mesmo cargo e também poderá trazer outros membros dos seus que deseja. Não precisa deletar a sua guilda, pode manter ela caso um dia queira voltar. Caso não queira aceitar, respeitamos sua decisão sem nenhum problema. Se tiver algum ponto que queira saber, pode perguntar também','You could come straight in with the HR rank and have the same voice as everyone at that rank, and you could also bring whichever of your members you want. You do not need to delete your guild, you can keep it in case you ever want to go back. If you do not want to accept, we respect your decision with no problem at all. If there is anything you want to know, feel free to ask'),
+     L('iMonoYasuo','gsw','Desculpa a demora pra digitar, fiquei pensando como pôr tudo em uma mensagem só!','Sorry for taking so long to type, I was working out how to put it all in one message!'),
+     L('B_Attomic','me','Oq seria HR?','What is HR?'),
+     L('iMonoYasuo','gsw','High Ranked','High Ranked'),
+     L('iMonoYasuo','gsw','Strat e chief, basicamente','Strat and chief, basically'),
+     L('B_Attomic','me','Ah sim, mas já falei com o Volkzz anteriormente','Ah right, but I already talked to Volkzz earlier'),
+     L('B_Attomic','me','Eu tenho banidos da Wynn Brasil na GsW','I have people banned from Wynn Brasil sitting in GsW'),
+     L('B_Attomic','me','E não tenho interesse em unificar','And I am not interested in unifying')
+    ]}
+  ]},
+ {label:T('DM Volkzz101 ⟷ Fatal_Addicted — 11/01/2025','DM Volkzz101 ⟷ Fatal_Addicted — 11/01/2025'),
+  slides:[
+   {img:'fusao1',cap:T('De onde veio a ideia da fusão, e a primeira fricção de vocabulário: "segregação" contra "fork".',
+                       'Where the merge idea came from, and the first clash of vocabulary: "segregation" versus "fork".'),
+    lines:[
+     L('Volkzz101','gsw','mas pq a pergunta?','but why the question?'),
+     L('Fatal_Addicted','me','o imonoyasuo ofereceu a fusão','imonoyasuo offered the merge'),
+     L('Fatal_Addicted','me','só pra contextualizar oq eu tava explicando pra ele','just to give context on what I was explaining to him'),
+     L('Volkzz101','gsw','essa ideia aí a princípio começou comigo e com o rad, mas só o radicchi levou pra frente','that idea originally started with me and rad, but only radicchi took it forward'),
+     L('Fatal_Addicted','me','bom, aparentemente mais chiefs concordaram','well, apparently more chiefs agreed'),
+     L('Volkzz101','gsw','pelo menos pra mim era só pela razão de n ter motivo pra ter a segregação de guild, sendo que aqui tem espaço, sempre 12 ou mais gente em call jogando e aí o povo bem menos, no geral','at least for me it was just because there is no reason for guild segregation, since here there is room, always 12 or more people in call playing, and over there far fewer people, generally'),
+     L('Fatal_Addicted','me','segregação... Nós não somos um "fork" seus não po','segregation... We are not a "fork" of yours, come on'),
+     L('Volkzz101','gsw','como assim "fork"? n é disso q to falando','what do you mean "fork"? that is not what I am talking about'),
+     L('Fatal_Addicted','me','a WnBR não surgiu da GsW','WnBR did not come out of GsW')
+    ]},
+   {img:'fusao2',cap:T('Eu listo o que a gente estava construindo. A resposta é a frase do gigante e do minion.',
+                       'I list what we were building. The answer is the giant-and-minion line.'),
+    lines:[
+     L('Fatal_Addicted','me','Eu sei que estamos desempenhando bem, pq vocês (guilda de 8 anos) ficam se comparando com uma guilda de 6 meses','I know we are doing well, because you (an 8-year-old guild) keep comparing yourselves to a 6-month-old guild'),
+     L('Fatal_Addicted','me','Jaja vamos ter nossos times pra guerra também, e uma ilha bonitinha','Soon we will have our own war teams too, and a nice little island'),
+     L('Fatal_Addicted','me','Tem aparecido uma galera que joga bem','People who play well have been showing up'),
+     L('Fatal_Addicted','me','nosso bot ta ficando bom também, tem melhorado aos pouquinhos','our bot is getting good too, improving bit by bit'),
+     L('Fatal_Addicted','me','ao poucos estamos conquistando nosso espaço na comunidade','little by little we are earning our space in the community'),
+     L('Volkzz101','gsw','Primeiro, a gente não fica se comparando com a Wynn BR pq simplesmente n existe comparação quando vc pega um gigante contra um minion, com todo respeito, o convite foi simplesmente para fortalecer uma única guild brasileira incluindo vcs','First, we do not compare ourselves to Wynn BR because there simply is no comparison when you take a giant against a minion, with all due respect, the invitation was simply to strengthen a single Brazilian guild, including you')
+    ]},
+   {img:'fusao3',cap:T('Ele diz que precisou falar daquele jeito. Eu respondo que crescimento de guilda não é ameaça a ninguém — e conto que eu mesmo já tinha proposto as duas lado a lado.',
+                       'He says he had to speak that way. I answer that guild growth is nobody’s threat — and mention that I had already proposed the two side by side.'),
+    lines:[
+     L('Volkzz101','gsw','sim, eu precisei falar desse jeito pq vc simplesmente enxerga como se a gente se sentisse intimidado pelo crescimento da guild de vcs, o que simplesmente não nos afeta','yes, I had to speak that way because you act as if we felt intimidated by your guild’s growth, which simply does not affect us'),
+     L('Fatal_Addicted','me','intimidado? pq eu ia querer isso? tem muito mato a ser explorado ai, WnBR crescer não muda nada para vocês','intimidated? why would I want that? there is plenty of ground to cover out there, WnBR growing changes nothing for you'),
+     L('Fatal_Addicted','me','Tanto que falei agora pro iMonoYasuo que queria ver as guildas lado a lado pegando território','So much so that I just told iMonoYasuo I wanted to see the guilds side by side taking territory')
+    ]},
+   {img:'fusao4',cap:T('O fecho. Ele encerra a vontade de incluir a gente; eu digo que sigo incluindo a GsW no meu Discord, porque comunidade nunca foi só a guilda.',
+                       'The closing. He ends any will to include us; I say I will keep including GsW in my Discord, because the community was never just the guild.'),
+    lines:[
+     L('Volkzz101','gsw','segurar claim provavelmente nunca vai acontecer mais pra gente, os benefícios do jogo são quase inexistentes depois de tanto nerf, e a gente atualmente é a guilda referência de ataque','holding claims will probably never happen for us again, the game benefits are almost nonexistent after so many nerfs, and right now we are the reference guild for attacking'),
+     L('Fatal_Addicted','me','nos queremos e vamos ainda','we want to and we still will'),
+     L('Volkzz101','gsw','Enfim, morre aqui minha vontade de incluir vcs nas wars e comunidade daqui','Anyway, my will to include you in the wars and community here dies right here'),
+     L('Fatal_Addicted','me','Tudo bem meu rei, eu tinha dito que não tinha interesse por conta de comportamento','That is fine my man, I had already said I was not interested because of behaviour'),
+     L('Volkzz101','gsw','por orgulho tb','out of pride too'),
+     L('Fatal_Addicted','me','eu vou continuar com meus planos de incluir a GsW lá no Discord, pq não limitamos a guilda somente','I am going ahead with my plan to include GsW in the Discord, because we do not limit it to the guild only')
+    ]}
+  ]
+ }]
+},
+
+/* ── VI ────────────────────────────────────────────────── */
+{
+ id:'ato7',num:'VII',yr:'2025',date:T('14 de abril de 2025','April 14, 2025'),
+ tag:T('O convite','The invite'),
+ title:T('Convidado, e banido em menos de 12 horas.','Invited, and banned in under 12 hours.'),
+ lede:T('O radicchi me chamou pro Discord da GsW dizendo que eu tinha sido "muito receptivo" com eles. Eu entrei. Não durou nem 12 horas: quando o Bigouslino viu que eu estava lá, me baniu.',
+        'radicchi invited me to the GsW Discord saying I had been "very welcoming" to them. I joined. It did not last 12 hours: when Bigouslino saw I was there, he banned me.'),
+ body:[
+  T('O convite foi feito nos melhores termos possíveis. Uma comunidade "para gringos e membros de outras guildas". Eu aceitei, porque é exatamente o que eu defendo desde sempre: comunidade brasileira não é a mesma coisa que guilda.',
+    'The invitation came in the best possible terms. A community "for foreigners and members of other guilds". I accepted, because it is exactly what I have always argued for: a Brazilian community is not the same thing as a guild.'),
+  T('Nenhum motivo foi apresentado, na hora nem depois. Eu não tinha falado nada lá dentro — tinha acabado de entrar. Do meu lado, isso encerrou a possibilidade de tratar a GsW como um bloco: dava pra ver que dependia inteiramente de qual dos chiefs estava olhando.',
+    'No reason was given, then or later. I had said nothing inside — I had just joined. On my end, that killed any chance of treating GsW as a single bloc: you could see it depended entirely on which chief happened to be looking.')
+ ],
+ evidence:[{
+  label:T('O convite e o ban','The invite and the ban'),
+  slides:[
+   {img:'convite',cap:T('DM do radicchi, 14/04/2025, 20:57. Servidor da GsW com 653 membros.',
+                        'DM from radicchi, 14/04/2025, 20:57. GsW server with 653 members.'),
+    lines:[
+     L('radicchi','gsw','Salve attomico','Yo attomico'),
+     L('radicchi','gsw','Criamos na GsW uma paradinha de comunidade, para gringos e membros de outras guildas','We made a little community thing in GsW, for foreigners and members of other guilds'),
+     L('radicchi','gsw','Fique à vontade se quiser entrar, vc foi muito receptivo com a gente tb!','Feel free to join if you want, you were very welcoming to us too!'),
+     L('[convite]','other','Guardian of Wynn (GsW) — 185 online · 653 membros','Guardian of Wynn (GsW) — 185 online · 653 membros','sys')
+    ]},
+   {img:'ban',cap:T('O resultado, 13:03. Sem aviso, sem motivo, sem mensagem nenhuma minha no servidor.',
+                    'The result, 13:03. No warning, no reason, not a single message from me in the server.'),
+    lines:[
+    ]}
+  ]
+ }]
+},
+
+/* ── VII ───────────────────────────────────────────────── */
+{
+ id:'ato8',num:'VIII',yr:'2025',date:T('Depois do ban','After the ban'),
+ tag:T('Recrutamento','Recruiting'),
+ title:T('Recrutando dentro da minha casa.','Recruiting inside my own house.'),
+ lede:T('Enquanto eu estava banido do Discord deles, eles estavam no meu — divulgando evento da GsW no nosso canal de conversas e puxando membro nosso pra DM com convite de guilda.',
+        'While I was banned from their Discord, they were in mine — advertising GsW events in our chat channel and pulling our members into DMs with a guild invite.'),
+ body:[
+  T('O print abaixo é do <b>#conversas do Discord da Wynn Brasil</b>. O radicchi divulga o evento de páscoa da GsW e os 14 prêmios míticos distribuídos. Até aí, tudo bem — eu <em>de fato</em> deixava a GsW frequentar meu servidor, foi o que eu disse ao Volkzz no ato anterior.',
+    'The screenshot below is from <b>#conversas in the Wynn Brasil Discord</b>. radicchi advertises GsW’s Easter event and the 14 mythic prizes handed out. Fine so far — I <em>did</em> let GsW hang around my server, exactly as I told Volkzz in the previous act.'),
+  T('O problema é o que vem depois. Um membro nosso pergunta como faz pra entrar nas guildas, e a resposta é: <b>"Vou te chamar na DM parceiro, te mandar nosso invite!"</b>. Isso não é convivência — é recrutamento dentro de casa alheia, com o dono da casa banido do servidor deles.',
+    'The problem is what comes next. One of our members asks how to join the guilds, and the answer is: <b>"I will DM you buddy, send you our invite!"</b>. That is not coexistence — that is recruiting inside someone else’s house, with the owner of that house banned from their server.'),
+  T('Eu ainda deixei correr. O que quebrou de vez veio três dias depois, e está no ato seguinte.',
+    'I still let it slide. What broke it for good came three days later, and it is in the next act.')
+ ],
+ evidence:[{
+  label:T('#conversas — Discord da Wynn Brasil','#conversas — Wynn Brasil Discord'),
+  slides:[
+   {img:'poach',cap:T('radicchi divulgando a GsW no nosso canal, e o Volkzz reforçando: "GsW, a maior guilda br do servidor". Em seguida, o convite por DM pro nosso membro.',
+                      'radicchi advertising GsW in our channel, with Volkzz backing it: "GsW, the biggest BR guild on the server". Then the DM invite to our member.'),
+    lines:[
+     L('Volkzz','gsw','Fiquei sabendo que teve até um evento foda ontem','I heard there was even a sick event yesterday'),
+     L('radicchi','gsw','Isso mesmo! Ontem tivemos um "Caça aos Ovos" como evento da GsW, tematizado pela páscoa!','That is right! Yesterday we had an "Egg Hunt" as a GsW event, Easter themed!'),
+     L('radicchi','gsw','Foram distribuídos 14 prêmios míticos para quem conseguir encontrar os ovos na nossa Guild Housing!','14 mythic prizes were handed out to whoever found the eggs in our Guild Housing!'),
+     L('radicchi','gsw','Nossos membros gostaram muito pelo que fiquei sabendo.','Our members really enjoyed it from what I heard.'),
+     L('Volkzz','gsw','GsW, a maior guilda br do servidor','GsW, the biggest BR guild on the server'),
+     L('Nomineraven','wnbr','nossa, q maneiro, e como faz pra entrar nas guildas???','wow, that is cool, and how do you join the guilds???'),
+     L('radicchi','gsw','Vou te chamar na DM parceiro, te mandar nosso invite!','I will DM you buddy, send you our invite!'),
+     L('Nomineraven','wnbr','é o guardian of wynn ne??','it is guardian of wynn right??'),
+     L('radicchi','gsw','Isso!','That is it!'),
+     L('Nomineraven','wnbr','acabei de entrar meu nobr','just joined my man')
+    ]}
+  ]
+ }]
+},
+
+/* ── VIII ──────────────────────────────────────────────── */
+{
+ id:'ato9',num:'IX',yr:'2025',date:T('24 de abril de 2025','April 24, 2025'),
+ tag:T('A acusação','The accusation'),
+ title:T('"Difamação" — e nenhum print.','"Defamation" — and not one screenshot.'),
+ lede:T('Dias depois do ban, eles entraram no meu servidor e disseram o motivo em voz alta. A acusação era a de que eu difamo a GsW. Eu pedi o print ali, na hora, na frente de todo mundo. Nunca veio nenhum.',
+        'Days after the ban, they came into my server and said the reason out loud. The accusation was that I defame GsW. I asked for the screenshot right there, in front of everyone. None ever came.'),
+ body:[
+  T('O primeiro print é do <b>meu servidor</b>, 10:46. Eles entraram declarando o motivo: <em>"a gente ta aqui só pra captar os players que vc difama a GsW"</em>. E complementaram com <em>"temos varias alts aqui"</em> e <em>"se não recrutarmos aqui, recrutamos pelo pv"</em>. Isso não é resposta a difamação — é o Ato VIII outra vez, agora dito com todas as letras.',
+    'The first screenshot is from <b>my server</b>, 10:46. They came in stating the reason: <em>"we are only here to capture the players you defame GsW to"</em>. And added <em>"we have several alts here"</em> and <em>"if we do not recruit here, we recruit by DM"</em>. That is not a response to defamation — it is Act VIII again, now spelled out.'),
+  T('Eu perguntei duas vezes: <b>"onde eu difamo a gsw? cadê as prints?"</b> e <b>"da um CTRL + F aqui e procura se eu falo de vcs"</b>. Até hoje ninguém apresentou uma linha.',
+    'I asked twice: <b>"where do I defame gsw? where are the screenshots?"</b> and <b>"hit CTRL + F here and search whether I talk about you"</b>. To this day nobody has produced a single line.'),
+  T('E eu também passei do ponto ali, então registro por conta própria: chamei o grupo de <b>"bando de adulto improdutivo que a única coisa que resta pra se orgulhar é o Wynncraft"</b>. Foi raiva, está no print, e está na lista de erros no fim.',
+    'And I also went too far there, so I record it myself: I called them <b>"a bunch of unproductive adults whose only remaining source of pride is Wynncraft"</b>. It was anger, it is in the screenshot, and it is on the list of mistakes at the end.'),
+  T('Dois minutos depois da última mensagem, às 11:01, eu bani todo mundo. É o segundo print: <b>julinho, fallingo, rafaelgomes, iyasuo_, eduuus, atmisuki, p4gu, closerapha, kwte</b> — <b>todos eram High Ranked da GsW</b>. Virou <b>blacklist de guilda</b>, e ela existe até hoje. Foi decisão minha, no impulso, e ela está na lista de erros.',
+    'Two minutes after the last message, at 11:01, I banned everyone. That is the second screenshot: <b>julinho, fallingo, rafaelgomes, iyasuo_, eduuus, atmisuki, p4gu, closerapha, kwte</b> — <b>every one of them a GsW High Ranked</b>. It became a <b>guild blacklist</b>, and it exists to this day. It was my call, made on impulse, and it is on the list of mistakes.')
+ ],
+ evidence:[
+  {label:T('Discord da Wynn Brasil — 10:46','Wynn Brasil Discord — 10:46'),
+   slides:[
+    {img:'difamacao',cap:T('A declaração de motivo, o pedido de prova, e a minha resposta com raiva. Tudo no mesmo print, sem corte.',
+                           'The stated motive, the request for proof, and my angry reply. All in one screenshot, uncut.'),
+     lines:[
+      L('victo','gsw','que te encher o saco bixo','just to bother you dude'),
+      L('victo','gsw','nao sei se vc ja percebeu mas ninguem da gsw liga pra vc','I do not know if you have noticed but nobody in gsw cares about you'),
+      L('victo','gsw','a gente ta aqui só pra captar os players que vc difama a GsW para','we are only here to capture the players you defame GsW to'),
+      L('victo','gsw','vc achou mesmo q era tao significante para 5 pessoas entrar aqui só pra te encher o saco?','did you really think you were so significant that 5 people would join here just to bother you?'),
+      L('victo','gsw','tu teve problema com 2 ou 3 pessoas da GsW e acha que todo mundo tem problema com vc','you had a problem with 2 or 3 people in GsW and you think everyone has a problem with you'),
+      L('victo','gsw','e pode banir. temos varias alts aqui','and go ahead and ban. we have several alts here'),
+      L('victo','gsw','se nao recrutarmos aqui, recrutamos pelo pv','if we do not recruit here, we recruit by DM'),
+      L('Mark_Wolf_','wnbr','Kkk o cara só provou o ponto...','Kkk the guy just proved the point...'),
+      L('B_Attomic','me','onde eu difamo a gsw? cade as prints?','where do I defame gsw? where are the screenshots?'),
+      L('B_Attomic','me','Vcs se difamam, n percebeu isso ainda?','You defame yourselves, have you not noticed yet?'),
+      L('B_Attomic','me','da um CTRL + F aqui e procura se eu falo de vcs','hit CTRL + F here and search whether I talk about you'),
+      L('Mark_Wolf_','wnbr','Exatamente, ele veio aqui só provar isso','Exactly, he came here just to prove it'),
+      L('B_Attomic','me','É um bando de adulto improdutivo que a única coisa que restam pra se orgulhar é o Wynncraft, metade ai mora com os pais e não trabalham','They are a bunch of unproductive adults whose only remaining source of pride is Wynncraft, half of them live with their parents and do not work'),
+      L('B_Attomic','me','Eu não to no discord da gsw captando player','I am not in the gsw discord capturing players'),
+      L('victo','gsw','te garanto que mais da metade do HR da gsw ja ta muito bem de vida e bem estabilizado','I guarantee more than half of gsw’s HR are doing very well and are well established')
+     ]}
+   ]},
+  {label:T('O ban em massa e a blacklist — 11:01 às 11:07','The mass ban and the blacklist — 11:01 to 11:07'),
+   slides:[
+    {img:'blacklist1',cap:T('Log do Dyno no meu servidor. Sete bans em pouco mais de um minuto, com o MidnightSP_ comentando ao lado.',
+                            'Dyno log in my server. Seven bans in a little over a minute, with MidnightSP_ commenting alongside.'),
+     lines:[
+      L('MidnightSP_','wnbr','Eles falam tanto que vc difama a imagem deles','They go on so much about you defaming their image'),
+      L('MidnightSP_','wnbr','Mas eles fazem isso sozinhos','But they do it to themselves'),
+     ]},
+    {img:'blacklist2',cap:T('A continuação, até 11:07 — incluindo <b>CloseRapha</b> e <b>SoggyKwte</b>, ambos chiefs da GsW. É aqui que a blacklist de guilda nasce.',
+                            'The continuation, up to 11:07 — including <b>CloseRapha</b> and <b>SoggyKwte</b>, both GsW chiefs. This is where the guild blacklist is born.'),
+     lines:[
+     ]}
+   ]}
+ ]
+},
+
+/* ── IX ────────────────────────────────────────────────── */
+{
+ id:'ato10',num:'X',yr:'2026',date:T('~junho de 2026 · um ano depois','~June 2026 · a year later'),
+ tag:T('A volta','The return'),
+ title:T('Voltamos a jogar. Os shouts voltaram junto.','We came back to the game. The shouts came back with us.'),
+ lede:T('A gente parou de jogar — lag, falta de conteúdo novo, e a strat de guerra Bouncing Arrow + Bouncing Bombs tinha sido corrigida. Voltamos <b>cerca de um ano depois</b>, e em pouquíssimo tempo a mesma coisa estava acontecendo.',
+        'We stopped playing — lag, no new content, and the Bouncing Arrow + Bouncing Bombs war strat had been patched. We came back <b>about a year later</b>, and in no time at all the same thing was happening again.'),
+ body:[
+  T('O print abaixo é o padrão: nosso shout de recrutamento sai, e logo em seguida sai o deles por cima. Não é coincidência de timing — é o mesmo comportamento de 2024 e 2025.',
+    'The screenshot below is the pattern: our recruitment shout goes out, and theirs goes out right on top of it. It is not a timing coincidence — it is the same behaviour from 2024 and 2025.'),
+  T('E, apesar de tudo, o contato com o <b>iMonoYasuo</b> nesse período foi bom. Ele perguntou do meu lado da história com o Bigouslino, e eu tive a chance de explicar — a mesma coisa que está no Ato I deste documento. O que veio junto com a volta, e que está no ato seguinte, foi outra coisa.',
+    'And despite everything, the contact with <b>iMonoYasuo</b> in this period was good. He asked about my side of the story with Bigouslino, and I got the chance to explain — the same thing that is in Act I of this document. What came along with the return, and is in the next act, was something else.')
+ ],
+ evidence:[{
+  label:T('Shout por cima do shout — 2026','Shout on top of shout — 2026'),
+  slides:[
+   {img:'shout',cap:T('Chat global. O shout de recrutamento da WnBR sai, e o da GsW sai na sequência imediata, por cima.',
+                      'Global chat. WnBR’s recruitment shout goes out, and GsW’s follows immediately, right on top.'),
+    lines:[
+     L('AsymptomaticSlowness','me','[WnBR] Wynn Brasil recruta! Junte-se à maior guilda BR/PT. Foco em Guild Wars, Raids, Lootruns e Builds. Discord ativo com +250 membros e atividades diárias! /msg B_Attomic','[WnBR] Wynn Brasil is recruiting! Join the biggest BR/PT guild. Focus on Guild Wars, Raids, Lootruns and Builds. Active Discord with 250+ members and daily activities! /msg B_Attomic'),
+     L('67sugestivo67','gsw','Guardians of Wynn [GsW] — Lv. 101, a maior guilda brasileira está recrutando jogadores que possuem a intenção de progredir no jogo ou juntar-se a uma comunidade brasileira! Caso tenha interesse mande dm para .alfeu no discord ou /msg 67sugestivo67 no jogo','Guardians of Wynn [GsW] — Lv. 101, the biggest Brazilian guild is recruiting players who intend to progress in the game or join a Brazilian community! If interested DM .alfeu on discord or /msg 67sugestivo67 in game')
+    ]}
+  ]
+ }]
+},
+
+/* ── XI ────────────────────────────────────────────────── */
+{
+ id:'ato11',num:'XI',yr:'2026',date:T('Julho de 2026','July 2026'),
+ tag:T('A reputação','Reputation'),
+ title:T('Três tentativas de estragar o nome da guilda.','Three attempts to wreck the guild’s name.'),
+ lede:T('Em poucas semanas, três coisas diferentes atingiram a mesma coisa: a reputação da Wynn Brasil. Um shout nos chamando de fascistas, uma insinuação de que a gente compactua com racismo, e um griefing dentro do canal de recrutamento oficial do Wynncraft.',
+        'In a few weeks, three different things hit the same target: Wynn Brasil’s reputation. A shout calling us fascists, an insinuation that we condone racism, and griefing inside Wynncraft’s official recruitment channel.'),
+ body:[
+  T('<b>Um.</b> Um player que eu nunca tinha visto, o <b>xX_NoScope_Xx</b>, soltou um shout global chamando a Wynn Brasil de <em>"fascist dictators"</em> e dizendo <em>"i hate wynn brazil"</em>, convidando todo mundo a ocupar Corkus. Do nada, sem nenhum atrito prévio com a gente.',
+    '<b>One.</b> A player I had never seen, <b>xX_NoScope_Xx</b>, dropped a global shout calling Wynn Brasil <em>"fascist dictators"</em> and saying <em>"i hate wynn brazil"</em>, inviting everyone to occupy Corkus. Out of nowhere, with no prior friction with us at all.'),
+  T('Eu chamei ele na DM e perguntei o motivo. A resposta é a parte que interessa: <b>"i shouted for a friend"</b>. Perguntei quem era o amigo e ele não quis dizer — <em>"i dont really care lol"</em>. Outros players do servidor comentaram por conta própria que o cara estava só procurando confusão.',
+    'I DMed him and asked why. The answer is the part that matters: <b>"i shouted for a friend"</b>. I asked who the friend was and he would not say — <em>"i dont really care lol"</em>. Other players on the server commented on their own that the guy was just looking for trouble.'),
+  T('<b>Eu suspeito que o pedido tenha partido de alguém da GsW. Mas isso é suspeita minha e eu não tenho prova nenhuma</b> — o cara nunca disse o nome, e eu não estou acusando ninguém. Fica registrado pelo que é: alguém pediu, ele não diz quem, e a WnBR levou.',
+    '<b>I suspect the request came from someone in GsW. But that is my suspicion and I have no proof whatsoever</b> — the guy never gave a name, and I am not accusing anyone. It is recorded for what it is: someone asked, he will not say who, and WnBR took the hit.'),
+  T('<b>Dois.</b> Um membro que tinha sido banido da GsW <b>e do próprio Wynncraft</b> por racismo, muito tempo atrás, foi <b>desbanido pelo próprio Wynncraft</b> e entrou na Wynn Brasil. O <b>iMonoYasuo</b> levantou isso no nosso <b>#guild-recruitment</b>, dando a entender que a gente estava concordando com o que ele fez.',
+    '<b>Two.</b> A member who had been banned from GsW <b>and from Wynncraft itself</b> for racism, a long time ago, was <b>unbanned by Wynncraft itself</b> and joined Wynn Brasil. <b>iMonoYasuo</b> raised this in our <b>#guild-recruitment</b>, implying we agreed with what he had done.'),
+  T('Meu argumento foi simples: o Wynncraft é uma organização racista por ter dado o unban? Não. Então por que a gente não podia dar uma segunda chance? Ainda assim, a gente não varreu pra debaixo do tapete. <b>Fizemos votekick na guilda. Deu empate.</b> Decidimos manter o membro, com o aviso explícito de que qualquer polêmica nova e ele sai.',
+    'My argument was simple: is Wynncraft a racist organisation for granting the unban? No. So why could we not give a second chance? Even so, we did not sweep it under the rug. <b>We ran a votekick in the guild. It tied.</b> We decided to keep the member, with an explicit warning that any new controversy and he is out.'),
+  T('<b>Aviso de lacuna:</b> as mensagens em que levantaram esse assunto foram <b>apagadas pelo próprio iMonoYasuo</b>, então eu não tenho print delas. Estou relatando de memória e registro isso abertamente, porque em qualquer outro ponto deste documento eu cobro print de quem afirma.',
+    '<b>Evidence gap:</b> the messages where they raised this were <b>deleted by iMonoYasuo himself</b>, so I have no screenshot of them. I am recounting from memory and I flag it openly, because everywhere else in this document I demand screenshots from whoever makes a claim.'),
+  T('<b>Três.</b> Griefing no <b>Discord oficial do Wynncraft</b>, no canal <b>#guild_recruitment</b>, <em>dentro da thread de recrutamento da própria Wynn Brasil</em>. Uma conta chamada <b>Oklahoma</b> apareceu postando dois prints de busca do Google, anotados em vermelho, destacando que a GsW é <em>"#1 GUILD BR"</em> e <em>"a maior guild brasileira do server"</em>.',
+    '<b>Three.</b> Griefing in the <b>official Wynncraft Discord</b>, in the <b>#guild_recruitment</b> channel, <em>inside Wynn Brasil’s own recruitment thread</em>. An account called <b>Oklahoma</b> showed up posting two Google search screenshots, annotated in red, highlighting that GsW is <em>"#1 GUILD BR"</em> and <em>"the biggest Brazilian guild on the server"</em>.'),
+  T('É o mesmo comportamento do Ato IV e do Ato VIII, só que agora no canal de recrutamento oficial do servidor. E a resposta estava na tela: no mesmo momento, a GsW tinha <b>1 de 95 membros online</b> e a Wynn Brasil, <b>17 de 66</b>. Os posts do Google são de 2020 e 2023. <em>"Foi a época já, rapaziada."</em>',
+    'It is the same behaviour as Act IV and Act VIII, only now in the server’s official recruitment channel. And the answer was right there on screen: at that very moment GsW had <b>1 of 95 members online</b> and Wynn Brasil had <b>17 of 66</b>. The Google posts are from 2020 and 2023. <em>"That was back then, folks."</em>'),
+  T('No print eu chamo aquilo de <b>"criar discord fake pra griefing"</b>. Registro que essa é a <b>minha leitura na hora</b> — eu não tenho como provar que a conta Oklahoma era alt de alguém da GsW, e não estou afirmando que era.',
+    'In the screenshot I call it <b>"making a fake discord account to grief"</b>. I record that this was <b>my read in the moment</b> — I cannot prove the Oklahoma account was an alt of someone from GsW, and I am not claiming it was.'),
+  T('Os três episódios têm o mesmo alvo, e nenhum deles é território ou guerra. É o nome da guilda. É por isso que eles estão juntos neste ato e separados do anterior.',
+    'The three episodes share one target, and none of them is territory or war. It is the guild’s name. That is why they sit together in this act, separate from the previous one.')
+ ],
+ evidence:[
+  {label:T('O shout do "fascist dictators" — e o "i shouted for a friend"','The "fascist dictators" shout — and the "i shouted for a friend"'),
+   slides:[
+    {img:'facista1',cap:T('Shout global. Um player sem nenhuma treta prévia com a gente chamando a Wynn Brasil de ditadores fascistas.',
+                          'Global shout. A player with no prior beef with us calling Wynn Brasil fascist dictators.'),
+     lines:[
+      L('xX_NoScope_Xx','other','Corkus is now freed of the fascist dictators (wynn brazil) (i hate wynn brazil) if anyone wants free unclaimed land then please spawn on the newly liberated land of corkus!!!!!','Corkus is now freed of the fascist dictators (wynn brazil) (i hate wynn brazil) if anyone wants free unclaimed land then please spawn on the newly liberated land of corkus!!!!!')
+     ]},
+    {img:'facista2',cap:T('A DM em que eu pergunto o motivo. Ele admite que soltou <b>a pedido de um amigo</b> e se recusa a dizer quem é. <em>Quem pediu, eu não sei — e não estou dizendo que sei.</em>',
+                          'The DM where I ask why. He admits he shouted <b>on a friend’s request</b> and refuses to say who. <em>Who asked, I do not know — and I am not claiming I do.</em>'),
+     lines:[
+      L('Warrer','me','can i ask why/','can i ask why/'),
+      L('xX_NoScope_Xx','other','i shouted for a friend','i shouted for a friend'),
+      L('Warrer','me','for a mute offense? lol','for a mute offense? lol'),
+      L('Warrer','me','can i ask who?','can i ask who?'),
+      L('xX_NoScope_Xx','other','i dont really care lol','i dont really care lol')
+     ]},
+    {img:'facista3',cap:T('E não fui só eu que achei estranho — outros players do servidor comentaram por conta própria.',
+                          'And I was not the only one who found it odd — other players on the server commented on their own.'),
+     lines:[
+      L('hailey','other','cayson is hate maxxing please stop him','cayson is hate maxxing please stop him'),
+      L('sylvanlist','other','llol','llol')
+     ]}
+   ]},
+  {label:T('Griefing no #guild_recruitment do Discord oficial — 28/07/2026','Griefing in the official Discord’s #guild_recruitment — 28/07/2026'),
+   slides:[
+    {img:'grief1',cap:T('A thread de recrutamento da <b>Wynn Brasil</b>, no Discord oficial do Wynncraft. A conta <b>Oklahoma</b> posta os dois prints de Google, e eu respondo com a contagem de online do momento.',
+                        '<b>Wynn Brasil</b>’s recruitment thread, in the official Wynncraft Discord. The <b>Oklahoma</b> account posts the two Google screenshots, and I reply with the live online count.'),
+     lines:[
+      L('Oklahoma','other','É essa aqui? [image.png]','Is this the one? [image.png]'),
+      L('Oklahoma','other','É essa aqui? [image.png]','Is this the one? [image.png]'),
+      L('B_Attomic','me','kkkkkkkkkkkkkkkkkkkkkkkkk','kkkkkkkkkkkkkkkkkkkkkkkkk'),
+      L('[jogo]','other','Guardians of Wynn [GsW] has 1/95 members currently online — Captain: 67sugestivo67','Guardians of Wynn [GsW] has 1/95 members currently online — Captain: 67sugestivo67','sys'),
+      L('[jogo]','other','Wynn Brasil [WnBR] has 17/66 members currently online — Owner: B_Attomic · Chief: NinjaBR_ · Strategist: Niculax_ · Recruiter: preparado, ougato, Xhapisco, FrierenSZ_, Ranguer, Tempon1, zKiest_, jorgebacuri17, Ziiss, Brn5025, doidoloco11, xFORSAKENNx, RASQUIS, Draconiico','Wynn Brasil [WnBR] has 17/66 members currently online — Owner: B_Attomic · Chief: NinjaBR_ · Strategist: Niculax_ · Recruiter: preparado, ougato, Xhapisco, FrierenSZ_, Ranguer, Tempon1, zKiest_, jorgebacuri17, Ziiss, Brn5025, doidoloco11, xFORSAKENNx, RASQUIS, Draconiico','sys'),
+      L('B_Attomic','me','Foi a epoca ja rapazeada','That was back then, folks'),
+      L('B_Attomic','me','vamo ate deixar a msg ai pra promover a vergonha da gsw','let us even leave the message up to advertise gsw’s embarrassment'),
+      L('B_Attomic','me','de criar discord fake pra griefing, patéticos e infantis como sempre','of making a fake discord account to grief, pathetic and childish as always'),
+      L('B_Attomic','me','os cara sabe aparecer no google kkkkkkkkkkkkk','the guys sure know how to show up on google kkkkkkkkkkkkk'),
+      L('Frame','gsw','Queria eu ter tempo suficiente para me importar com player online as 1 da manhã de uma terça no jogo de bloco','I wish I had enough time to care about players online at 1 in the morning on a Tuesday in the block game')
+     ]},
+    {img:'grief2',cap:T('A primeira imagem que eles postaram: busca no Google anotada em vermelho, destacando resultados de <b>2020 e 2023</b> que chamam a GsW de "#1 GUILD BR" e "maior guild brasileira do server".',
+                        'The first image they posted: a Google search annotated in red, highlighting results from <b>2020 and 2023</b> calling GsW "#1 GUILD BR" and "the biggest Brazilian guild on the server".'),
+     lines:[
+      L('[Google]','other','Guild - Brasil | Guardian of Wynn | LvL 94 | #1 GUILD BR — 11 de jan. de 2023','Guild - Brasil | Guardian of Wynn | LvL 94 | #1 GUILD BR — 11 de jan. de 2023','sys'),
+      L('[Google]','other','Guilda Brasileira — 5 de nov. de 2020: "existe a GsW (Guardian Of Wynn). Maior guild brasileira do server."','Guilda Brasileira — 5 de nov. de 2020: "existe a GsW (Guardian Of Wynn). Maior guild brasileira do server."','sys'),
+      L('','other','Anotação à mão no print deles: "LV 101 AGORA".','Handwritten annotation on their screenshot: "LV 101 AGORA".','note')
+     ]},
+    {img:'grief3',cap:T('A segunda imagem: o resumo de IA do Google dizendo que a guilda brasileira mais conhecida é a GsW. É esse o argumento que foi levado pra dentro da nossa thread de recrutamento.',
+                        'The second image: Google’s AI overview saying the best-known Brazilian guild is GsW. That is the argument that was brought into our recruitment thread.'),
+     lines:[
+      L('[Google]','other','Visão geral criada por IA: "A comunidade brasileira no servidor de Minecraft Wynncraft conta com grupos ativos de jogadores... A guilda brasileira mais conhecida é a Guardian of Wynn (GsW), fundada em 2017 para reunir falantes de português."','Visão geral criada por IA: "A comunidade brasileira no servidor de Minecraft Wynncraft conta com grupos ativos de jogadores... A guilda brasileira mais conhecida é a Guardian of Wynn (GsW), fundada em 2017 para reunir falantes de português."','sys')
+     ]}
+   ]}
+ ]
+},
+
+/* ── X ─────────────────────────────────────────────────── */
+{
+ id:'ato12',num:'XII',yr:'2026',date:T('Agosto de 2026','August 2026'),
+ tag:T('O meu erro','My mistake'),
+ title:T('Aqui o errado sou eu.','Here I am the one in the wrong.'),
+ lede:T('Chegou até mim, por um chief da GsW, uma acusação grave sobre o passado de um player da GsW. Eu não tinha prova nenhuma. Mesmo assim, usei aquilo como carta na manga pra forçar ele a parar de encher o saco da gente. Fui banido do Wynncraft por <b>blackmail</b> — e o ban é justo.',
+        'A serious accusation about a GsW player’s past reached me through a GsW chief. I had no proof whatsoever. Even so, I used it as leverage to force him to stop bothering us. I was banned from Wynncraft for <b>blackmail</b> — and the ban is fair.'),
+ body:[
+  T('Contexto: o <b>67sugestivo67</b> é um player novo que estava fazendo com a WnBR exatamente o que faziam com a gente em 2024 e 2025 — atacando nossos territórios e soltando shout por cima do nosso, intencionalmente.',
+    'Context: <b>67sugestivo67</b> is a new player who was doing to WnBR exactly what was done to us in 2024 and 2025 — attacking our territories and deliberately shouting over ours.'),
+  T('<b>Sobre a acusação eu vou ser bem claro.</b> Era sobre um <b>vídeo que ele teria compartilhado</b> no passado, e que já tinha custado um banimento a ele antes. O assunto chegou até mim pelo <b>SoggyKwte, chief da GsW</b>, que demonstrava saber exatamente do que se tratava. <b>Eu nunca vi esse vídeo, nunca recebi, e não tenho como provar nem que ele existe.</b> Por isso eu não vou escrever aqui do que ele era — publicar uma acusação grave que eu não posso sustentar é a mesma coisa que eu estou reclamando que fizeram comigo no Ato IX.',
+    '<b>Let me be very clear about the accusation.</b> It was about a <b>video he had supposedly shared</b> in the past, one that had already cost him a ban before. The matter reached me through <b>SoggyKwte, a GsW chief</b>, who clearly knew exactly what it was about. <b>I never saw that video, never received it, and I cannot prove it even exists.</b> That is why I will not write here what it was about — publishing a serious accusation I cannot back up is the same thing I am complaining they did to me in Act IX.'),
+  T('O que eu fiz foi ir atrás dele e dizer, na cara, que eu tinha essa carta na manga e que ia usar se ele não parasse. Ele tem <b>14 anos</b>. <b>Eu não digitei aquilo achando que era chantagem</b> — na minha cabeça eu estava atrás de paz, nem que ela viesse por cima de expor a merda que ele tinha feito. Mas o nome daquilo é chantagem de qualquer jeito, e a intenção não muda o que está escrito nos prints.',
+    'What I did was go after him and tell him, to his face, that I had this card up my sleeve and would use it if he did not stop. He is <b>14 years old</b>. <b>I did not type that thinking it was blackmail</b> — in my head I was after peace, even if it came by exposing what he had done. But the name for it is blackmail either way, and intent does not change what is written in the screenshots.'),
+  T('Duas coisas ainda ficam nos prints, e eu registro pelo valor que têm: nenhum de nós dois menciona o termo diretamente, mas ele sabia exatamente do que eu estava falando; e ele confirma que estava incomodando a gente <b>só por rivalidade de guilda</b>, que não fazia ideia da treta e que não se importava com ela.',
+    'Two things do remain in the screenshots, and I record them for what they are worth: neither of us names the thing directly, yet he knew exactly what I was talking about; and he confirms he was bothering us <b>purely out of guild rivalry</b>, that he had no idea about the history and did not care about it.'),
+  T('<b>Resultado: fui banido do Wynncraft por blackmail. Justo. Não tenho o que reclamar</b>, e o print do ban está aqui embaixo, inteiro, com o motivo escrito. E é exatamente por isso que este arquivo existe — não pra dizer que eu sou santo, mas pra dar os cinco anos de contexto que ninguém vê quando lê só esse print.',
+    '<b>Result: I was banned from Wynncraft for blackmail. Fair. I have nothing to complain about</b>, and the ban screenshot is right below, in full, with the reason spelled out. And that is exactly why this file exists — not to claim I am a saint, but to give the five years of context nobody sees when they only read that screenshot.')
+ ],
+ evidence:[
+  {label:T('De onde o assunto veio','Where the matter came from'),
+   slides:[
+    {img:'call',cap:T('A call em que o assunto foi comentado. Registro apenas quem estava presente — não o que foi dito, e não estou atribuindo nada a ninguém aqui.',
+                      'The call where the matter was brought up. I record only who was present — not what was said, and I am attributing nothing to anyone here.'),
+     lines:[
+      L('[call]','other','B_Attomic · CloseRapha [GsW] · 1nfinity [Eden] · SoggyKwte [GsW]','B_Attomic · CloseRapha [GsW] · 1nfinity [Eden] · SoggyKwte [GsW]','sys'),
+      L('','other','Nenhum conteúdo da call está sendo reproduzido neste documento.','No content from the call is reproduced in this document.','note')
+     ]}
+   ]},
+  {label:T('DM B_Attomic / Warrer ⟷ 67sugestivo67','DM B_Attomic / Warrer ⟷ 67sugestivo67'),
+   slides:[
+    {img:'conf1',cap:T('A ameaça. É aqui que eu erro, e não tem meio termo: "quer ficar de birra com nos? vou começar espalhar".',
+                       'The threat. This is where I go wrong, and there is no middle ground: "want to keep being petty with us? I will start spreading it".'),
+     lines:[
+      L('B_Attomic','me','descobri coisas do seu passado amigao','I found out things about your past buddy'),
+      L('B_Attomic','me','o video la q te resultou em banimento','that video that got you banned'),
+      L('B_Attomic','me','inclusive puxei esse assunto com yasuo','I even brought this up with yasuo'),
+      L('B_Attomic','me','quer ficar de birra com nos? vou começar espalhar oq te resultou em banimento','want to keep being petty with us? I will start spreading what got you banned'),
+      L('B_Attomic','me','ta comprando uma treta que nem sabe','you are picking up a fight you know nothing about'),
+      L('67sugestivo67','gsw','manda','go ahead'),
+      L('B_Attomic','me','infelizmente nao me mandaram o video, até pq prefiro nao ver esse tipo de conteudo','unfortunately they did not send me the video, and I would rather not see that kind of content anyway'),
+      L('B_Attomic','me','vc nem sabe oq resultou nas tretas entre guilda','you have no idea what caused the fights between the guilds'),
+      L('B_Attomic','me','e ta comprando lado','and you are picking a side'),
+      L('67sugestivo67','gsw','w apavoro','w scary'),
+      L('B_Attomic','me','tive call com Kwte e Rapha','I had a call with Kwte and Rapha')
+     ]},
+    {img:'conf2',cap:T('O nome muda para <b>Warrer</b> no meio — é apelido de classe, continua sendo eu na mesma conta. Ele pergunta o óbvio: pra que você vai usar isso? Você está puto por um jogo? Por um território?',
+                       'The name changes to <b>Warrer</b> midway — it is a class nickname, still me on the same account. He asks the obvious: what are you going to use this for? Are you angry over a game? Over a territory?'),
+     lines:[
+      L('67sugestivo67','gsw','boa mano','nice man'),
+      L('B_Attomic','me','14 anos é dificil de conversar msm ne vei','14 years old, it really is hard to talk, huh'),
+      L('B_Attomic','me','enfim, é isso. boa sorte','anyway, that is it. good luck'),
+      L('67sugestivo67','gsw','vlw, boa sorte tb','thanks, good luck too'),
+      L('Warrer','me','Namoral ze, conversando na paz','Seriously man, talking in peace'),
+      L('67sugestivo67','gsw','mas praq vc vai usar isso?','but what are you going to use this for?'),
+      L('67sugestivo67','gsw','oq vc vai fz?','what are you going to do?'),
+      L('67sugestivo67','gsw','vc ta puto por um jogo? um territorio?','are you angry over a game? a territory?'),
+      L('Warrer','me','Quer conversar namoral mesmo?','Do you want to talk for real?'),
+      L('Warrer','me','Pq tu ta comprando uma suposta treta que tu nem sabe oq rolou','Because you are buying into a supposed feud when you do not even know what happened')
+     ]},
+    {img:'conf3',cap:T('Eu digo o que queria de verdade: paz entre as guildas. Já tinha oferecido isso ao Yasuo três vezes.',
+                       'I say what I actually wanted: peace between the guilds. I had already offered it to Yasuo three times.'),
+     lines:[
+      L('Warrer','me','Pq tu tem 14 anos e ta perseguindo a WnBR por trollagem','Because you are 14 and you are chasing WnBR for the trolling'),
+      L('67sugestivo67','gsw','w','w'),
+      L('Warrer','me','namoral mesmo','seriously though'),
+      L('Warrer','me','eu ofereci pro Yasuo pela terceira vez','I offered it to Yasuo for the third time')
+     ]},
+    {img:'conf4',cap:T('A proposta, na íntegra: vocês não precisam gostar da gente, a gente não vai gostar de vocês — mas dá pra coexistir.',
+                       'The proposal, in full: you do not have to like us, we will not like you — but we can coexist.'),
+     lines:[
+      L('Warrer','me','vamos ficar na paz entre as guildas','let us keep the peace between the guilds'),
+      L('Warrer','me','vcs n precisam gostar da gente','you do not have to like us'),
+      L('Warrer','me','a gnt n vai gostar de vcs nunca','we will never like you'),
+      L('67sugestivo67','gsw','cara, eu entrei agr','man, I just joined'),
+      L('Warrer','me','mas pelo menos co-existir','but at least coexist'),
+      L('Warrer','me','eu sei q tu entro agora paizao','I know you just joined, boss'),
+      L('67sugestivo67','gsw','n quis dizer isso porra','that is not what I meant, damn')
+     ]},
+    {img:'conf5',cap:T('Eu ofereço mostrar os prints do meu próprio ban — os mesmos que estão neste documento. Ele diz que não liga. Justo.',
+                       'I offer to show the screenshots of my own ban — the same ones in this document. He says he does not care. Fair.'),
+     lines:[
+      L('Warrer','me','sei dos seus amigos, que falaram pra vc n levar pra vida, pq eram doentes','I know about your friends, who told you not to take it personally, because they were sick in the head'),
+      L('Warrer','me','vc quer ver as prints do pq eu to banido da GsW?','do you want to see the screenshots of why I am banned from GsW?'),
+      L('Warrer','me','aposto q nunca te falaram','I bet they never told you'),
+      L('67sugestivo67','gsw','eu n ligo','I do not care'),
+      L('Warrer','me','justo','fair'),
+      L('Warrer','me','bom, é isso. to te oferecendo paz entre nos dois','well, that is it. I am offering you peace between the two of us'),
+      L('67sugestivo67','gsw','isso n é cmg','that is not with me')
+     ]},
+    {img:'conf6',cap:T('O trecho mais feio do documento — e o mais honesto. Eu admito na hora que o vídeo não diz nada sobre ele e que duvido do gosto dele, e mesmo assim uso: "e ta enchendo nosso saco, entao pq nao ne?".',
+                       'The ugliest passage in this document — and the most honest. I admit right there that the video says nothing about him and that I doubt his taste, and use it anyway: "and you are bothering us, so why not, right?".'),
+     lines:[
+      L('67sugestivo67','gsw','é com rafaelgomes','it is with rafaelgomes'),
+      L('Warrer','me','vc é um servo dele? escravo?','are you his servant? his slave?'),
+      L('67sugestivo67','gsw','viaja n','do not trip'),
+      L('Warrer','me','enfim, eu tenho essa carta na manga ai','anyway, I have this card up my sleeve'),
+      L('67sugestivo67','gsw','use','use it'),
+      L('Warrer','me','eu sei q o video em si nao diz nada sobre vc','I know the video itself says nothing about you'),
+      L('Warrer','me','duvido mt q vc compartilhe daquele gosto','I really doubt you share that taste'),
+      L('Warrer','me','mas vc errou nisso ai, compartilhando o vide','but you messed up there, sharing the video'),
+      L('Warrer','me','e ta enchendo nosso saco, entao pq nao ne?','and you are bothering us, so why not, right?'),
+      L('67sugestivo67','gsw','é so um jogo bro','it is just a game bro'),
+      L('Warrer','me','agora é so um jogo ne kkk. sempre foi','now it is just a game, right kkk. it always was')
+     ]},
+    {img:'conf7',cap:T('O fim. Ele sugere voice chat; eu recuso porque não fica print. Tudo o que está aqui foi digitado, dos dois lados.',
+                       'The end. He suggests voice chat; I refuse because it leaves no screenshots. Everything here was typed, on both sides.'),
+     lines:[
+      L('Warrer','me','da ignore ai dnv, problema n, mas lembra que eu tentei conversar na paz','ignore me again, no problem, but remember I tried to talk peacefully'),
+      L('67sugestivo67','gsw','vo tentar lembrar','I will try to remember'),
+      L('Warrer','me','ta tudo printado ja','it is all screenshotted already'),
+      L('67sugestivo67','gsw','ok mano, só para de falar aq. se quiser falar puxa dc','ok man, just stop talking here. if you want to talk, hit me on discord'),
+      L('Warrer','me','vc n tem nem maturidade pra conversar e quer ir voicechat pra evitar prints? to suave','you do not even have the maturity to talk and you want voice chat to avoid screenshots? I am good'),
+      L('Warrer','me','continua assim amigao, vai ficar conhecido no Wynn','keep it up buddy, you will get famous in Wynn')
+     ]}
+   ]},
+  {label:T('O resultado — meu ban do Wynncraft','The result — my Wynncraft ban'),
+   slides:[
+    {img:'banwynn',cap:T('Sem contestação da minha parte. O motivo está escrito na tela e eu não recorri: <b>blackmail</b>. Este documento não existe pra derrubar esse ban.',
+                         'No contest from me. The reason is written on the screen and I did not appeal: <b>blackmail</b>. This document does not exist to overturn that ban.'),
+     lines:[
+      L('[Wynncraft]','other','Connection Lost — You have been banned from Wynncraft. Reason: blackmail. Appeal at wynncraft.com/appeal','Connection Lost — You have been banned from Wynncraft. Reason: blackmail. Appeal at wynncraft.com/appeal','sys')
+     ]}
+   ]},
+  {label:T('O outro lado do desfecho — DM do iMonoYasuo, 13:05','The other side of the outcome — DM from iMonoYasuo, 13:05'),
+   slides:[
+    {img:'sugestivoban',cap:T('A própria liderança da GsW veio me avisar que o 67sugestivo67 tinha sido banido. Deixo a minha reação como está — <em>"KKKKKK hype"</em> — porque foi essa mesmo. E logo em seguida a pergunta de sempre.',
+                              'GsW leadership itself came to tell me 67sugestivo67 had been banned. I leave my reaction as it was — <em>"KKKKKK hype"</em> — because that is what it was. And right after, the same question as always.'),
+     lines:[
+      L('iMonoYasuo','gsw','Opa','Hey'),
+      L('iMonoYasuo','gsw','Falar aqui contigo pelo mesmo motivo que você veio me dar satisfação aquele dia com o Duduimp','Talking to you here for the same reason you came to explain yourself to me that day about Duduimp'),
+      L('iMonoYasuo','gsw','O Sugestivo foi banido','Sugestivo has been banned'),
+      L('B_Attomic','me','Kkkkkk seriao?','Kkkkkk for real?'),
+      L('B_Attomic','me','KKKKKK hype','KKKKKK hype'),
+      L('B_Attomic','me','E sobre uma trégua entre as guildas?','And what about a truce between the guilds?')
+     ]}
+   ]}
+ ]
+},
+
+/* ── XI ────────────────────────────────────────────────── */
+{
+ id:'ato13',num:'XIII',yr:'2026',date:T('Agosto de 2026','August 2026'),
+ tag:T('As tentativas','The attempts'),
+ title:T('Três vezes eu ofereci neutralidade.','Three times I offered neutrality.'),
+ lede:T('Não é "só briga". Em vários momentos eu levei a proposta na mão: ninguém precisa gostar de ninguém, mas dá pra parar de se estranhar. E eu concordei publicamente com a única reclamação que a GsW me trouxe.',
+        'It is not "just fighting". At several points I brought the proposal myself: nobody needs to like anybody, but we can stop clashing. And I publicly agreed with the one complaint GsW brought to me.'),
+ body:[
+  T('O <b>iYasuo_</b> me trouxe uma reclamação legítima: gente da WnBR mandando DM pros recrutas que apareciam no guild recruit deles. Minha resposta foi <b>"concordo 100%"</b> — e eu mandei, na mesma conversa, o print do radicchi fazendo exatamente a mesma coisa dentro do meu servidor.',
+    '<b>iYasuo_</b> brought me a legitimate complaint: WnBR people DMing recruits who showed up in their guild recruit channel. My answer was <b>"I agree 100%"</b> — and in that same conversation I sent the screenshot of radicchi doing exactly the same thing inside my server.'),
+  T('A proposta que eu fiz é a mesma desde 2025, e ela está inteira no print: <b>reciprocidade</b>. Para de shout por cima, a gente para também. Marca uma call com todo mundo que tem indiferença comigo. Fecha uma neutralidade. Ninguém se farpa, ninguém se incomoda.',
+    'The proposal I made is the same since 2025, and it is fully in the screenshot: <b>reciprocity</b>. Stop shouting over us, we stop too. Set up a call with everyone who has an issue with me. Settle a neutrality. Nobody jabs, nobody gets bothered.'),
+  T('E, no fim, eu ofereci mais uma vez — inclusive mandando os prints pros chiefs, se quisessem ver. A parte do Bigos eu deixo escrita como está no print, porque é honesto: <em>eu não quero desculpa dele</em>. O que eu quero é que as duas guildas parem de se estranhar.',
+    'And in the end I offered once more — including sending the screenshots to the chiefs if they wanted to see them. The Bigos part I leave written as it is in the screenshot, because it is honest: <em>I do not want an apology from him</em>. What I want is for the two guilds to stop clashing.')
+ ],
+ evidence:[{
+  label:T('As propostas de neutralidade','The neutrality proposals'),
+  slides:[
+   {img:'paz1',cap:T('DM com o iYasuo_. Ele traz a reclamação dele, eu concordo na hora, mostro o outro lado da mesma moeda e proponho reciprocidade.',
+                     'DM with iYasuo_. He brings his complaint, I agree immediately, show the other side of the same coin and propose reciprocity.'),
+    lines:[
+     L('iYasuo_','gsw','Ah, e uma parada. Não sei se o Ninja faz isso pelo que rolou no passado com o Radicchi, mas é meio feio ele ficar mandando mensagem na dm da galera que vai no nosso guild recruit perguntando sobre a guilda (GsW) e ele vai e manda o dc da wynnbr no pv kkkk','Oh, and one thing. I do not know if Ninja does this because of what happened with Radicchi in the past, but it is kind of ugly for him to DM the people who go to our guild recruit asking about the guild (GsW) and then he sends them the wynnbr discord kkkk'),
+     L('iYasuo_','gsw','Se algum dos meus tiver fazendo isso e eu n to sabendo, pode me avisar','If any of mine are doing this and I do not know about it, let me know'),
+     L('B_Attomic','me','é feio ne?','it is ugly, right?'),
+     L('[anexo]','other','print do radicchi divulgando a GsW e chamando membro nosso na DM, dentro do Discord da Wynn Brasil','screenshot of radicchi advertising GsW and DMing our member, inside the Wynn Brasil Discord','sys'),
+     L('B_Attomic','me','concordo 100%','I agree 100%'),
+     L('B_Attomic','me','pararemos de fazer isso se for reciproco','we will stop doing it if it is reciprocal'),
+     L('B_Attomic','me','Se parar de mandar shout em cima tambem','If the shouting over us stops too'),
+     L('B_Attomic','me','é só conversar tlg. Se for reciproco, fechamos qualquer acordo','it is just a matter of talking. If it is reciprocal, we can close any agreement'),
+     L('B_Attomic','me','Namoral yasuo, de coração. Marca uma call ai com todo mundo q tem qualquer indiferença cmg','Seriously yasuo, from the heart. Set up a call with everyone who has any issue with me'),
+     L('B_Attomic','me','Bora fechar uma neutralidade pelo menos','Let us at least settle a neutrality'),
+     L('B_Attomic','me','Ngm se farpa, ngm se incomoda, vamos viver em harmonia como tivemos por um momento','Nobody jabs, nobody gets bothered, let us live in harmony like we did for a moment')
+    ]},
+   {img:'paz2',cap:T('A última oferta, 20:41 — também em DM com o <b>iYasuo_</b>. Eu me ofereço pra mandar todos os prints pros chiefs: os mesmos que estão neste documento.',
+                     'The last offer, 20:41 — also in DM with <b>iYasuo_</b>. I offer to send all the screenshots to the chiefs: the same ones in this document.'),
+    lines:[
+     L('B_Attomic','me','Enfim, se quiser uma ultima vez, tentar firmar a paz ai','Anyway, if you want one last try at settling peace'),
+     L('B_Attomic','me','Eu to disposto','I am up for it'),
+     L('B_Attomic','me','Eu vazo as print tudo pros chief ai se quiser','I will leak all the screenshots to the chiefs if you want'),
+     L('B_Attomic','me','Pq o Bigos cmg é orgulho','Because with Bigos and me it is pride'),
+     L('B_Attomic','me','Ele ta errado e sabe disso','He is wrong and he knows it'),
+     L('B_Attomic','me','E eu nem quero desculpas, caguei pra ele totalmente','And I do not even want an apology, I could not care less about him'),
+     L('B_Attomic','me','Vc mesmo viu com seus olhos que eu sempre estive disposto a ser uma comunidade brasileira e nao so uma guilda','You saw with your own eyes that I was always willing to be a Brazilian community and not just a guild')
+    ]}
+  ]
+ }]
+}
+
+],
+
+owned:{
+  kicker:T('Prestação de contas','Accountability'),
+  title:T('Onde eu errei.','Where I was wrong.'),
+  intro:T('Se eu só listasse o que fizeram comigo, esse documento seria propaganda. Então aqui está a outra metade, sem atenuante e sem "mas".',
+          'If I only listed what was done to me, this document would be propaganda. So here is the other half, with no excuses and no "buts".'),
+  items:[
+    T('Usei uma acusação que eu não podia provar como instrumento de pressão contra um player de <b>14 anos</b>. Eu queria paz e não enxerguei na hora o que aquilo era — mas era chantagem.',
+      'I used an accusation I could not prove as leverage against a <b>14-year-old</b> player. I wanted peace and did not see at the time what it was — but it was blackmail.'),
+    T('Chamei um grupo inteiro de "bando de adulto improdutivo" com raiva, num servidor onde eu sou responsável pelo tom.',
+      'I called an entire group "a bunch of unproductive adults" in anger, in a server where I am responsible for the tone.'),
+    T('Bani gente no impulso e transformei aquilo numa <b>blacklist de guilda inteira</b>, que atinge gente que nunca fez nada comigo. Ela existe até hoje.',
+      'I banned people on impulse and turned it into a <b>whole-guild blacklist</b>, which hits people who never did anything to me. It still exists today.')
+  ]
+},
+
+ask:{
+  kicker:T('O que eu peço','What I ask'),
+  title:T('Três pedidos, e nenhum deles é ataque.','Three requests, and none of them is an attack.'),
+  items:[
+    {h:T('Pros membros da WnBR','To WnBR members'),
+     p:T('Isso aqui é contexto, não ordem de serviço. Ninguém sai atacando ninguém, ninguém entra em servidor de ninguém, ninguém manda DM pra recruta dos outros. Se a gente fizer o que a gente reclama, o documento inteiro perde valor.',
+         'This is context, not a work order. Nobody goes attacking anyone, nobody raids anyone’s server, nobody DMs other people’s recruits. If we do the thing we complain about, the whole document loses its value.')},
+    {h:T('Pra GsW','To GsW'),
+     p:T('Neutralidade. Vocês não precisam gostar da gente e a gente não precisa gostar de vocês. Para de shout por cima, a gente para também. A oferta é a mesma desde janeiro de 2025 e continua de pé.',
+         'Neutrality. You do not have to like us and we do not have to like you. Stop shouting over us and we stop too. The offer is the same since January 2025 and it still stands.')},
+    {h:T('Pra quem lê de fora','To everyone else reading'),
+     p:T('Julgue pelos prints, não por mim. Eles estão inteiros, com data e horário, e o ato em que eu sou o vilão está no meio deles com o mesmo destaque dos outros.',
+         'Judge by the screenshots, not by me. They are here in full, with dates and times, and the act where I am the villain sits among them with the same prominence as the rest.')}
+  ],
+  sig:T('B_Attomic — WnBR, Wynn Brasil','B_Attomic — WnBR, Wynn Brasil')
+}
+};
+
+/* ═══════════════════════════════════════════════════════════
+   3. RENDER
+   ═══════════════════════════════════════════════════════════ */
+let LANG = (localStorage.getItem('gsw-lang')==='en') ? 'en' : 'pt';
+const t = o => (o && typeof o==='object' && 'pt' in o) ? (o[LANG]||o.pt) : (o||'');
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+function imgTag(key,alt){
+  if(!IMG[key]) return `<div class="missing">${esc(t(DOC.ui.missing)).replace(/\n/g,'<br>')}</div>`;
+  return `<img src="${IMG[key]}" alt="${esc(alt)}" loading="lazy">`;
+}
+
+/* Apelido que aparece no print  ->  nickname real da pessoa.
+   A transcrição sempre mostra o nickname real; o apelido do print
+   vai embaixo, em cinza, pra bater com a imagem ao lado. */
+const CANON = {
+  'Fatal_Addicted':'B_Attomic', 'Warrer':'B_Attomic', 'AsymptomaticSlowness':'B_Attomic',
+  'Bigo':'Bigouslino', 'Bigos':'Bigouslino',
+  'Volkzz':'Volkzz101',
+  'iYasuo_':'iMonoYasuo',
+  'Kwte':'SoggyKwte',
+  'Closerapha':'CloseRapha',
+  'infinity1111':'1nfinity',
+  'rafaelgomes':'RafaelGomes'
+};
+function whoTag(l){
+  const raw = l.who || '';
+  const real = CANON[raw] || raw;
+  const sub = l.raw || (real !== raw ? raw : '');
+  return `<span class="who">${esc(real)}${sub?`<em>${esc(sub)}</em>`:''}</span>`;
+}
+function renderLines(lines){
+  return lines.map(l=>{
+    const cls = l.cls ? l.cls : ('s-'+l.side);
+    return `<div class="line ${cls}">${whoTag(l)}<span class="txt">${esc(t(l))}</span></div>`;
+  }).join('');
+}
+function renderOrig(lines){
+  return lines.map(l=>`<div class="line ${l.cls?l.cls:('s-'+l.side)}">${whoTag(l)}<span class="txt">${esc(l.pt)}</span></div>`).join('');
+}
+
+function renderEvidence(evi,actNum,idx){
+  const n = evi.slides.length;
+  /* saída de bot (log de ban) não tem transcrição: a imagem já é o
+     texto. Nesses casos o print ocupa a largura inteira. */
+  const slides = evi.slides.map((s,i)=>{
+    const has = s.lines && s.lines.length;
+    return `
+    <div class="slide ${i===0?'on':''}" data-i="${i}">
+      <div class="slide-grid${has?'':' nolines'}">
+        <div class="shot">
+          ${imgTag(s.img, t(evi.label)+' — '+(i+1))}
+          <div class="cap">${t(s.cap)}</div>
+        </div>
+        ${has?`<div class="script">
+          <div class="sh">${esc(t(DOC.ui.transcript))} · ${i+1}/${n}</div>
+          <div class="lines">${renderLines(s.lines)}</div>
+          ${LANG==='en'?`<button class="origtoggle" type="button">${esc(t(DOC.ui.showOrig))}</button>
+          <div class="orig">${renderOrig(s.lines)}</div>`:''}
+        </div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+  const dots = n>1 ? evi.slides.map((_,i)=>`<i data-i="${i}" class="${i===0?'on':''}"></i>`).join('') : '';
+  const nav = n>1 ? `
+    <div class="evi-nav">
+      <button class="prev" disabled>${esc(t(DOC.ui.prev))}</button>
+      <div class="dots">${dots}</div>
+      <button class="next">${esc(t(DOC.ui.next))}</button>
+    </div>` : '';
+  return `
+  <div class="evi" data-idx="0" data-n="${n}">
+    <div class="evi-head">
+      <span class="badge">${esc(t(DOC.ui.evidence))} ${actNum}.${idx+1}</span>
+      <span class="lbl">${t(evi.label)}</span>
+      <span class="count">${n} ${n>1?'prints':'print'}</span>
+    </div>
+    ${slides}
+    ${nav}
+  </div>`;
+}
+
+function render(){
+  document.documentElement.lang = LANG==='en'?'en':'pt-BR';
+  const D = DOC;
+
+  /* nav */
+  const navItems = [
+    ['hero', t(D.ui.navHero)],
+    ...D.acts.map(a=>[a.id, a.num]),
+    ['owned', t(D.ui.navOwned)],
+    ['ask', t(D.ui.navAsk)]
+  ];
+  document.getElementById('nav').innerHTML = navItems
+    .map(([id,l])=>`<a href="#${id}" data-t="${id}">${esc(l)}</a>`).join('');
+
+  /* hero */
+  let h = `
+  <section id="hero"><div class="wrap">
+    <div class="eyebrow rv">${esc(t(D.hero.eyebrow))}</div>
+    <h1 class="rv">${t(D.hero.title)}</h1>
+    <p class="sub rv">${t(D.hero.sub)}</p>
+  </div><div class="scrollcue">${esc(t(D.hero.cue))}</div></section>`;
+
+  /* como ler */
+  h += `
+  <section id="howto"><div class="wrap">
+    <div class="blocktitle rv">${esc(t(D.howto.kicker))}</div>
+    <h2 class="big rv">${esc(t(D.howto.title))}</h2>
+    <div class="principles rv">
+      ${D.howto.items.map(i=>`<article><span class="n">${i.n}</span><h3>${esc(t(i.h))}</h3><p>${esc(t(i.p))}</p></article>`).join('')}
+    </div>
+  </div></section>`;
+
+  /* elenco */
+  h += `
+  <section id="cast"><div class="wrap">
+    <div class="blocktitle rv">${esc(t(D.cast.kicker))}</div>
+    <h2 class="big rv">${esc(t(D.cast.title))}</h2>
+    <p class="castnote rv">${t(D.cast.note)}</p>
+    ${D.cast.groups.map(g=>`
+      <div class="castgroup rv">
+        <h3 class="g-${g.side}">${esc(t(g.label))}</h3>
+        <div class="people${g.people.length===1?' solo':''}">
+          ${g.people.map(p=>`
+            <div class="person is-${g.side}">
+              <div class="nick">${esc(p.nick)}</div>
+              <div class="alias">${p.alias==='—'?'—':'<span>=</span> '+esc(p.alias)}</div>
+              <div class="role">${t(p.role)}</div>
+            </div>`).join('')}
+        </div>
+      </div>`).join('')}
+    <div class="guildkey rv">${D.cast.guilds.map(([a,b])=>`<span><b>${esc(a)}</b>${b==='—'?'':' · '+esc(b)}</span>`).join('')}</div>
+  </div></section>`;
+
+  /* atos */
+  h += `<div id="acts">` + D.acts.map(a=>`
+    <section class="act" id="${a.id}"><div class="wrap"><div class="act-inner">
+      <div class="rail rv">
+        <span class="num">${a.num}</span>
+        <span class="yr">${esc(a.yr)}</span>
+        <span class="tag">${esc(t(a.tag))}</span>
+      </div>
+      <div class="act-main">
+        <div class="rv">
+          <div class="blocktitle">${esc(t(D.ui.actWord))} ${a.num} · ${esc(t(a.date))}</div>
+          <h2>${esc(t(a.title))}</h2>
+          <p class="lede">${t(a.lede)}</p>
+        </div>
+        <div class="body rv">${a.body.map(p=>`<p>${t(p)}</p>`).join('')}</div>
+        ${a.evidence.length===0?`<div class="noproof rv">${esc(t(D.ui.noproof))}</div>`:''}
+        ${a.evidence.map((e,i)=>`<div class="rv">${renderEvidence(e,a.num,i)}</div>`).join('')}
+      </div>
+    </div></div></section>`).join('') + `</div>`;
+
+  /* onde eu errei */
+  h += `
+  <section id="owned"><div class="wrap">
+    <div class="shellbox rv">
+      <div class="blocktitle">${esc(t(D.owned.kicker))}</div>
+      <h2>${esc(t(D.owned.title))}</h2>
+      <p class="intro">${esc(t(D.owned.intro))}</p>
+      <ol class="owns">${D.owned.items.map(i=>`<li>${t(i)}</li>`).join('')}</ol>
+    </div>
+  </div></section>`;
+
+  /* pedido */
+  h += `
+  <section id="ask"><div class="wrap">
+    <div class="blocktitle rv">${esc(t(D.ask.kicker))}</div>
+    <h2 class="big rv">${esc(t(D.ask.title))}</h2>
+    <div class="asks rv">${D.ask.items.map(i=>`<article><h3>${esc(t(i.h))}</h3><p>${esc(t(i.p))}</p></article>`).join('')}</div>
+    <div class="sig rv">${esc(t(D.ask.sig))}</div>
+  </div></section>`;
+
+  document.getElementById('app').innerHTML = h;
+  document.querySelectorAll('#lang button').forEach(b=>b.classList.toggle('on', b.dataset.l===LANG));
+  wire();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   4. INTERAÇÃO
+   ═══════════════════════════════════════════════════════════ */
+function goSlide(evi,i){
+  const n = +evi.dataset.n;
+  i = Math.max(0, Math.min(n-1, i));
+  evi.dataset.idx = i;
+  evi.querySelectorAll(':scope > .slide').forEach(s=>s.classList.toggle('on', +s.dataset.i===i));
+  evi.querySelectorAll('.dots i').forEach(d=>d.classList.toggle('on', +d.dataset.i===i));
+  const p = evi.querySelector('.prev'), nx = evi.querySelector('.next');
+  if(p) p.disabled = i===0;
+  if(nx) nx.disabled = i===n-1;
+}
+
+function wire(){
+  /* carrossel */
+  document.querySelectorAll('.evi').forEach(evi=>{
+    const p = evi.querySelector('.prev'), n = evi.querySelector('.next');
+    if(p) p.onclick = ()=>goSlide(evi, +evi.dataset.idx - 1);
+    if(n) n.onclick = ()=>goSlide(evi, +evi.dataset.idx + 1);
+    evi.querySelectorAll('.dots i').forEach(d=>d.onclick = ()=>goSlide(evi, +d.dataset.i));
+    evi.tabIndex = 0;
+    evi.onkeydown = e=>{
+      if(e.key==='ArrowRight'){goSlide(evi, +evi.dataset.idx+1); e.preventDefault();}
+      if(e.key==='ArrowLeft'){goSlide(evi, +evi.dataset.idx-1); e.preventDefault();}
+    };
+  });
+
+  /* original PT sob a tradução */
+  document.querySelectorAll('.origtoggle').forEach(b=>{
+    b.onclick = ()=>{
+      const box = b.nextElementSibling;
+      const on = box.classList.toggle('on');
+      b.textContent = on ? t(DOC.ui.hideOrig) : t(DOC.ui.showOrig);
+    };
+  });
+
+  /* lightbox */
+  const lb = document.getElementById('lb'), lbi = lb.querySelector('img');
+  document.querySelectorAll('.shot img').forEach(im=>{
+    im.onclick = ()=>{ lbi.src = im.src; lbi.alt = im.alt; lb.classList.add('on'); };
+  });
+  lb.onclick = ()=>lb.classList.remove('on');
+
+  /* reveal — com rede de segurança: se por qualquer motivo o
+     observer não disparar, tudo aparece em 2,5s de qualquer jeito */
+  const all = [...document.querySelectorAll('.rv')];
+  if(document.documentElement.classList.contains('anim')){
+    const io = new IntersectionObserver(es=>{
+      es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target);} });
+    },{rootMargin:'0px 0px -8% 0px',threshold:.06});
+    all.forEach((el,i)=>{
+      el.style.transitionDelay = Math.min(i%6,5)*55 + 'ms';
+      io.observe(el);
+    });
+    /* o que já está na tela aparece na hora, sem esperar o observer */
+    const vh = window.innerHeight || 800;
+    all.forEach(el=>{
+      const r = el.getBoundingClientRect();
+      if(r.top < vh && r.bottom > 0) el.classList.add('in');
+    });
+    clearTimeout(window.__rvSafety);
+    window.__rvSafety = setTimeout(()=>all.forEach(el=>el.classList.add('in')), 2500);
+  } else {
+    all.forEach(el=>el.classList.add('in'));
+  }
+
+  /* scrollspy */
+  const links = [...document.querySelectorAll('#nav a')];
+  const targets = links.map(a=>document.getElementById(a.dataset.t)).filter(Boolean);
+  if('IntersectionObserver' in window && targets.length){
+    const spy = new IntersectionObserver(es=>{
+      es.forEach(e=>{
+        if(e.isIntersecting){
+          links.forEach(a=>a.classList.toggle('on', a.dataset.t===e.target.id));
+        }
+      });
+    },{rootMargin:'-45% 0px -50% 0px'});
+    targets.forEach(s=>spy.observe(s));
+  }
+}
+
+/* só liga a animação de entrada se o navegador der suporte */
+if('IntersectionObserver' in window) document.documentElement.classList.add('anim');
+
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape') document.getElementById('lb').classList.remove('on');
+});
+document.querySelectorAll('#lang button').forEach(b=>{
+  b.onclick = ()=>{
+    if(LANG===b.dataset.l) return;
+    LANG = b.dataset.l;
+    localStorage.setItem('gsw-lang', LANG);
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0,y);
+  };
+});
+
+render();
+</script>
+</body>
+</html>
