@@ -66,6 +66,41 @@ export function isValidNick(nick) {
   return /^\w{1,20}$/.test(String(nick ?? '').trim());
 }
 
+/**
+ * Os nomes pelos quais vale tentar achar alguém na API, do mais para o menos
+ * confiável. São TRÊS campos diferentes no Discord, e usar só um deles fazia o
+ * bot ignorar gente que estava com o nick à vista:
+ *
+ *  - `nickname`   — o apelido no servidor. Pode estar vazio.
+ *  - `globalName` — o "display name", que é o nome que todo mundo VÊ na lista de
+ *                   membros quando não há apelido. Era ignorado por completo.
+ *  - `username`   — o @handle. Desde 2023 é sempre minúsculo e aceita ponto, e
+ *                   por isso sozinho não representa mais o nome de ninguém: um
+ *                   handle `gwen.zzy` nem passa no teste de nick válido.
+ *
+ * Sai sem repetição (comparando sem caixa, já que a API é caso-insensível na
+ * busca) e só com o que poderia ser um nick — normalmente uma ou duas entradas.
+ *
+ * @param {import('discord.js').GuildMember} member
+ * @returns {string[]}
+ */
+export function nickCandidates(member) {
+  const brutos = [member.nickname, member.user?.globalName, member.user?.username];
+  const vistos = new Set();
+  const out = [];
+  for (const bruto of brutos) {
+    // Descasca a TAG: quem já foi renomeado para `[GsW] Fulano` tem `Fulano`
+    // como nick, e sem isto a consulta iria com o colchete e não acharia nada.
+    const nick = stripNickTag(bruto);
+    if (!isValidNick(nick)) continue;
+    const chave = nick.toLowerCase();
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    out.push(nick);
+  }
+  return out;
+}
+
 // A nossa guilda ainda vem do ambiente: ela é uma só e não muda. As OUTRAS
 // (black-list e aliadas) vivem no banco, geridas por `/guilds` — ver
 // services/guildList.js.
@@ -618,48 +653,59 @@ export async function sweepMembers(guild, {
       continue;
     }
 
-    // Descasca a TAG: quem já foi renomeado para `[GsW] Fulano` tem `Fulano`
-    // como nick, e sem isto a consulta iria com o colchete e não acharia nada.
-    const rawNick = stripNickTag(member.nickname || member.user.username);
-
-    // Apelido que não pode ser nick nem chega à API. É a maioria dos casos numa
-    // varredura de servidor grande ("Ninja no celular", "joão | BR", emojis) e
-    // era ele que enchia a fila de requisições inúteis.
-    if (!isValidNick(rawNick)) {
+    // Apelido, display name e @handle. Nenhum deles podendo ser nick, a pessoa
+    // nem chega à API — é a maioria dos casos num servidor grande ("Ninja no
+    // celular", "joão | BR", emojis), e era isso que enchia a fila de
+    // requisições inúteis.
+    const candidatos = nickCandidates(member);
+    if (!candidatos.length) {
       summary.invalid += 1;
       continue;
     }
 
-    // Acabou o tempo da rodada: o resto fica para o próximo clique. Continuar
-    // seria varrer com um token de interação já morto — trabalho feito que
-    // ninguém veria.
-    if (!noPrazo()) {
+    // Tenta um nome de cada vez e para no primeiro que resolver. Só um "não
+    // existe" justifica tentar o seguinte: conflito, ambiguidade ou rate limit
+    // são respostas sobre a PESSOA, e insistir com outro nome só faria o bot
+    // vincular a conta errada.
+    let res = null;
+    let semTempo = false;
+    for (const rawNick of candidatos) {
+      // Acabou o tempo da rodada: o resto fica para o próximo clique. Continuar
+      // seria varrer com um token de interação já morto — trabalho feito que
+      // ninguém veria.
+      if (!noPrazo()) {
+        semTempo = true;
+        break;
+      }
+      summary.lookups += 1;
+      if (summary.lookups % PROGRESS_EVERY === 0) await progresso();
+
+      // Uma pessoa não pode custar a varredura inteira. Antes deste `catch`,
+      // qualquer erro inesperado da API (foi um 300 de nick ambíguo que apareceu
+      // na prática) subia até o handler do botão: a rodada morria no meio, sem
+      // resumo e sem auditoria, e clicar de novo parava exatamente no mesmo nick.
+      try {
+        res = await performLink({
+          client: guild.client,
+          guildId: guild.id,
+          targetDiscordId: member.id,
+          targetMember: member,
+          rawNick,
+          actorId,
+          force: false,
+          silent: true,
+        });
+      } catch (e) {
+        log.warn(`Registro em massa: falhei em ${rawNick} (${member.id}):`, e?.message ?? e);
+        res = { ok: false, code: 'failed' };
+        break;
+      }
+      if (res.ok || res.code !== 'not_found') break;
+    }
+
+    if (semTempo) {
       summary.timedOut = true;
       summary.remaining += 1;
-      continue;
-    }
-    summary.lookups += 1;
-    if (summary.lookups % PROGRESS_EVERY === 0) await progresso();
-
-    // Uma pessoa não pode custar a varredura inteira. Antes deste `catch`,
-    // qualquer erro inesperado da API (foi um 300 de nick ambíguo que apareceu
-    // na prática) subia até o handler do botão: a rodada morria no meio, sem
-    // resumo e sem auditoria, e clicar de novo parava exatamente no mesmo nick.
-    let res;
-    try {
-      res = await performLink({
-        client: guild.client,
-        guildId: guild.id,
-        targetDiscordId: member.id,
-        targetMember: member,
-        rawNick,
-        actorId,
-        force: false,
-        silent: true,
-      });
-    } catch (e) {
-      log.warn(`Registro em massa: falhei em ${rawNick} (${member.id}):`, e?.message ?? e);
-      summary.failed += 1;
       continue;
     }
 

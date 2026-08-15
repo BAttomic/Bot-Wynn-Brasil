@@ -6,7 +6,7 @@ import {
   syncNickname,
   expectedNickname,
   stripNickTag,
-  isValidNick,
+  nickCandidates,
 } from './registration.js';
 import { loadGuildIndex } from './guildList.js';
 import { ensureAllyRole, syncAllyIdentity } from './allyRoles.js';
@@ -242,12 +242,20 @@ export async function computeReconciliation(guild) {
 
   for (const member of guild.members.cache.values()) {
     if (member.user.bot) continue;
-    const nick = member.nickname || member.user.username;
-    // A TAG é descascada só para IDENTIFICAR: `[GsW] Fulano` é o Fulano do
-    // roster. O `nick` original continua sendo o que se compara com o esperado.
-    const nickLower = norm(stripNickTag(nick));
+    // O nome VISÍVEL na lista de membros: apelido, ou o display name, ou o
+    // @handle — nessa ordem, que é a que o próprio Discord usa.
+    const nick = member.displayName;
+    // Para IDENTIFICAR, porém, os três valem: quem está sem apelido pode ter o
+    // nick no display name, e o @handle é minúsculo e pode ter ponto. Ganha o
+    // primeiro que aparecer num roster ou num vínculo; sem nenhum casando, fica
+    // o visível. A TAG é descascada aqui (`[GsW] Fulano` é o Fulano do roster);
+    // o `nick` original continua sendo o que se compara com o esperado.
+    const candidatos = nickCandidates(member);
     const link = linkByDiscord.get(member.id);
-    if (!link && isValidNick(stripNickTag(nick))) pendingRegistration += 1;
+    if (!link && candidatos.length) pendingRegistration += 1;
+    const nickLower =
+      candidatos.map(norm).find((c) => canonicalByName.has(c) || linkByName.has(c)) ??
+      norm(stripNickTag(nick));
     const uuid = link?.uuid ?? matchUuid(nickLower, uuidByName, linkByName);
     let kind = resolveKind({ nickLower, uuid, discordId: member.id, linked: !!link }, ctx);
 
