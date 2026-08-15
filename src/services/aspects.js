@@ -47,6 +47,12 @@ const ASPECT_PROJECTION = {
 /**
  * A conta de um membro só. Fica isolada para `listAspects` e o resumo de uma
  * pessoa (usado na mensagem de entrega) nunca poderem divergir.
+ *
+ * `pending` é o SALDO, e continua fracionário: a 0,5 por raid, um número ímpar
+ * de raids deixa meio aspect pendurado. `deliverable` é quanto dá para entregar
+ * DE VERDADE — aspect no jogo é item inteiro, não existe passar meio. A metade
+ * que sobra não se perde: fica no saldo e vira unidade quando a próxima raid
+ * fechar o par.
  */
 function computeAspect(r, rate, minDays) {
   // Sem baseline ainda → base = total atual → 0 raids contados (começa do zero).
@@ -54,6 +60,7 @@ function computeAspect(r, rate, minDays) {
   const raids = Math.max(0, (r.guildRaids ?? 0) - base);
   const earned = raids * rate;
   const delivered = r.aspectsDelivered ?? 0;
+  const pending = earned - delivered;
   const days = r.joinedGuildAt ? Math.floor((Date.now() - new Date(r.joinedGuildAt).getTime()) / 86_400_000) : null;
   return {
     uuid: r.uuid,
@@ -61,7 +68,9 @@ function computeAspect(r, rate, minDays) {
     raids,
     earned,
     delivered,
-    pending: earned - delivered,
+    pending,
+    // Saldo negativo (entregou-se a mais no passado) não vira dívida a entregar.
+    deliverable: Math.max(0, Math.floor(pending)),
     days,
     eligible: days !== null && days >= minDays,
   };
@@ -98,16 +107,30 @@ export async function aspectStatus(guildId, uuid) {
   return row ? computeAspect(row, rate, minDays) : null;
 }
 
-/** Só quem PODE receber agora (elegível + com pendência), do maior para o menor. */
+/**
+ * Só quem PODE receber agora: elegível e com pelo menos UMA unidade inteira.
+ *
+ * Quem tem só 0,5 acumulado fica de fora — não há o que entregar, e listar essa
+ * pessoa no menu seria oferecer uma entrega impossível. Ela continua aparecendo
+ * no `/aspects`, onde o saldo fracionário é informação legítima.
+ */
 export async function pendingAspects(guildId) {
   return (await listAspects(guildId))
-    .filter((a) => a.eligible && a.pending > 0)
-    .sort((a, b) => b.pending - a.pending);
+    .filter((a) => a.eligible && a.deliverable >= 1)
+    .sort((a, b) => b.deliverable - a.deliverable);
 }
 
-/** Registra uma entrega (acumula em guildStats.aspectsDelivered). */
+/**
+ * Registra uma entrega (acumula em guildStats.aspectsDelivered).
+ *
+ * Só aceita unidade inteira: aspect é item, e meio item não passa de mão. Entregar
+ * MAIS do que o saldo é permitido de propósito — acontece de a staff passar a
+ * mais no jogo, e o excedente vira saldo negativo que as próximas raids quitam.
+ *
+ * @returns {boolean} false se a quantidade não for um inteiro positivo
+ */
 export async function deliverAspects(uuid, amount) {
-  if (!(amount > 0)) return false;
+  if (!Number.isInteger(amount) || amount <= 0) return false;
   await collections.guildStats().updateOne({ uuid }, { $inc: { aspectsDelivered: amount } });
   return true;
 }
@@ -125,12 +148,16 @@ export async function deliverAspects(uuid, amount) {
  * pode ser menos que zero. Quem fica negativo é o SALDO (gerado − entregue),
  * calculado em listAspects.
  *
+ * Só unidades inteiras: o que se corrige aqui é quanto SAIU do baú, e do baú
+ * nunca saiu meio aspect. Um ajuste fracionário só poderia vir de erro de
+ * digitação, e aceitá-lo criaria um saldo quebrado que nunca fecha.
+ *
  * @param {string} uuid
- * @param {number} delta  positivo soma, negativo estorna
+ * @param {number} delta  inteiro; positivo soma, negativo estorna
  * @returns {Promise<{antes:number, agora:number}|null>} null se não achou
  */
 export async function adjustAspectsDelivered(uuid, delta) {
-  if (!Number.isFinite(delta) || delta === 0) return null;
+  if (!Number.isInteger(delta) || delta === 0) return null;
   const antes = await collections.guildStats().findOne({ uuid }, { projection: { aspectsDelivered: 1 } });
   if (!antes) return null;
   const agora = Math.max(0, (antes.aspectsDelivered ?? 0) + delta);

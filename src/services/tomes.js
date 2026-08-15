@@ -58,6 +58,12 @@ export async function rankedQueue(guildId) {
         days,
         tenureOk,
         credits,
+        // "X de Y" na fila: Y é o direito de VIDA (uma missão semanal cumprida =
+        // um Tome, acumulando), X é quanto já saiu. Mostrar o SALDO no lugar de Y
+        // confundia — "recebeu 3 · pode receber 2" se lê como cota estourada,
+        // quando na verdade a pessoa cumpriu 5 semanais e levou 3.
+        delivered: s?.tomesDelivered ?? 0,
+        entitled: s?.weeklyObjectives ?? 0,
         ready: tenureOk && credits > 0,
         // Por que está em espera — o primeiro motivo que falta.
         blockedBy: !tenureOk ? 'days' : credits <= 0 ? 'weekly' : null,
@@ -85,8 +91,9 @@ export async function queueView(guildId) {
  * outro não a mantém na fila: quem quiser o próximo entra de novo, e volta para
  * o fim — ou melhor, para a posição que os pontos dela mandarem.
  *
- * @returns {Promise<{credits:number, delivered:number}>} `credits` = quantos
- *   ainda pode pedir; `delivered` = total que já recebeu, esta entrega inclusa
+ * @returns {Promise<{credits:number, delivered:number, entitled:number}>}
+ *   `credits` = quantos ainda pode pedir; `delivered` = total que já recebeu,
+ *   esta entrega inclusa; `entitled` = direito de vida (semanais cumpridas)
  */
 export async function deliverTome(uuid) {
   await collections.guildStats().updateOne({ uuid }, { $inc: { tomesDelivered: 1 } }, { upsert: true });
@@ -94,7 +101,11 @@ export async function deliverTome(uuid) {
   const stat = await collections
     .guildStats()
     .findOne({ uuid }, { projection: { weeklyObjectives: 1, tomesDelivered: 1 } });
-  return { credits: tomeCredits(stat), delivered: stat?.tomesDelivered ?? 0 };
+  return {
+    credits: tomeCredits(stat),
+    delivered: stat?.tomesDelivered ?? 0,
+    entitled: stat?.weeklyObjectives ?? 0,
+  };
 }
 
 function fmtAsp(n) {
@@ -139,6 +150,22 @@ function btn(id, label, emoji, style) {
   return new ButtonBuilder().setCustomId(id).setLabel(label).setEmoji(emoji).setStyle(style);
 }
 
+/**
+ * Junta as linhas respeitando o teto de 1024 do campo de embed, cortando por
+ * LINHA inteira. Estourar o limite faz a edição do painel falhar por completo —
+ * o painel congela e só o log denuncia.
+ */
+function fieldValue(linhas, max = 1024) {
+  const out = [];
+  let tamanho = 0;
+  for (const linha of linhas) {
+    if (tamanho + linha.length + 1 > max) break;
+    out.push(linha);
+    tamanho += linha.length + 1;
+  }
+  return out.join('\n');
+}
+
 // Painel AO VIVO do canal de tomes/aspects: fila de Tomes (por pontos) + aspects
 // gerados em guild raids ainda a entregar. Republicado pelo job de painéis e
 // logo após cada ação (entrar/sair da fila, entregar tome/aspect).
@@ -148,17 +175,22 @@ export async function buildTomePanel(guildId) {
   const minLvl = Number(params?.tomeMinClassLevel) || 100;
   const { ready: queue, waiting: queueWaiting } = await queueView(guildId);
   const aspects = await listAspects(guildId);
-  const pending = aspects.filter((a) => a.eligible && a.pending > 0).sort((a, b) => b.pending - a.pending);
+  // Só quem tem unidade INTEIRA a receber: aspect não se parte, e meio acumulado
+  // não é entregável.
+  const pending = aspects.filter((a) => a.eligible && a.deliverable >= 1).sort((a, b) => b.deliverable - a.deliverable);
   // Já têm aspect acumulado, mas ainda não completaram os 7 dias de guilda.
-  const waiting = aspects.filter((a) => !a.eligible && a.pending > 0).length;
+  const waiting = aspects.filter((a) => !a.eligible && a.deliverable >= 1).length;
 
+  // Duas linhas por pessoa: a posição e, logo abaixo, o acumulado de vida. Quem
+  // olha a fila quer saber "quanto essa pessoa já levou?" antes de entregar, e
+  // esse número não estava em lugar nenhum — só aparecia depois da entrega.
   const queueLines = queue.length
     ? queue
         .slice(0, TOP)
-        .map(
-          (r, i) =>
-            `\`${String(i + 1).padStart(2, ' ')}.\` **${r.username}** — ${r.points} pts · ${r.credits}× 📜`,
-        )
+        .flatMap((r, i) => [
+          `\`${String(i + 1).padStart(2, ' ')}.\` **${r.username}** — ${r.points} pts`,
+          `> já recebeu **${r.delivered}** de **${r.entitled}** 📜 a que tem direito`,
+        ])
     : ['Fila vazia — clique em **Entrar na fila**.'];
   // Entraram na fila, mas ainda faltam dias de guilda ou missão semanal.
   if (queueWaiting.length) {
@@ -169,9 +201,11 @@ export async function buildTomePanel(guildId) {
       .join(' · ');
     queueLines.push(`-# +${queueWaiting.length} em espera (${motivos})`);
   }
-  // Só o que a staff precisa fazer: quanto entregar. Quanto a pessoa gerou e em
-  // quantas raids é derivável e não muda a ação — poluía a linha.
-  const aspectLines = pending.slice(0, TOP).map((a) => `**${a.username}** — ${fmtAsp(a.pending)} a entregar`);
+  // Só o que a staff precisa fazer: quantas unidades INTEIRAS entregar. A meia
+  // unidade que sobra fica no saldo e não é acionável agora.
+  const aspectLines = pending
+    .slice(0, TOP)
+    .map((a) => `**${a.username}** — **${a.deliverable}** a entregar${a.pending % 1 ? ` (+${fmtAsp(a.pending % 1)} acumulando)` : ''}`);
   if (waiting) aspectLines.push(`-# +${waiting} aguardando completar ${minDays} dias na guilda`);
 
   const embed = {
@@ -183,11 +217,13 @@ export async function buildTomePanel(guildId) {
     fields: [
       {
         name: `📜 Fila de Tomes (${queue.length})`,
-        value: queueLines.join('\n'),
+        // Duas linhas por pessoa aproximam o teto de 1024 do Discord; cortar é
+        // melhor que o painel inteiro falhar ao editar.
+        value: fieldValue(queueLines),
       },
       {
         name: `✨ Aspects a entregar (${pending.length})`,
-        value: aspectLines.join('\n') || 'Nada pendente 🎉',
+        value: fieldValue(aspectLines) || 'Nada pendente 🎉',
       },
     ],
     footer: { text: 'Fila por pontos · 1 tome por missão semanal · aspects: 0,5 por guild raid · apurado de hora em hora' },

@@ -52,24 +52,40 @@ async function replyAndDismiss(interaction, payload, seconds = DISMISS.delivery)
 /**
  * O acumulado da pessoa, em citação (`>`), para a confirmação de quem entregou.
  *
- * A fila vale por UM: receber tira da fila mesmo quem ainda tem crédito, então a
- * linha precisa dizer o que fazer para pegar o próximo, senão a pessoa fica
- * esperando uma vez que não vem.
+ * Mesmo formato da fila — "X de Y" — para o número não mudar de significado
+ * entre um lugar e outro.
+ *
+ * A fila vale por UM: receber tira da fila mesmo quem ainda tem direito a mais,
+ * então a linha precisa dizer o que fazer para pegar o próximo. Não há espera
+ * nenhuma para reentrar; basta ter direito.
  */
-function tomeSummary({ username, delivered, credits }) {
-  const total = `**${username}** já recebeu **${delivered}** Tome(s)`;
+function tomeSummary({ username, delivered, entitled, credits }) {
+  const total = `**${username}** — **${delivered}** de **${entitled}** Tome(s) a que tem direito`;
   return credits > 0
-    ? `> ${total} · ainda tem direito a **${credits}** — a fila vale por 1, então precisa entrar nela de novo.`
-    : `> ${total} · sem crédito agora — cada missão semanal da guilda dá direito a mais 1.`;
+    ? `> ${total} · faltam **${credits}**, e a fila vale por 1 — é só entrar de novo, sem espera.`
+    : `> ${total} · nada a receber agora; cada missão semanal cumprida dá direito a mais 1.`;
 }
 
-/** O mesmo, para aspects: acumulado entregue e o que ainda sobra. */
+/**
+ * Como está o saldo da pessoa DEPOIS da entrega. São três estados de verdade
+ * diferentes, e confundi-los é o que faz a staff entregar duas vezes:
+ *
+ *  - ainda tem unidade inteira a receber;
+ *  - só sobrou fração, que não dá para entregar e fica acumulando;
+ *  - ficou devendo, porque recebeu a mais.
+ */
+function saldoLabel(status) {
+  if (!status) return 'saldo desconhecido';
+  if (status.pending < 0) return `⚠️ recebeu ${fmtAsp(-status.pending)} a mais — as próximas raids quitam`;
+  if (status.deliverable >= 1) return `ainda faltam **${status.deliverable}**`;
+  if (status.pending > 0) return `sobrou ${fmtAsp(status.pending)} acumulando`;
+  return 'nada pendente';
+}
+
+/** O acumulado de vida da pessoa em aspects, para a confirmação da staff. */
 function aspectSummary(status) {
   if (!status) return null;
-  const total = `**${status.username}** já recebeu **${fmtAsp(status.delivered)}** aspect(s)`;
-  return status.pending > 0
-    ? `> ${total} · ainda faltam **${fmtAsp(status.pending)}** a entregar.`
-    : `> ${total} · nada pendente no momento.`;
+  return `> **${status.username}** já recebeu **${fmtAsp(status.delivered)}** aspect(s) · ${saldoLabel(status)}.`;
 }
 
 // Ações abertas a qualquer membro. `queue` saiu daqui junto com o botão "Ver
@@ -87,6 +103,11 @@ const MANAGER_GUILD_RANKS = Object.freeze(['chief', 'owner']);
 
 /** O menu de seleção do Discord aceita no máximo 25 opções. */
 const SELECT_LIMIT = 25;
+
+// O modal do Discord aceita no máximo 5 campos de texto. Como a entrega de
+// aspects exige a staff informar quanto entregou a CADA um, o lote de aspects
+// para em 5 — não é escolha nossa, é o teto da plataforma.
+const MODAL_FIELD_LIMIT = 5;
 
 /**
  * @param {import('discord.js').Interaction} interaction
@@ -121,7 +142,7 @@ async function deliverTo(interaction, uuids) {
       ausentes.push(uuid);
       continue;
     }
-    const { credits, delivered } = await deliverTome(uuid);
+    const { credits, delivered, entitled } = await deliverTome(uuid);
     await recordDelivery({
       kind: 'tome',
       uuid,
@@ -129,7 +150,7 @@ async function deliverTo(interaction, uuids) {
       discordId: entry.discordId,
       byDiscordId: interaction.user.id,
     });
-    linhas.push(tomeSummary({ username: entry.username, delivered, credits }));
+    linhas.push(tomeSummary({ username: entry.username, delivered, entitled, credits }));
   }
 
   await refreshPanels(interaction);
@@ -152,145 +173,151 @@ async function deliverTo(interaction, uuids) {
 // --- Entrega de aspects (recompensa de guild raid, ao lado dos tomes) ---
 
 /**
- * Passo 1: escolher quem recebeu, entre os que têm pendência.
+ * Passo 1: escolher quem recebeu, entre os que têm unidade inteira a receber.
  *
- * Marcando VÁRIOS, cada um recebe exatamente o que estava pendente — é o caso
- * normal, e não há o que digitar. Marcando UM SÓ, abre o modal para informar uma
- * quantidade diferente (entrega parcial, ou correção na hora).
+ * O teto de 5 não é escolha nossa: o modal do Discord aceita no máximo 5 campos,
+ * e cada pessoa precisa do seu — a staff informa quanto entregou DE VERDADE, que
+ * pode ser mais do que o saldo (no jogo se passa a mais, e isso vira saldo
+ * negativo que as próximas raids quitam).
  */
 async function promptAspectDelivery(interaction) {
   if (!(await isTomeManager(interaction))) {
     return interaction.reply({ content: 'Apenas **Chief ou superior** pode entregar aspects.', ephemeral: true });
   }
   const pending = await pendingAspects(interaction.guildId);
-  if (!pending.length) return interaction.reply({ content: 'Ninguém tem aspects pendentes.', ephemeral: true });
+  if (!pending.length) {
+    return interaction.reply({
+      content: 'Ninguém tem aspect inteiro a receber.\n-# Quem tem só meio acumulado aparece no `/aspects`, mas não dá para entregar meio aspect.',
+      ephemeral: true,
+    });
+  }
 
-  const opcoes = pending.slice(0, SELECT_LIMIT);
+  const opcoes = pending.slice(0, MODAL_FIELD_LIMIT);
   const menu = new StringSelectMenuBuilder()
     .setCustomId('tome:aspectPick')
-    .setPlaceholder('Quem recebeu aspects? (pode marcar vários)')
+    .setPlaceholder(`Quem recebeu aspects? (até ${MODAL_FIELD_LIMIT})`)
     .setMinValues(1)
     .setMaxValues(opcoes.length)
     .addOptions(
       opcoes.map((a) => ({
         label: a.username,
         value: a.uuid,
-        description: `${fmtAsp(a.pending)} pendente(s)`,
+        description: `${a.deliverable} a entregar`,
       })),
     );
+  const sobra = pending.length - opcoes.length;
   return interaction.reply({
     content:
-      'Selecione quem recebeu — pode marcar vários, e cada um recebe o que está pendente.\n' +
-      '-# Marcando **uma** pessoa só, dá para informar uma quantidade diferente.',
+      `Selecione quem recebeu — até **${MODAL_FIELD_LIMIT}** por vez. Em seguida você informa quanto entregou a cada um.` +
+      (sobra ? `\n-# Mais ${sobra} na fila; entregue em rodadas.` : ''),
     components: [new ActionRowBuilder().addComponents(menu)],
     ephemeral: true,
   });
 }
 
 /**
- * Passo 2. Um selecionado: pergunta a quantidade. Vários: entrega o pendente de
- * cada um direto, sem modal — perguntar vinte vezes seria o mesmo spam de antes.
+ * Passo 2: um campo por pessoa selecionada, já preenchido com o que ela tem a
+ * receber. A staff edita quem precisar — inclusive para MAIS, e deixar em branco
+ * (ou zero) pula aquela pessoa.
+ *
+ * Os uuids vão no customId porque o modal não carrega estado próprio, e a ordem
+ * dos campos precisa casar com a ordem deles na hora de aplicar.
  */
 async function promptAspectAmount(interaction) {
   if (!(await isTomeManager(interaction))) {
     return interaction.update({ content: 'Sem permissão.', components: [] });
   }
 
-  if (interaction.values.length > 1) {
-    await interaction.deferUpdate();
-    return deliverAspectBatch(interaction, interaction.values);
+  const escolhidos = interaction.values.slice(0, MODAL_FIELD_LIMIT);
+  const pending = await pendingAspects(interaction.guildId);
+  const alvos = escolhidos.map((uuid) => pending.find((a) => a.uuid === uuid)).filter(Boolean);
+  if (!alvos.length) {
+    return interaction.update({ content: 'Ninguém da seleção tem aspect inteiro a receber agora.', components: [] });
   }
 
-  const uuid = interaction.values[0];
-  const a = (await pendingAspects(interaction.guildId)).find((x) => x.uuid === uuid);
   const modal = new ModalBuilder()
-    .setCustomId(`tome:aspectAmount:${uuid}`)
+    .setCustomId(`tome:aspectAmount:${alvos.map((a) => a.uuid).join(',')}`)
     .setTitle('Entregar aspects')
     .addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('amount')
-          .setLabel(`Quantidade (pendente: ${fmtAsp(a?.pending ?? 0)})`)
-          .setPlaceholder('Ex.: 2 ou 0.5')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true),
+      ...alvos.map((a) =>
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId(`amt:${a.uuid}`)
+            // O label do Discord vai a 45 caracteres; nick vai a 20, então cabe.
+            .setLabel(`${a.username} (a receber: ${a.deliverable})`.slice(0, 45))
+            .setValue(String(a.deliverable))
+            .setPlaceholder('Unidades inteiras. 0 ou vazio = pular')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false),
+        ),
       ),
     );
   return interaction.showModal(modal);
 }
 
 /**
- * Entrega, a cada selecionado, exatamente o que estava pendente. Recalcula na
- * hora: entre abrir o menu e clicar, alguém pode ter recebido por outra via.
+ * Passo 3: aplica o que a staff digitou, um campo por pessoa.
+ *
+ * Aceita MAIS do que o saldo de propósito: no jogo se entrega a mais, e o
+ * excedente vira saldo negativo que as próximas raids quitam (ver a nota no topo
+ * de services/aspects.js). O que NÃO se aceita é fração — aspect é item inteiro.
  */
-async function deliverAspectBatch(interaction, uuids) {
-  const alvo = new Set(uuids);
-  const pending = (await pendingAspects(interaction.guildId)).filter((a) => alvo.has(a.uuid));
-
-  const linhas = [];
-  let total = 0;
-  for (const a of pending) {
-    await deliverAspects(a.uuid, a.pending);
-    const link = await collections.members().findOne({ uuid: a.uuid }, { projection: { discordId: 1 } });
-    await recordDelivery({
-      kind: 'aspect',
-      uuid: a.uuid,
-      username: a.username,
-      discordId: link?.discordId ?? null,
-      amount: a.pending,
-      byDiscordId: interaction.user.id,
-    });
-    total += a.pending;
-    linhas.push(`> **${a.username}** — ${fmtAsp(a.pending)} entregue(s), nada mais pendente.`);
-  }
-
-  await refreshPanels(interaction);
-
-  if (!linhas.length) {
-    return replyAndDismiss(interaction, {
-      content: 'Ninguém da seleção tem pendência agora — nada entregue.',
-      components: [],
-    });
-  }
-  const pulados = uuids.length - linhas.length;
-  return replyAndDismiss(interaction, {
-    content:
-      `✨ **${fmtAsp(total)}** aspect(s) entregues a **${linhas.length}** pessoa(s).\n` +
-      linhas.join('\n') +
-      (pulados ? `\n-# ${pulados} já não tinha(m) pendência e foram pulados.` : ''),
-    components: [],
-  });
-}
-
-/** Passo 3: aplica a entrega e atualiza o painel. */
 async function applyAspectDelivery(interaction) {
   if (!(await isTomeManager(interaction))) {
     return interaction.reply({ content: 'Sem permissão.', ephemeral: true });
   }
   await interaction.deferReply({ ephemeral: true });
-  const uuid = interaction.customId.split(':')[2];
-  const amount = Number(interaction.fields.getTextInputValue('amount').replace(',', '.'));
-  if (!(amount > 0)) return interaction.editReply('Quantidade inválida. Use um número, ex.: `0.5`.');
 
-  await deliverAspects(uuid, amount);
-  // Depois da entrega: o resumo tem de refletir o estado novo, não o de antes.
-  const status = await aspectStatus(interaction.guildId, uuid);
-  const name = status?.username ?? uuid;
-  // guildStats não guarda o Discord id — o vínculo mora em `members`.
-  const link = await collections.members().findOne({ uuid }, { projection: { discordId: 1 } });
-  await recordDelivery({
-    kind: 'aspect',
-    uuid,
-    username: name,
-    discordId: link?.discordId ?? null,
-    amount,
-    byDiscordId: interaction.user.id,
-  });
+  const uuids = interaction.customId.split(':')[2].split(',').filter(Boolean);
+
+  const entregues = [];
+  const invalidos = [];
+  let total = 0;
+
+  for (const uuid of uuids) {
+    const bruto = (interaction.fields.getTextInputValue(`amt:${uuid}`) ?? '').trim();
+    const status = await aspectStatus(interaction.guildId, uuid);
+    const nome = status?.username ?? uuid;
+
+    // Vazio ou zero = a staff decidiu não entregar a essa pessoa agora.
+    if (!bruto || bruto === '0') continue;
+
+    const valor = Number(bruto.replace(',', '.'));
+    if (!Number.isInteger(valor) || valor <= 0) {
+      invalidos.push(`**${nome}**: \`${bruto}\``);
+      continue;
+    }
+
+    await deliverAspects(uuid, valor);
+    const link = await collections.members().findOne({ uuid }, { projection: { discordId: 1 } });
+    await recordDelivery({
+      kind: 'aspect',
+      uuid,
+      username: nome,
+      discordId: link?.discordId ?? null,
+      amount: valor,
+      byDiscordId: interaction.user.id,
+    });
+    total += valor;
+    // Relê DEPOIS da entrega: o resumo tem de refletir o estado novo.
+    entregues.push({ valor, status: await aspectStatus(interaction.guildId, uuid) });
+  }
+
   await refreshPanels(interaction);
-  const resumo = aspectSummary(status);
+
+  const aviso = invalidos.length
+    ? `\n⚠️ Ignorado (não é unidade inteira): ${invalidos.join(', ')}.`
+    : '';
+
+  if (!entregues.length) {
+    return replyAndDismiss(interaction, `Nada entregue.${aviso}`, DISMISS.member);
+  }
+
+  const linhas = entregues.map((e) => `> **${e.status?.username ?? '?'}** — ${e.valor} entregue(s) · ${saldoLabel(e.status)}`);
   return replyAndDismiss(
     interaction,
-    `✨ Entregue: **${fmtAsp(amount)}** aspect(s) a **${name}**.` + (resumo ? `\n${resumo}` : ''),
+    `✨ **${total}** aspect(s) entregue(s) a **${entregues.length}** pessoa(s).\n${linhas.join('\n')}${aviso}`,
+    aviso ? DISMISS.member : DISMISS.delivery,
   );
 }
 
@@ -317,12 +344,12 @@ async function promptDelivery(interaction) {
       opcoes.map((r, i) => ({
         label: r.username,
         value: r.uuid,
-        description: `${i + 1}º na fila · ${r.points} pts · direito a ${r.credits}`,
+        description: `${i + 1}º · ${r.points} pts · ${r.delivered}/${r.entitled} recebidos`.slice(0, 100),
       })),
     );
 
   return interaction.reply({
-    content: `Selecione quem recebeu — pode marcar vários. Consome um crédito de missão semanal de cada um.${ready.length > SELECT_LIMIT ? `\n-# Mostrando os ${SELECT_LIMIT} primeiros de ${ready.length}.` : ''}`,
+    content: `Selecione quem recebeu — pode marcar vários. Cada um leva **1 Tome** e sai da fila; quem ainda tiver direito entra de novo, sem espera.${ready.length > SELECT_LIMIT ? `\n-# Mostrando os ${SELECT_LIMIT} primeiros de ${ready.length}.` : ''}`,
     components: [new ActionRowBuilder().addComponents(menu)],
     ephemeral: true,
   });
@@ -375,8 +402,15 @@ async function joinQueue(interaction) {
 
   const entry = ready.find((r) => r.uuid === member.uuid);
   const pos = ready.indexOf(entry) + 1;
+  // A regra que mais gera dúvida: a fila vale por UM. Quem tem direito a mais de
+  // um não recebe tudo de uma vez — recebe, sai, e entra de novo na hora.
+  const maisDeUm =
+    entry.credits > 1
+      ? `\n-# A fila vale por **1 Tome**. Você tem direito a ${entry.credits}; depois de receber, entre de novo — não há espera.`
+      : '';
   return interaction.editReply(
-    `Você entrou na fila de Tomes! Posição atual: **${pos}** de ${ready.length} — direito a **${entry.credits} Tome(s)**.\n-# A fila é ordenada por pontos de contribuição, não por ordem de chegada.`,
+    `Você entrou na fila de Tomes! Posição atual: **${pos}** de ${ready.length} — já recebeu **${entry.delivered}** de **${entry.entitled}** a que tem direito.\n` +
+      `-# A fila é ordenada por pontos de contribuição, não por ordem de chegada.${maisDeUm}`,
   );
 }
 
@@ -393,9 +427,13 @@ async function leaveQueue(interaction) {
 async function showQueue(interaction) {
   const { ready, waiting, minDays } = await queueView(interaction.guildId);
   if (!ready.length && !waiting.length) return interaction.editReply('A fila de Tomes está vazia.');
+  // Mesmo formato do painel: nome e, sob ele, o acumulado de vida.
   const lines = ready
     .slice(0, 15)
-    .map((r, i) => `\`${String(i + 1).padStart(2, ' ')}\` **${r.username}** — ${r.points} pts · ${r.credits}× 📜`);
+    .flatMap((r, i) => [
+      `\`${String(i + 1).padStart(2, ' ')}\` **${r.username}** — ${r.points} pts`,
+      `> já recebeu **${r.delivered}** de **${r.entitled}** 📜 a que tem direito`,
+    ]);
   if (!ready.length) lines.push('_Ninguém elegível ainda._');
   // Em espera aparecem à parte: estão na fila, mas ainda não valem.
   if (waiting.length) {
@@ -516,7 +554,7 @@ export default {
       if (!ready.length) return interaction.editReply('Ninguém elegível na fila.');
       target = ready[0];
     }
-    const { credits, delivered } = await deliverTome(target.uuid);
+    const { credits, delivered, entitled } = await deliverTome(target.uuid);
     await recordDelivery({
       kind: 'tome',
       uuid: target.uuid,
@@ -528,7 +566,7 @@ export default {
     return replyAndDismiss(
       interaction,
       `📜 Tome concedido a **${target.username}**. Saiu da fila.\n` +
-        tomeSummary({ username: target.username, delivered, credits }),
+        tomeSummary({ username: target.username, delivered, entitled, credits }),
     );
   },
 };

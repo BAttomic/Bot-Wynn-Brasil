@@ -35,16 +35,19 @@ export default {
     // Correção de entrega digitada errada. Vivem como OPÇÕES do /aspects, e não
     // como subcomando, para o `/aspects` puro continuar funcionando como sempre.
     //
-    // Duas formas porque as duas situações são diferentes: `estornar` para
-    // desfazer UMA entrega errada (não precisa saber o acumulado) e `entregues`
-    // para reescrever o total quando se sabe o número certo.
-    .addNumberOption((o) =>
+    // Duas formas porque as duas situações são diferentes: `ajustar` para mexer
+    // no que já foi entregue sem precisar saber o acumulado, e `entregues` para
+    // reescrever o total quando se sabe o número certo.
+    //
+    // Inteiros nos dois casos: o que se corrige aqui é quanto SAIU do baú, e do
+    // baú nunca saiu meio aspect.
+    .addIntegerOption((o) =>
       o
-        .setName('estornar')
-        .setDescription('(Corrige) Quanto entregou A MAIS. Ex.: digitou 20 e eram 2 → 18. Exige "user".')
+        .setName('ajustar')
+        .setDescription('(Corrige) Unidades a MAIS (+3) ou a MENOS (-2) no já entregue. Exige "user".')
         .setRequired(false),
     )
-    .addNumberOption((o) =>
+    .addIntegerOption((o) =>
       o
         .setName('entregues')
         .setDescription('(Corrige) Novo TOTAL já entregue a esse jogador. Exige "user".')
@@ -64,17 +67,18 @@ export default {
     const all = await listAspects(interaction.guildId);
     const user = interaction.options.getUser('user');
 
-    const corrigir = interaction.options.getNumber('entregues');
-    const estornar = interaction.options.getNumber('estornar');
-    if (corrigir !== null && estornar !== null) {
+    const corrigir = interaction.options.getInteger('entregues');
+    const ajustar = interaction.options.getInteger('ajustar');
+    if (corrigir !== null && ajustar !== null) {
       return interaction.editReply(
-        'Use **uma** das duas: `estornar` (quanto passou a mais) ou `entregues` (o total certo).',
+        'Use **uma** das duas: `ajustar` (quanto somar ou tirar) ou `entregues` (o total certo).',
       );
     }
-    if ((corrigir !== null || estornar !== null) && !user) {
+    if ((corrigir !== null || ajustar !== null) && !user) {
       return interaction.editReply(
         'Para corrigir, informe também o **user**:\n' +
-          '• `/aspects user:@fulano estornar:18` — tira 18 do que já foi entregue\n' +
+          '• `/aspects user:@fulano ajustar:-18` — tira 18 do que já foi entregue\n' +
+          '• `/aspects user:@fulano ajustar:3` — soma 3 que você entregou e não registrou\n' +
           '• `/aspects user:@fulano entregues:2` — reescreve o total para 2',
       );
     }
@@ -85,17 +89,18 @@ export default {
       if (!link) return interaction.editReply(`<@${user.id}> não está vinculado a nenhuma conta.`);
 
       // ---- Correção ----
-      if (corrigir !== null || estornar !== null) {
-        // `estornar: 18` significa "tira 18", então o sinal é invertido aqui —
-        // quem digita não precisa lembrar de pôr o menos.
+      if (corrigir !== null || ajustar !== null) {
+        // `ajustar` já vem com o sinal que a pessoa quis: +3 soma ao entregue,
+        // -2 tira. É o mesmo verbo para os dois erros (esqueci de registrar /
+        // registrei demais), e sem inversão escondida no meio do caminho.
         const res =
-          estornar !== null
-            ? await adjustAspectsDelivered(link.uuid, -estornar)
+          ajustar !== null
+            ? await adjustAspectsDelivered(link.uuid, ajustar)
             : await setAspectsDelivered(link.uuid, corrigir);
         if (!res) {
           return interaction.editReply(
-            estornar === 0
-              ? 'Estornar zero não faz nada. Informe quanto foi entregue a mais.'
+            ajustar === 0
+              ? 'Ajustar zero não faz nada. Use um número com sinal, ex.: `-2` para tirar 2 ou `3` para somar 3.'
               : `**${link.username}** não tem registro em guildStats.`,
           );
         }
@@ -132,8 +137,12 @@ export default {
         a.pending < 0
           ? `\n-# ⚠️ Saldo negativo: recebeu ${fmt(-a.pending)} a mais do que gerou.`
           : '';
+      // A fração que sobra é informação legítima aqui (é o saldo real), mas o
+      // número que importa para AGIR é quantas unidades inteiras dá para passar.
+      const sobra = a.pending > 0 && a.pending % 1 ? ` (+${fmt(a.pending % 1)} acumulando)` : '';
       return interaction.editReply(
-        `✨ **${a.username}** — **${fmt(a.pending)}** a entregar\n> Já recebeu **${fmt(a.delivered)}** aspect(s) · ${rate}/raid.${gate}${devendo}`,
+        `✨ **${a.username}** — **${a.deliverable}** a entregar${sobra}\n` +
+          `> Já recebeu **${fmt(a.delivered)}** aspect(s) · ${rate}/raid.${gate}${devendo}`,
       );
     }
 
@@ -141,17 +150,17 @@ export default {
     const relevant = all.filter((a) => a.earned > 0 || a.delivered > 0);
     if (!relevant.length) return interaction.editReply('Ninguém gerou aspects desde o início da contagem.');
 
-    // Ordena pelo pendente (o que importa entregar), depois pelo gerado.
-    const rows = [...relevant].sort((x, y) => y.pending - x.pending || y.earned - x.earned);
+    // Ordena pelo que dá para entregar (o que importa agir), depois pelo saldo.
+    const rows = [...relevant].sort((x, y) => y.deliverable - x.deliverable || y.pending - x.pending);
     const totalEarned = relevant.reduce((s, r) => s + r.earned, 0);
-    const totalPending = relevant.reduce((s, r) => s + r.pending, 0);
+    const totalDeliverable = relevant.reduce((s, r) => s + r.deliverable, 0);
 
     const lines = rows
       .slice(0, TOP)
-      .map(
-        (r, i) =>
-          `\`${String(i + 1).padStart(2, ' ')}.\` ${r.eligible ? '' : '⏳ '}**${r.username}** — ${fmt(r.pending)} a entregar · já recebeu ${fmt(r.delivered)}`,
-      );
+      .map((r, i) => {
+        const sobra = r.pending > 0 && r.pending % 1 ? ` (+${fmt(r.pending % 1)})` : '';
+        return `\`${String(i + 1).padStart(2, ' ')}.\` ${r.eligible ? '' : '⏳ '}**${r.username}** — ${r.deliverable} a entregar${sobra} · já recebeu ${fmt(r.delivered)}`;
+      });
 
     return interaction.editReply({
       embeds: [
@@ -162,7 +171,7 @@ export default {
           fields: [
             {
               name: 'Totais da guilda',
-              value: `A entregar: **${fmt(totalPending)}** · Gerado no total: **${fmt(totalEarned)}** (${relevant.length} membros)`,
+              value: `A entregar: **${totalDeliverable}** (unidades inteiras) · Gerado no total: **${fmt(totalEarned)}** (${relevant.length} membros)`,
             },
           ],
           footer: {
