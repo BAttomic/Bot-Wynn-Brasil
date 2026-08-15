@@ -253,11 +253,18 @@ Mexendo no manifesto:
 - **Subir a versão do Minecraft**: troque `minecraft`. É decisão da staff, de
   propósito — seguir "a última" automaticamente quebraria todo mundo que ainda
   não atualizou o jogo no dia em que o WynnCraft mudasse de versão.
-- **Só tem beta para a versão nova?** `"allowBeta": true` naquele mod. Sem isso
-  o pack só distribui release — nenhuma guilda quer receber beta por acidente.
+- **Mod que não publica release?** `"allowPrerelease": true` naquele mod, e ele
+  passa a aceitar beta e alpha (o WynnExtras só publica alpha, por exemplo). Sem
+  a chave o pack só distribui release — nenhuma guilda quer beta por acidente.
 
 Toda atualização vira uma linha no canal de auditoria (`logs`), com o de/para de
 cada mod.
+
+**Quando um mod não tem versão para o `minecraft` fixado**, o pack inteiro deixa
+de atualizar — continuar servindo o de ontem, completo, é melhor que publicar um
+sem o Wynntils — e o motivo vai para o canal de erros, uma vez por falha e não a
+cada passada. É o sinal de que chegou a hora de subir a versão no manifesto (ou
+de tirar o mod da lista).
 
 ## Ops (VPS / Easypanel)
 

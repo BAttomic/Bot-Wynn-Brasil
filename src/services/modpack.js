@@ -53,7 +53,7 @@ export function dataDir() {
   return dir;
 }
 
-/** @returns {{name: string, summary: string, minecraft: string, loader: string, mods: Array<{slug: string, name?: string, allowBeta?: boolean}>}} */
+/** @returns {{name: string, summary: string, minecraft: string, loader: string, mods: Array<{slug: string, name?: string, allowPrerelease?: boolean}>}} */
 function readManifest() {
   const path = fileURLToPath(new URL('../data/modpack.json', import.meta.url));
   return JSON.parse(readFileSync(path, 'utf8'));
@@ -70,11 +70,14 @@ async function fetchJson(url) {
  *
  * Só **release** por padrão. Isso importa de verdade: no dia em que escrevi
  * isto, a versão mais recente do Sodium para o 1.21.11 era uma beta — sem o
- * filtro, o pack oficial da guilda distribuiria beta para todo mundo. Um mod que
- * só publique beta para a versão nova do jogo pode liberar com
- * `"allowBeta": true` no manifesto.
+ * filtro, o pack oficial da guilda distribuiria beta para todo mundo.
  *
- * @param {{slug: string, name?: string, allowBeta?: boolean}} mod
+ * `allowPrerelease` libera beta E alpha, e pega a mais nova das três sem
+ * preferir uma categoria: existe para mod que simplesmente NUNCA publica
+ * release (o WynnExtras é assim — só alpha e beta), e nesse caso preferir a
+ * beta mais antiga à alpha mais nova congelaria o mod numa versão velha.
+ *
+ * @param {{slug: string, name?: string, allowPrerelease?: boolean}} mod
  * @param {{minecraft: string, loader: string}} manifest
  */
 async function resolveMod(mod, manifest) {
@@ -88,11 +91,13 @@ async function resolveMod(mod, manifest) {
     (a, b) => new Date(b.date_published) - new Date(a.date_published),
   );
   const escolhida = ordenadas.find((v) => v.version_type === 'release')
-    ?? (mod.allowBeta ? ordenadas[0] : null);
+    ?? (mod.allowPrerelease ? ordenadas[0] : null);
   if (!escolhida) {
     throw new Error(
-      `${mod.slug}: nenhuma release para ${manifest.loader} ${manifest.minecraft}` +
-      `${ordenadas.length ? ' (só beta/alpha — libere com "allowBeta": true se for o caso)' : ''}`,
+      ordenadas.length
+        ? `${mod.slug}: só tem ${[...new Set(ordenadas.map((v) => v.version_type))].join('/')} para ` +
+          `${manifest.loader} ${manifest.minecraft} — libere com "allowPrerelease": true se for o caso`
+        : `${mod.slug}: nenhuma versão para ${manifest.loader} ${manifest.minecraft}`,
     );
   }
   const arquivo = escolhida.files.find((f) => f.primary) ?? escolhida.files[0];
@@ -202,10 +207,32 @@ export async function refreshModpack({ force = false } = {}) {
   const manifest = readManifest();
   const dir = dataDir();
 
-  // Sequencial de propósito: são 7 chamadas uma vez por dia, e em rajada a
-  // Modrinth responde 429.
+  // Sequencial de propósito: é uma chamada por mod, poucas vezes por dia, e em
+  // rajada a Modrinth responde 429.
+  //
+  // As falhas são ACUMULADAS em vez de abortarem na primeira: quando o
+  // WynnCraft muda de versão do jogo, meia dúzia de mods some de uma vez, e
+  // saber disso mod a mod (em vez de um por execução, de 6 em 6 horas) é a
+  // diferença entre uma decisão e uma novela.
   const mods = [];
-  for (const mod of manifest.mods) mods.push(await resolveMod(mod, manifest));
+  const falhas = [];
+  for (const mod of manifest.mods) {
+    try {
+      mods.push(await resolveMod(mod, manifest));
+    } catch (e) {
+      falhas.push(e.message);
+    }
+  }
+  if (falhas.length) {
+    // Pack incompleto não vai para o ar: melhor continuar servindo o de ontem,
+    // inteiro, do que publicar um sem o Wynntils.
+    const e = new Error(
+      `${falhas.length} mod(s) sem versão para ${manifest.loader} ${manifest.minecraft}:\n` +
+      falhas.map((f) => `• ${f}`).join('\n'),
+    );
+    e.code = 'MODPACK_UNRESOLVED';
+    throw e;
+  }
 
   const digest = createHash('sha1')
     .update(mods.map((m) => `${m.slug}@${m.version}`).join('|'))
