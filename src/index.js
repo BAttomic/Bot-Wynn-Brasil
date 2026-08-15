@@ -19,7 +19,7 @@ import { ensurePanels, attachRegistrationGuard } from './services/registration.j
 import { ensureStaticPanels } from './services/staticPanels.js';
 import { ensurePingRolePanels, attachPingRoleHandler } from './services/pingRoles.js';
 import { ensureDownloadsPanel, ensureLeaderboardPanel } from './services/leaderboardPanel.js';
-import { ensureTomePanel } from './services/tomes.js';
+import { ensureTomePanel, ensureDeliveryLogPanel } from './services/tomes.js';
 import { ensureAspectBaselines } from './services/aspects.js';
 import { warnIfEmpty } from './services/guildList.js';
 import { runPingsCleanup } from './jobs/pingsCleanup.js';
@@ -110,7 +110,9 @@ async function main() {
         ['registro', () => ensurePanels(client, guildId)],
         ['estáticos', () => ensureStaticPanels(client, guildId)],
         ['pings', () => ensurePingRolePanels(client, guildId)],
+        // Ordem no canal de tomes: fila ao vivo primeiro, histórico logo abaixo.
         ['tomes', () => ensureTomePanel(client, guildId)],
+        ['log de entregas', () => ensureDeliveryLogPanel(client, guildId)],
         // Ordem no canal de status: info (ao vivo) → downloads → leaderboard.
         ['downloads', () => ensureDownloadsPanel(client, guildId)],
         ['leaderboard', () => ensureLeaderboardPanel(client, guildId)],

@@ -133,7 +133,7 @@ export default {
           ? `\n-# ⚠️ Saldo negativo: recebeu ${fmt(-a.pending)} a mais do que gerou.`
           : '';
       return interaction.editReply(
-        `✨ **${a.username}** — **${fmt(a.pending)}** a entregar\n-# Gerou ${fmt(a.earned)} em ${a.raids} raids · já recebeu ${fmt(a.delivered)} · ${rate}/raid.${gate}${devendo}`,
+        `✨ **${a.username}** — **${fmt(a.pending)}** a entregar\n> Já recebeu **${fmt(a.delivered)}** aspect(s) · ${rate}/raid.${gate}${devendo}`,
       );
     }
 
@@ -150,7 +150,7 @@ export default {
       .slice(0, TOP)
       .map(
         (r, i) =>
-          `\`${String(i + 1).padStart(2, ' ')}.\` ${r.eligible ? '' : '⏳ '}**${r.username}** — ${fmt(r.pending)} a entregar · gerou ${fmt(r.earned)} (${r.raids} raids)`,
+          `\`${String(i + 1).padStart(2, ' ')}.\` ${r.eligible ? '' : '⏳ '}**${r.username}** — ${fmt(r.pending)} a entregar · já recebeu ${fmt(r.delivered)}`,
       );
 
     return interaction.editReply({

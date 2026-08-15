@@ -34,6 +34,39 @@ export async function ensureAspectBaselines() {
   );
 }
 
+/** Campos de `guildStats` que a conta de aspects precisa. */
+const ASPECT_PROJECTION = {
+  uuid: 1,
+  username: 1,
+  guildRaids: 1,
+  aspectBaseRaids: 1,
+  aspectsDelivered: 1,
+  joinedGuildAt: 1,
+};
+
+/**
+ * A conta de um membro só. Fica isolada para `listAspects` e o resumo de uma
+ * pessoa (usado na mensagem de entrega) nunca poderem divergir.
+ */
+function computeAspect(r, rate, minDays) {
+  // Sem baseline ainda → base = total atual → 0 raids contados (começa do zero).
+  const base = r.aspectBaseRaids ?? r.guildRaids ?? 0;
+  const raids = Math.max(0, (r.guildRaids ?? 0) - base);
+  const earned = raids * rate;
+  const delivered = r.aspectsDelivered ?? 0;
+  const days = r.joinedGuildAt ? Math.floor((Date.now() - new Date(r.joinedGuildAt).getTime()) / 86_400_000) : null;
+  return {
+    uuid: r.uuid,
+    username: r.username,
+    raids,
+    earned,
+    delivered,
+    pending: earned - delivered,
+    days,
+    eligible: days !== null && days >= minDays,
+  };
+}
+
 /**
  * Todos os membros com guild raids, contados do 0, já com elegibilidade dos 7
  * dias na guilda (só elegíveis podem RECEBER; os demais acumulam e esperam).
@@ -46,30 +79,23 @@ export async function listAspects(guildId) {
 
   const rows = await collections
     .guildStats()
-    .find(
-      { guildRaids: { $gt: 0 } },
-      { projection: { uuid: 1, username: 1, guildRaids: 1, aspectBaseRaids: 1, aspectsDelivered: 1, joinedGuildAt: 1 } },
-    )
+    .find({ guildRaids: { $gt: 0 } }, { projection: ASPECT_PROJECTION })
     .toArray();
 
-  return rows.map((r) => {
-    // Sem baseline ainda → base = total atual → 0 raids contados (começa do zero).
-    const base = r.aspectBaseRaids ?? r.guildRaids ?? 0;
-    const raids = Math.max(0, (r.guildRaids ?? 0) - base);
-    const earned = raids * rate;
-    const delivered = r.aspectsDelivered ?? 0;
-    const days = r.joinedGuildAt ? Math.floor((Date.now() - new Date(r.joinedGuildAt).getTime()) / 86_400_000) : null;
-    return {
-      uuid: r.uuid,
-      username: r.username,
-      raids,
-      earned,
-      delivered,
-      pending: earned - delivered,
-      days,
-      eligible: days !== null && days >= minDays,
-    };
-  });
+  return rows.map((r) => computeAspect(r, rate, minDays));
+}
+
+/**
+ * O mesmo retrato, para UMA pessoa. Existe para a mensagem de entrega poder
+ * dizer o acumulado sem varrer a coleção inteira.
+ * @returns {Promise<ReturnType<typeof computeAspect>|null>}
+ */
+export async function aspectStatus(guildId, uuid) {
+  const { params } = await getConfig(guildId);
+  const rate = Number(params?.aspectsPerGuildRaid) || 0.5;
+  const minDays = Number(params?.rewardMinGuildDays) || 7;
+  const row = await collections.guildStats().findOne({ uuid }, { projection: ASPECT_PROJECTION });
+  return row ? computeAspect(row, rate, minDays) : null;
 }
 
 /** Só quem PODE receber agora (elegível + com pendência), do maior para o menor. */

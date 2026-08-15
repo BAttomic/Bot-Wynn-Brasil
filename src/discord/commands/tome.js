@@ -8,37 +8,62 @@ import {
   TextInputStyle,
 } from 'discord.js';
 import { collections } from '../../db/mongo.js';
-import { queueView, deliverTome, tomeCredits, ensureTomePanel } from '../../services/tomes.js';
-import { pendingAspects, deliverAspects } from '../../services/aspects.js';
+import {
+  queueView,
+  deliverTome,
+  tomeCredits,
+  ensureTomePanel,
+  ensureDeliveryLogPanel,
+  recordDelivery,
+} from '../../services/tomes.js';
+import { pendingAspects, deliverAspects, aspectStatus } from '../../services/aspects.js';
 import { maxClassLevel, tomeMinLevel } from '../../services/eligibility.js';
-import { getConfig } from '../../config/guildConfig.js';
 
 const fmtAsp = (n) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 
 /**
- * Anuncia no canal de Tomes (junto da fila/painel), não no de auditoria.
+ * Republica os dois painéis do canal: a fila ao vivo e o histórico.
  *
- * Quem é NOTIFICADO é só quem recebeu: `ping` traz o Discord id do premiado. A
- * staff que entregou aparece marcada no texto, mas nunca leva ping — ela já sabe
- * o que fez, e são sempre as mesmas duas ou três pessoas entregando.
- *
- * @param {string[]} [ping] ids que podem ser notificados (só o premiado)
+ * Substituiu o anúncio por entrega. Antes, cada Tome ou aspect virava uma
+ * mensagem nova no canal — para o premiado (com ping) e à vista de todos —, e
+ * 24h depois a limpeza apagava tudo, sem deixar registro de quem recebeu o quê.
+ * Agora a entrega vira uma linha no painel de histórico, que é EDITADO: não
+ * pinga ninguém, não empurra o canal para baixo, e o extrato fica.
  */
-async function announceTome(client, guildDiscordId, content, ping = []) {
-  const cfg = await getConfig(guildDiscordId);
-  const channelId = cfg.channels?.tome;
-  if (!channelId) return;
-  const channel = await client.channels.fetch(channelId).catch(() => null);
-  if (channel) await channel.send({ content, allowedMentions: { users: ping.filter(Boolean) } });
+async function refreshPanels(interaction) {
+  await ensureTomePanel(interaction.client, interaction.guildId);
+  await ensureDeliveryLogPanel(interaction.client, interaction.guildId);
 }
 
-/** Como citar o premiado: marcado se estiver vinculado, senão só o nick. */
-function mention(discordId, username) {
-  return discordId ? `<@${discordId}> (**${username}**)` : `**${username}**`;
+/**
+ * O acumulado da pessoa, em citação (`>`), para a confirmação de quem entregou.
+ *
+ * A fila vale por UM: receber tira da fila mesmo quem ainda tem crédito, então a
+ * linha precisa dizer o que fazer para pegar o próximo, senão a pessoa fica
+ * esperando uma vez que não vem.
+ */
+function tomeSummary({ username, delivered, credits }) {
+  const total = `**${username}** já recebeu **${delivered}** Tome(s)`;
+  return credits > 0
+    ? `> ${total} · ainda tem direito a **${credits}** — a fila vale por 1, então precisa entrar nela de novo.`
+    : `> ${total} · sem crédito agora — cada missão semanal da guilda dá direito a mais 1.`;
 }
 
-/** Ações abertas a qualquer membro. @type {readonly string[]} */
-const BUTTON_ACTIONS = Object.freeze(['join', 'leave', 'queue']);
+/** O mesmo, para aspects: acumulado entregue e o que ainda sobra. */
+function aspectSummary(status) {
+  if (!status) return null;
+  const total = `**${status.username}** já recebeu **${fmtAsp(status.delivered)}** aspect(s)`;
+  return status.pending > 0
+    ? `> ${total} · ainda faltam **${fmtAsp(status.pending)}** a entregar.`
+    : `> ${total} · nada pendente no momento.`;
+}
+
+// Ações abertas a qualquer membro. `queue` saiu daqui junto com o botão "Ver
+// fila": a fila já está no painel, e o botão só produzia uma cópia efêmera dela.
+// O `/tome queue` continua existindo — quem digita o comando está pedindo, não
+// sendo bombardeado.
+/** @type {readonly string[]} */
+const BUTTON_ACTIONS = Object.freeze(['join', 'leave']);
 
 /**
  * Ranks DA GUILDA que podem entregar um Tome. "Chief ou superior".
@@ -67,18 +92,19 @@ async function deliverTo(interaction, uuid) {
   const entry = await collections.tomeQueue().findOne({ uuid });
   if (!entry) return interaction.editReply({ content: 'Essa pessoa não está mais na fila.', components: [] });
 
-  const { credits } = await deliverTome(uuid);
-  const resto = credits > 0 ? ` Ainda tem direito a **${credits}** — precisa entrar na fila de novo.` : '';
-  await announceTome(
-    interaction.client,
-    interaction.guildId,
-    `📜 Tome entregue a ${mention(entry.discordId, entry.username)} por <@${interaction.user.id}>.` +
-      (credits > 0 ? `\n-# Ainda tem direito a ${credits} — é só entrar na fila de novo.` : ''),
-    [entry.discordId],
-  );
-  await ensureTomePanel(interaction.client, interaction.guildId);
+  const { credits, delivered } = await deliverTome(uuid);
+  await recordDelivery({
+    kind: 'tome',
+    uuid,
+    username: entry.username,
+    discordId: entry.discordId,
+    byDiscordId: interaction.user.id,
+  });
+  await refreshPanels(interaction);
   return interaction.editReply({
-    content: `Tome entregue a **${entry.username}**. Saiu da fila.${resto}`,
+    content:
+      `📜 Tome entregue a **${entry.username}**. Saiu da fila.\n` +
+      tomeSummary({ username: entry.username, delivered, credits }),
     components: [],
   });
 }
@@ -144,18 +170,24 @@ async function applyAspectDelivery(interaction) {
   if (!(amount > 0)) return interaction.editReply('Quantidade inválida. Use um número, ex.: `0.5`.');
 
   await deliverAspects(uuid, amount);
-  const stat = await collections.guildStats().findOne({ uuid });
-  const name = stat?.username ?? uuid;
+  // Depois da entrega: o resumo tem de refletir o estado novo, não o de antes.
+  const status = await aspectStatus(interaction.guildId, uuid);
+  const name = status?.username ?? uuid;
   // guildStats não guarda o Discord id — o vínculo mora em `members`.
   const link = await collections.members().findOne({ uuid }, { projection: { discordId: 1 } });
-  await announceTome(
-    interaction.client,
-    interaction.guildId,
-    `✨ ${fmtAsp(amount)} aspect(s) entregue(s) a ${mention(link?.discordId, name)} por <@${interaction.user.id}>.`,
-    [link?.discordId],
+  await recordDelivery({
+    kind: 'aspect',
+    uuid,
+    username: name,
+    discordId: link?.discordId ?? null,
+    amount,
+    byDiscordId: interaction.user.id,
+  });
+  await refreshPanels(interaction);
+  const resumo = aspectSummary(status);
+  return interaction.editReply(
+    `✨ Entregue: **${fmtAsp(amount)}** aspect(s) a **${name}**.` + (resumo ? `\n${resumo}` : ''),
   );
-  await ensureTomePanel(interaction.client, interaction.guildId);
-  return interaction.editReply(`Entregue: **${fmtAsp(amount)}** aspect(s) a **${name}**.`);
 }
 
 /** Passo 1 do botão "Entregar Tome": escolher quem recebeu. */
@@ -323,8 +355,7 @@ export default {
     if (!BUTTON_ACTIONS.includes(action)) return;
     await interaction.deferReply({ ephemeral: true });
     if (action === 'join') return joinQueue(interaction);
-    if (action === 'leave') return leaveQueue(interaction);
-    return showQueue(interaction);
+    return leaveQueue(interaction);
   },
 
   async execute(interaction) {
@@ -362,18 +393,18 @@ export default {
       if (!ready.length) return interaction.editReply('Ninguém elegível na fila.');
       target = ready[0];
     }
-    const { credits } = await deliverTome(target.uuid);
-    await announceTome(
-      interaction.client,
-      interaction.guildId,
-      `📜 Tome concedido a ${mention(target.discordId, target.username)} por <@${interaction.user.id}>.` +
-        (credits > 0 ? `\n-# Ainda tem direito a ${credits} — é só entrar na fila de novo.` : ''),
-      [target.discordId],
-    );
-    await ensureTomePanel(interaction.client, interaction.guildId);
+    const { credits, delivered } = await deliverTome(target.uuid);
+    await recordDelivery({
+      kind: 'tome',
+      uuid: target.uuid,
+      username: target.username,
+      discordId: target.discordId,
+      byDiscordId: interaction.user.id,
+    });
+    await refreshPanels(interaction);
     return interaction.editReply(
-      `Tome concedido a **${target.username}**. Saiu da fila.` +
-        (credits > 0 ? ` Ainda tem direito a **${credits}** — precisa entrar na fila de novo.` : ''),
+      `📜 Tome concedido a **${target.username}**. Saiu da fila.\n` +
+        tomeSummary({ username: target.username, delivered, credits }),
     );
   },
 };

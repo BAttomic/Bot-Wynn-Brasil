@@ -5,9 +5,12 @@ import { ensurePanel } from './panels.js';
 import { listAspects } from './aspects.js';
 import { daysSince, minGuildDays } from './eligibility.js';
 import { brandWithLogo, logoAttachment } from '../util/assets.js';
+import { brDateTime } from '../util/format.js';
 
 const STATE_ID = 'tomePanel';
+const LOG_STATE_ID = 'tomeLogPanel';
 const TOP = 10; // linhas de cada seção no painel ao vivo
+const LOG_SIZE = 30; // entregas mostradas no painel de histórico
 
 /**
  * Quantos Tomes a pessoa ainda tem DIREITO a receber: cada objetivo semanal da
@@ -82,7 +85,8 @@ export async function queueView(guildId) {
  * outro não a mantém na fila: quem quiser o próximo entra de novo, e volta para
  * o fim — ou melhor, para a posição que os pontos dela mandarem.
  *
- * @returns {Promise<{credits:number}>} `credits` = quantos ainda pode pedir
+ * @returns {Promise<{credits:number, delivered:number}>} `credits` = quantos
+ *   ainda pode pedir; `delivered` = total que já recebeu, esta entrega inclusa
  */
 export async function deliverTome(uuid) {
   await collections.guildStats().updateOne({ uuid }, { $inc: { tomesDelivered: 1 } }, { upsert: true });
@@ -90,11 +94,45 @@ export async function deliverTome(uuid) {
   const stat = await collections
     .guildStats()
     .findOne({ uuid }, { projection: { weeklyObjectives: 1, tomesDelivered: 1 } });
-  return { credits: tomeCredits(stat) };
+  return { credits: tomeCredits(stat), delivered: stat?.tomesDelivered ?? 0 };
 }
 
 function fmtAsp(n) {
   return n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+}
+
+/**
+ * Registra uma entrega no histórico.
+ *
+ * Antes disto, cada entrega virava uma MENSAGEM no canal, apagada 24h depois: o
+ * canal virava um mural de avisos repetidos e, passado um dia, não sobrava
+ * registro nenhum de quem recebeu o quê. Agora a entrega é uma LINHA, e o painel
+ * de log a mostra junto das outras 29.
+ *
+ * @param {{kind:'tome'|'aspect', uuid:string, username:string, discordId?:string|null, amount?:number, byDiscordId:string}} p
+ */
+export async function recordDelivery({ kind, uuid, username, discordId = null, amount = 1, byDiscordId }) {
+  await collections.rewardLog().insertOne({
+    at: new Date(),
+    kind,
+    uuid,
+    username,
+    discordId,
+    amount,
+    byDiscordId,
+  });
+}
+
+/**
+ * As últimas entregas, da mais recente para a mais antiga.
+ *
+ * O `_id` desempata: duas entregas no mesmo milissegundo empatam no `at`, e o
+ * Mongo não promete ordem entre empates — o painel mostraria as duas em ordem
+ * arbitrária, trocando de posição a cada atualização. ObjectId é monotônico,
+ * então ele resolve o empate na ordem real de inserção.
+ */
+export async function recentDeliveries(limit = LOG_SIZE) {
+  return collections.rewardLog().find({}).sort({ at: -1, _id: -1 }).limit(limit).toArray();
 }
 
 function btn(id, label, emoji, style) {
@@ -131,9 +169,9 @@ export async function buildTomePanel(guildId) {
       .join(' · ');
     queueLines.push(`-# +${queueWaiting.length} em espera (${motivos})`);
   }
-  const aspectLines = pending
-    .slice(0, TOP)
-    .map((a) => `**${a.username}** — ${fmtAsp(a.pending)} a entregar · gerou ${fmtAsp(a.earned)} (${a.raids} raids)`);
+  // Só o que a staff precisa fazer: quanto entregar. Quanto a pessoa gerou e em
+  // quantas raids é derivável e não muda a ação — poluía a linha.
+  const aspectLines = pending.slice(0, TOP).map((a) => `**${a.username}** — ${fmtAsp(a.pending)} a entregar`);
   if (waiting) aspectLines.push(`-# +${waiting} aguardando completar ${minDays} dias na guilda`);
 
   const embed = {
@@ -159,10 +197,11 @@ export async function buildTomePanel(guildId) {
   return brandWithLogo({
     embeds: [embed],
     components: [
+      // Sem "Ver fila": a fila já está no embed acima, e o botão só gerava uma
+      // cópia efêmera dela para quem clicasse.
       new ActionRowBuilder().addComponents(
         btn('tome:join', 'Entrar na fila', '📜', ButtonStyle.Success),
         btn('tome:leave', 'Sair da fila', '🚪', ButtonStyle.Danger),
-        btn('tome:queue', 'Ver fila', '📋', ButtonStyle.Secondary),
       ),
       new ActionRowBuilder().addComponents(
         btn('tome:deliver', 'Entregar Tome', '🎁', ButtonStyle.Primary),
@@ -176,3 +215,46 @@ export async function ensureTomePanel(client, guildId) {
   const cfg = await getConfig(guildId);
   return ensurePanel(client, cfg.channels?.tome, STATE_ID, await buildTomePanel(guildId), 'tomes', [logoAttachment()]);
 }
+
+/** Uma linha do histórico: quem recebeu o quê, de quem, e quando. */
+function logLine(d) {
+  const quem = d.discordId ? `<@${d.discordId}>` : `**${d.username}**`;
+  const oque = d.kind === 'tome' ? '📜 Tome' : `✨ ${fmtAsp(d.amount)} aspect(s)`;
+  return `${brDateTime(d.at)} — ${oque} → ${quem} · por <@${d.byDiscordId}>`;
+}
+
+/**
+ * Painel de HISTÓRICO: as últimas 30 entregas, numa mensagem só que se atualiza.
+ *
+ * É a substituição do anúncio por entrega. Uma mensagem editada não pinga
+ * ninguém, e é isso que tira o spam: quem recebeu já sabe (recebeu o item em
+ * jogo), e quem quer conferir o que foi entregue olha aqui em vez de rolar o
+ * canal.
+ */
+export async function buildDeliveryLogPanel() {
+  const linhas = (await recentDeliveries(LOG_SIZE)).map(logLine);
+  return {
+    embeds: [
+      {
+        title: '🧾 Últimas entregas',
+        color: 0x2ecc71,
+        description: linhas.length
+          ? linhas.join('\n').slice(0, 4000)
+          : 'Nenhuma entrega registrada ainda.',
+        footer: { text: `Últimas ${LOG_SIZE} entregas de Tomes e aspects · horário de Brasília` },
+        timestamp: new Date().toISOString(),
+      },
+    ],
+    // Sem menções: o painel é um extrato, não um aviso. Os <@id> continuam
+    // clicáveis, mas ninguém é notificado a cada entrega.
+    allowedMentions: { parse: [] },
+  };
+}
+
+export async function ensureDeliveryLogPanel(client, guildId) {
+  const cfg = await getConfig(guildId);
+  return ensurePanel(client, cfg.channels?.tome, LOG_STATE_ID, await buildDeliveryLogPanel(), 'log de entregas');
+}
+
+/** Os dois painéis fixos do canal de tomes — a limpeza não pode apagá-los. */
+export const TOME_PANEL_STATE_IDS = Object.freeze([STATE_ID, LOG_STATE_ID]);
