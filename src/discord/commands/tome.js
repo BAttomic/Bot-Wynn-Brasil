@@ -18,6 +18,7 @@ import {
 } from '../../services/tomes.js';
 import { pendingAspects, deliverAspects, aspectStatus } from '../../services/aspects.js';
 import { maxClassLevel, tomeMinLevel } from '../../services/eligibility.js';
+import { autoDismiss, DISMISS } from '../../util/ephemeral.js';
 
 const fmtAsp = (n) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 
@@ -33,6 +34,19 @@ const fmtAsp = (n) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 async function refreshPanels(interaction) {
   await ensureTomePanel(interaction.client, interaction.guildId);
   await ensureDeliveryLogPanel(interaction.client, interaction.guildId);
+}
+
+/**
+ * Responde e marca a efêmera para sumir.
+ *
+ * Efêmera não polui o canal, mas empilha na tela de quem clicou até ser
+ * dispensada uma a uma — e quem entrega recompensa faz isso em série. O extrato
+ * do que aconteceu fica no painel de histórico, então nada aqui precisa durar.
+ */
+async function replyAndDismiss(interaction, payload, seconds = DISMISS.delivery) {
+  const res = await interaction.editReply(payload);
+  autoDismiss(interaction, seconds);
+  return res;
 }
 
 /**
@@ -85,33 +99,65 @@ async function isTomeManager(interaction) {
 }
 
 /**
- * Registra a entrega, consumindo um crédito de missão semanal. Quem ainda tem
- * semanais de sobra continua na fila; quem zerou sai.
+ * Entrega um Tome a CADA pessoa selecionada, consumindo um crédito de missão
+ * semanal de cada uma. Quem recebe sai da fila, mesmo que ainda tenha crédito.
+ *
+ * Aceita vários de uma vez porque a entrega é feita em mutirão: a staff distribui
+ * para a fila inteira de uma sentada. Um clique por pessoa gerava uma resposta
+ * efêmera por pessoa, e vinte entregas viravam vinte mensagens empilhadas na
+ * tela de quem entregou.
+ *
+ * @param {string[]} uuids
  */
-async function deliverTo(interaction, uuid) {
-  const entry = await collections.tomeQueue().findOne({ uuid });
-  if (!entry) return interaction.editReply({ content: 'Essa pessoa não está mais na fila.', components: [] });
+async function deliverTo(interaction, uuids) {
+  const linhas = [];
+  const ausentes = [];
 
-  const { credits, delivered } = await deliverTome(uuid);
-  await recordDelivery({
-    kind: 'tome',
-    uuid,
-    username: entry.username,
-    discordId: entry.discordId,
-    byDiscordId: interaction.user.id,
-  });
+  for (const uuid of uuids) {
+    const entry = await collections.tomeQueue().findOne({ uuid });
+    // Saiu da fila entre a abertura do menu e o clique (outra pessoa da staff
+    // entregou, ou o próprio membro saiu). Não é erro — só não entrega.
+    if (!entry) {
+      ausentes.push(uuid);
+      continue;
+    }
+    const { credits, delivered } = await deliverTome(uuid);
+    await recordDelivery({
+      kind: 'tome',
+      uuid,
+      username: entry.username,
+      discordId: entry.discordId,
+      byDiscordId: interaction.user.id,
+    });
+    linhas.push(tomeSummary({ username: entry.username, delivered, credits }));
+  }
+
   await refreshPanels(interaction);
-  return interaction.editReply({
-    content:
-      `📜 Tome entregue a **${entry.username}**. Saiu da fila.\n` +
-      tomeSummary({ username: entry.username, delivered, credits }),
+
+  if (!linhas.length) {
+    return replyAndDismiss(interaction, {
+      content: 'Ninguém da seleção continua na fila — nada entregue.',
+      components: [],
+    });
+  }
+
+  const cabecalho = `📜 **${linhas.length}** Tome(s) entregue(s). Saíram da fila.`;
+  const rodape = ausentes.length ? `\n-# ${ausentes.length} já não estava(m) na fila e foram pulados.` : '';
+  return replyAndDismiss(interaction, {
+    content: `${cabecalho}\n${linhas.join('\n')}${rodape}`.slice(0, 2000),
     components: [],
   });
 }
 
 // --- Entrega de aspects (recompensa de guild raid, ao lado dos tomes) ---
 
-/** Passo 1: escolher quem recebeu, entre os que têm pendência. */
+/**
+ * Passo 1: escolher quem recebeu, entre os que têm pendência.
+ *
+ * Marcando VÁRIOS, cada um recebe exatamente o que estava pendente — é o caso
+ * normal, e não há o que digitar. Marcando UM SÓ, abre o modal para informar uma
+ * quantidade diferente (entrega parcial, ou correção na hora).
+ */
 async function promptAspectDelivery(interaction) {
   if (!(await isTomeManager(interaction))) {
     return interaction.reply({ content: 'Apenas **Chief ou superior** pode entregar aspects.', ephemeral: true });
@@ -119,28 +165,42 @@ async function promptAspectDelivery(interaction) {
   const pending = await pendingAspects(interaction.guildId);
   if (!pending.length) return interaction.reply({ content: 'Ninguém tem aspects pendentes.', ephemeral: true });
 
+  const opcoes = pending.slice(0, SELECT_LIMIT);
   const menu = new StringSelectMenuBuilder()
     .setCustomId('tome:aspectPick')
-    .setPlaceholder('Quem recebeu aspects?')
+    .setPlaceholder('Quem recebeu aspects? (pode marcar vários)')
+    .setMinValues(1)
+    .setMaxValues(opcoes.length)
     .addOptions(
-      pending.slice(0, SELECT_LIMIT).map((a) => ({
+      opcoes.map((a) => ({
         label: a.username,
         value: a.uuid,
         description: `${fmtAsp(a.pending)} pendente(s)`,
       })),
     );
   return interaction.reply({
-    content: 'Selecione quem recebeu. Em seguida, informe a quantidade.',
+    content:
+      'Selecione quem recebeu — pode marcar vários, e cada um recebe o que está pendente.\n' +
+      '-# Marcando **uma** pessoa só, dá para informar uma quantidade diferente.',
     components: [new ActionRowBuilder().addComponents(menu)],
     ephemeral: true,
   });
 }
 
-/** Passo 2: escolhido o jogador, pede a quantidade num modal (uuid vai no id). */
+/**
+ * Passo 2. Um selecionado: pergunta a quantidade. Vários: entrega o pendente de
+ * cada um direto, sem modal — perguntar vinte vezes seria o mesmo spam de antes.
+ */
 async function promptAspectAmount(interaction) {
   if (!(await isTomeManager(interaction))) {
     return interaction.update({ content: 'Sem permissão.', components: [] });
   }
+
+  if (interaction.values.length > 1) {
+    await interaction.deferUpdate();
+    return deliverAspectBatch(interaction, interaction.values);
+  }
+
   const uuid = interaction.values[0];
   const a = (await pendingAspects(interaction.guildId)).find((x) => x.uuid === uuid);
   const modal = new ModalBuilder()
@@ -157,6 +217,49 @@ async function promptAspectAmount(interaction) {
       ),
     );
   return interaction.showModal(modal);
+}
+
+/**
+ * Entrega, a cada selecionado, exatamente o que estava pendente. Recalcula na
+ * hora: entre abrir o menu e clicar, alguém pode ter recebido por outra via.
+ */
+async function deliverAspectBatch(interaction, uuids) {
+  const alvo = new Set(uuids);
+  const pending = (await pendingAspects(interaction.guildId)).filter((a) => alvo.has(a.uuid));
+
+  const linhas = [];
+  let total = 0;
+  for (const a of pending) {
+    await deliverAspects(a.uuid, a.pending);
+    const link = await collections.members().findOne({ uuid: a.uuid }, { projection: { discordId: 1 } });
+    await recordDelivery({
+      kind: 'aspect',
+      uuid: a.uuid,
+      username: a.username,
+      discordId: link?.discordId ?? null,
+      amount: a.pending,
+      byDiscordId: interaction.user.id,
+    });
+    total += a.pending;
+    linhas.push(`> **${a.username}** — ${fmtAsp(a.pending)} entregue(s), nada mais pendente.`);
+  }
+
+  await refreshPanels(interaction);
+
+  if (!linhas.length) {
+    return replyAndDismiss(interaction, {
+      content: 'Ninguém da seleção tem pendência agora — nada entregue.',
+      components: [],
+    });
+  }
+  const pulados = uuids.length - linhas.length;
+  return replyAndDismiss(interaction, {
+    content:
+      `✨ **${fmtAsp(total)}** aspect(s) entregues a **${linhas.length}** pessoa(s).\n` +
+      linhas.join('\n') +
+      (pulados ? `\n-# ${pulados} já não tinha(m) pendência e foram pulados.` : ''),
+    components: [],
+  });
 }
 
 /** Passo 3: aplica a entrega e atualiza o painel. */
@@ -185,7 +288,8 @@ async function applyAspectDelivery(interaction) {
   });
   await refreshPanels(interaction);
   const resumo = aspectSummary(status);
-  return interaction.editReply(
+  return replyAndDismiss(
+    interaction,
     `✨ Entregue: **${fmtAsp(amount)}** aspect(s) a **${name}**.` + (resumo ? `\n${resumo}` : ''),
   );
 }
@@ -201,11 +305,16 @@ async function promptDelivery(interaction) {
   const { ready } = await queueView(interaction.guildId);
   if (!ready.length) return interaction.reply({ content: 'Ninguém elegível na fila.', ephemeral: true });
 
+  const opcoes = ready.slice(0, SELECT_LIMIT);
   const menu = new StringSelectMenuBuilder()
     .setCustomId('tome:delivered')
-    .setPlaceholder('Quem recebeu o Tome?')
+    .setPlaceholder('Quem recebeu o Tome? (pode marcar vários)')
+    .setMinValues(1)
+    // Marcar todo mundo de uma vez é o caso NORMAL: a staff distribui em
+    // mutirão. O teto é o do Discord, não uma escolha nossa.
+    .setMaxValues(opcoes.length)
     .addOptions(
-      ready.slice(0, SELECT_LIMIT).map((r, i) => ({
+      opcoes.map((r, i) => ({
         label: r.username,
         value: r.uuid,
         description: `${i + 1}º na fila · ${r.points} pts · direito a ${r.credits}`,
@@ -213,7 +322,7 @@ async function promptDelivery(interaction) {
     );
 
   return interaction.reply({
-    content: 'Selecione quem recebeu. Consome um crédito de missão semanal.',
+    content: `Selecione quem recebeu — pode marcar vários. Consome um crédito de missão semanal de cada um.${ready.length > SELECT_LIMIT ? `\n-# Mostrando os ${SELECT_LIMIT} primeiros de ${ready.length}.` : ''}`,
     components: [new ActionRowBuilder().addComponents(menu)],
     ephemeral: true,
   });
@@ -344,7 +453,7 @@ export default {
         return interaction.update({ content: 'Sem permissão.', components: [] });
       }
       await interaction.deferUpdate();
-      return deliverTo(interaction, interaction.values[0]);
+      return deliverTo(interaction, interaction.values);
     }
 
     // Entrega de aspects: botão → select → modal.
@@ -354,16 +463,30 @@ export default {
 
     if (!BUTTON_ACTIONS.includes(action)) return;
     await interaction.deferReply({ ephemeral: true });
-    if (action === 'join') return joinQueue(interaction);
-    return leaveQueue(interaction);
+    // Confirmação de membro: descartável como a da staff, só com mais tempo —
+    // o texto explica regras (dias de guilda, missão semanal) que a pessoa pode
+    // querer reler antes de sumir. A fila de verdade está no painel.
+    const res = action === 'join' ? await joinQueue(interaction) : await leaveQueue(interaction);
+    autoDismiss(interaction, DISMISS.member);
+    return res;
   },
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
     await interaction.deferReply({ ephemeral: sub !== 'queue' });
 
-    if (sub === 'join') return joinQueue(interaction);
-    if (sub === 'leave') return leaveQueue(interaction);
+    // `/tome queue` é o único que a pessoa pediu para LER — esse fica. Os outros
+    // são confirmações, e somem como as do painel.
+    if (sub === 'join') {
+      const res = await joinQueue(interaction);
+      autoDismiss(interaction, DISMISS.member);
+      return res;
+    }
+    if (sub === 'leave') {
+      const res = await leaveQueue(interaction);
+      autoDismiss(interaction, DISMISS.member);
+      return res;
+    }
     if (sub === 'queue') return showQueue(interaction);
 
     // grant (staff)
@@ -402,7 +525,8 @@ export default {
       byDiscordId: interaction.user.id,
     });
     await refreshPanels(interaction);
-    return interaction.editReply(
+    return replyAndDismiss(
+      interaction,
       `📜 Tome concedido a **${target.username}**. Saiu da fila.\n` +
         tomeSummary({ username: target.username, delivered, credits }),
     );
