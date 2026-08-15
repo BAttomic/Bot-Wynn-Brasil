@@ -8,7 +8,7 @@ import { registerAllByNick } from '../../services/registration.js';
 import { getConfig } from '../../config/guildConfig.js';
 import { audit } from '../../services/audit.js';
 
-const APPLY_SCOPES = new Set(['member', 'neutral', 'banned', 'all']);
+const APPLY_SCOPES = new Set(['member', 'ally', 'neutral', 'banned', 'all']);
 
 /**
  * Quem pode usar o painel: os mesmos cargos de liderança do /forcelink
@@ -24,7 +24,7 @@ async function isStaff(interaction) {
 export default {
   data: new SlashCommandBuilder()
     .setName('reconciliar')
-    .setDescription('(Staff) Painel para conferir e corrigir os cargos de classificação de todo o servidor')
+    .setDescription('(Staff) Painel para conferir e corrigir os cargos e apelidos de todo o servidor')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .toJSON(),
 
@@ -64,7 +64,7 @@ export default {
     if (action === 'select') {
       await interaction.deferUpdate();
       const { applied, data } = await applyReconciliation(interaction.guild, 'all', interaction.values);
-      audit(interaction.client, interaction.guildId, `🔧 <@${interaction.user.id}> reconciliou **${applied}** cargo(s) (seleção).`);
+      audit(interaction.client, interaction.guildId, `🔧 <@${interaction.user.id}> reconciliou **${applied}** membro(s) (seleção).`);
       return interaction.editReply(reconciliationPanel(data, note(applied)));
     }
 
@@ -72,7 +72,7 @@ export default {
     if (action === 'apply' && APPLY_SCOPES.has(scope)) {
       await interaction.deferUpdate();
       const { applied, data } = await applyReconciliation(interaction.guild, scope);
-      audit(interaction.client, interaction.guildId, `🔧 <@${interaction.user.id}> reconciliou **${applied}** cargo(s) (${scope}).`);
+      audit(interaction.client, interaction.guildId, `🔧 <@${interaction.user.id}> reconciliou **${applied}** membro(s) (${scope}).`);
       return interaction.editReply(reconciliationPanel(data, note(applied)));
     }
   },
@@ -90,7 +90,7 @@ export default {
 
 function note(applied) {
   return applied
-    ? `✅ **${applied}** cargo(s) aplicado(s). Retrato atualizado abaixo.`
+    ? `✅ **${applied}** membro(s) corrigido(s) — cargos e apelidos. Retrato atualizado abaixo.`
     : 'Nada a aplicar — ninguém elegível na seleção.';
 }
 
@@ -100,6 +100,6 @@ function registerNote(s) {
     `Já vinculados: **${s.already}** · Nick não encontrado na API: **${s.notFound}**`,
   ];
   if (s.conflicts) partes.push(`⚠️ Conflitos (apelido de conta já vinculada a outro): **${s.conflicts}** — use \`/forcelink\` caso queira sobrescrever.`);
-  if (s.registered) partes.push(`Classificação: 🟢 ${s.byKind.member} membro(s) · ⚪ ${s.byKind.neutral} comunidade · 🚫 ${s.byKind.banned} banido(s).`);
+  if (s.registered) partes.push(`Classificação: 🟢 ${s.byKind.member} membro(s) · 🤝 ${s.byKind.ally} aliado(s) · ⚪ ${s.byKind.neutral} comunidade · 🚫 ${s.byKind.banned} banido(s).`);
   return partes.join('\n');
 }

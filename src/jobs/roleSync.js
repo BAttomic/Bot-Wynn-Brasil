@@ -2,7 +2,9 @@ import { collections } from '../db/mongo.js';
 import { fetchGuildMembers, isHigherRank, RANK_LABEL } from '../services/guildData.js';
 import { getConfig } from '../config/guildConfig.js';
 import { audit } from '../services/audit.js';
-import { applyClassificationRoles, blacklistGuild, syncNickname } from '../services/registration.js';
+import { applyClassificationRoles, syncNickname } from '../services/registration.js';
+import { loadGuildIndex } from '../services/guildList.js';
+import { ensureAllyRole, syncAllyIdentity } from '../services/allyRoles.js';
 import {
   loadBanIndex,
   recordBan,
@@ -38,8 +40,38 @@ export async function runRoleSync(client) {
   if (!res) return;
   const rankByUuid = new Map(res.members.map((m) => [m.uuid, m.rank]));
 
-  const blacklisted = await fetchGuildMembers(blacklistGuild().prefix).catch(() => null);
-  const blacklistedUuids = new Set(blacklisted?.members.map((m) => m.uuid) ?? []);
+  // Uma requisição por guilda rastreada, não uma por membro. O cache de 60s da
+  // API absorve a repetição entre ciclos vizinhos, e a lista é curta por
+  // natureza — é uma decisão manual da staff, não um catálogo.
+  const tracked = await loadGuildIndex();
+
+  const blacklistedUuids = new Set();
+  for (const doc of tracked.blacklist) {
+    const roster = await fetchGuildMembers(doc.prefix).catch(() => null);
+    if (!roster) {
+      log.warn(`Roster da black-list [${doc.prefix}] indisponível neste ciclo.`);
+      continue;
+    }
+    for (const m of roster.members) blacklistedUuids.add(m.uuid);
+  }
+
+  // uuid do jogador -> { roleId, guildUuid } da guilda aliada dele.
+  const allyByPlayer = new Map();
+  for (let doc of tracked.ally) {
+    const roster = await fetchGuildMembers(doc.prefix).catch(() => null);
+    if (!roster) {
+      log.warn(`Roster da aliada [${doc.prefix}] indisponível neste ciclo.`);
+      continue;
+    }
+    // A guilda pode ter trocado de TAG ou de nome desde que entrou na lista; o
+    // roster que acabamos de pagar já traz a versão atual, então o cargo é
+    // renomeado junto, de graça.
+    doc = await syncAllyIdentity(doc, roster.guild);
+    const roleId = await ensureAllyRole(guild, cfg, doc);
+    if (!roleId) continue;
+    for (const m of roster.members) allyByPlayer.set(m.uuid, { roleId, guildUuid: doc.uuid });
+  }
+
   const banIndex = await loadBanIndex();
 
   await guild.members.fetch().catch(() => {});
@@ -70,9 +102,17 @@ export async function runRoleSync(client) {
     // O banimento vence tudo, e não expira: sair da guilda proibida não devolve
     // o acesso. Só /ban remove desfaz.
     const banned = banIndex.uuids.has(m.uuid) || banIndex.discordIds.has(m.discordId);
-    const kind = banned ? 'banned' : inGuild ? 'member' : 'neutral';
+    // Ser nosso vem antes de ser aliado: quem aparece nas duas listas é nosso.
+    const ally = !banned && !inGuild ? allyByPlayer.get(m.uuid) ?? null : null;
+    const allyRoleId = ally?.roleId ?? null;
+    const kind = banned ? 'banned' : inGuild ? 'member' : ally ? 'ally' : 'neutral';
 
-    const update = { inGuild, guildRank: rank, classification: kind };
+    const update = {
+      inGuild,
+      guildRank: rank,
+      classification: kind,
+      allyGuildUuid: ally?.guildUuid ?? null,
+    };
 
     // Cargo mais alto que a pessoa já teve. Sobrevive a kick por inatividade,
     // então quando ela voltar dá para devolver o cargo que tinha.
@@ -104,9 +144,13 @@ export async function runRoleSync(client) {
     const member = guild.members.cache.get(m.discordId);
     if (!member) continue;
 
-    await applyClassificationRoles(member, cfg, kind);
+    await applyClassificationRoles(member, cfg, kind, allyRoleId);
     // Pega quem trocou de nick no Minecraft depois de registrado.
     await syncNickname(member, m.username);
   }
-  log.info(`Role sync concluído (${linked.length} vínculos, ${res.members.length} membros na guilda, ${blacklistedUuids.size} na black-list).`);
+  log.info(
+    `Role sync concluído (${linked.length} vínculos, ${res.members.length} membros na guilda, ` +
+      `${blacklistedUuids.size} na black-list de ${tracked.blacklist.length} guilda(s), ` +
+      `${allyByPlayer.size} aliado(s) de ${tracked.ally.length} guilda(s)).`,
+  );
 }

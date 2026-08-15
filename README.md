@@ -35,6 +35,7 @@ Todos os módulos do roadmap. Comandos:
 | `/booth registrar\|status\|cancelar` | Lembrete de reset do booth (24h): avisa o dono ~5 min antes, no canal `booth`, com botão de parar |
 | `/evento criar\|ranking\|listar\|encerrar\|cancelar\|apurar` | Competição por período: quem mais fizer guild raids, guerras ou XP leva a recompensa |
 | `/giveaway criar\|encerrar\|reroll\|listar` | Sorteio com inscrição por botão |
+| `/guilds list\|blacklist\|ally` | (Staff) Guildas rastreadas: black-list (auto-ban) e aliadas (cargo `[TAG] Nome`), com quem adicionou e quando |
 
 Automático (jobs):
 - **Sync de cargos**: cargo "Membro da Guilda" + "Top Contribuidor" (ranks são manuais) + reconciliação de ingresso/saída
@@ -48,6 +49,45 @@ Automático (jobs):
 - **Eventos e sorteios**: painel do evento se atualiza sozinho, o evento fecha e
   anuncia o pódio no prazo, e o sorteio é apurado no minuto do vencimento
 - **Auditoria** (`logs`) e **erros do bot** (`errors`)
+
+## Guildas rastreadas
+
+O bot acompanha guildas do WynnCraft em dois papéis opostos, adicionadas **pela
+TAG** e guardadas no banco — mexer nelas não exige redeploy.
+
+```
+/guilds blacklist add tag:GsW      # membros dela levam o cargo de banido
+/guilds ally      add tag:HAX      # membros dela ganham o cargo [HAX] Nome
+/guilds ally      remove tag:HAX
+/guilds list                       # os dois papéis, com quem adicionou e quando
+```
+
+`/guilds list` mostra tudo de uma vez; `/guilds blacklist list` e
+`/guilds ally list` mostram um papel só. Cada linha traz a TAG, o nome, o cargo
+(nas aliadas), **quem adicionou** — menção do Discord e o nick do WynnCraft, se a
+pessoa tiver vínculo — e a data em **horário de Brasília (UTC-3)**, fixa. O
+`<t:…>` do Discord não serve aqui: ele renderiza no fuso de quem lê, e dois
+membros da staff veriam horas diferentes para o mesmo registro.
+
+| Papel | O que acontece com quem for membro |
+|---|---|
+| **black-list** | Recebe o cargo de banido no registro, no `/reconciliar` e a cada ciclo do sync de cargos. **Em silêncio** — nenhuma mensagem, em canal nenhum |
+| **aliada** | Recebe o cargo de comunidade **mais** um cargo `[TAG] Nome`, criado pelo bot logo abaixo do cargo de membro da guilda e logo acima do de comunidade |
+
+O `add` já aplica aos membros que estão no servidor; não é preciso esperar o
+próximo ciclo. A identificação é pelo **UUID** da guilda, não pela TAG: trocar a
+TAG no jogo não escapa da regra nem quebra o cargo de aliada — o cargo é
+renomeado sozinho no ciclo seguinte.
+
+**Tirar uma guilda da black-list não desbane ninguém.** Os banimentos já
+gravados são permanentes por decisão de projeto (ver `services/bans.js`); quem
+for perdoado sai pelo `/ban remove`, caso a caso. E `ally remove` **não apaga** o
+cargo do Discord — ele só para de ser distribuído; apagar o cargo é o que tira de
+todos de uma vez.
+
+A black-list **não tem nada embutido**: nem no código, nem no `.env`. Servidor
+novo (ou banco novo) sobe com a lista vazia e sem banir ninguém — o bot avisa no
+log. Rode `/guilds blacklist add tag:<TAG>` uma vez e pronto.
 
 ## Check-in de inatividade
 
@@ -228,6 +268,11 @@ Após subir, configure ao menos os cargos de classificação e o canal de regist
 /config role key:banned       role:@BANIDO
 /config channel key:registration channel:#registro
 ```
+
+O cargo do bot precisa estar **acima** do cargo de comunidade na lista de cargos
+do servidor: é o que permite criar e posicionar os cargos `[TAG] Nome` das
+guildas aliadas. Sem isso o bot avisa no log e segue sem o cargo, em vez de
+falhar o registro.
 
 Os cargos de liderança (votam nas candidaturas e podem usar `/forcelink`):
 

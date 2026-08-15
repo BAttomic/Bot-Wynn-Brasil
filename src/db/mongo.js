@@ -35,6 +35,7 @@ export const collections = {
   territoryCaptures: () => getDb().collection('territoryCaptures'),
   warAudit: () => getDb().collection('warAudit'),
   bans: () => getDb().collection('bans'),
+  trackedGuilds: () => getDb().collection('trackedGuilds'),
   warns: () => getDb().collection('warns'),
   pointsEvents: () => getDb().collection('pointsEvents'),
   leaderboardCache: () => getDb().collection('leaderboardCache'),
@@ -75,6 +76,12 @@ async function ensureIndexes() {
   // Banimento pega pelos dois lados da identidade.
   await collections.bans().createIndex({ uuid: 1 }, { unique: true });
   await collections.bans().createIndex({ discordIds: 1 });
+  // Guildas do WynnCraft que o bot rastreia: black-list (auto-ban) e aliadas
+  // (cargo [TAG] Nome). O UUID é a chave porque o prefixo pode ser trocado pelo
+  // dono a qualquer momento — a mesma razão que fez a black-list nascer com os
+  // dois campos no ambiente.
+  await collections.trackedGuilds().createIndex({ uuid: 1 }, { unique: true });
+  await collections.trackedGuilds().createIndex({ kind: 1 });
   await collections.eventBlacklist().createIndex({ uuid: 1 }, { unique: true });
   await collections.eventBlacklist().createIndex({ discordIds: 1 });
   // Advertências: uma linha por ocorrência (ao contrário do ban, que é um

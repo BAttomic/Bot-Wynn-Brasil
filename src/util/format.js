@@ -1,3 +1,35 @@
+/** Fuso em que a staff pensa as datas. O Brasil não tem mais horário de verão. */
+export const TIMEZONE = 'America/Sao_Paulo';
+
+/**
+ * Data e hora de Brasília, sempre igual para todo mundo.
+ *
+ * O `<t:…>` do Discord renderiza no fuso de QUEM LÊ, o que é ótimo para prazos
+ * ("faltam 2h") e péssimo para registro histórico: dois membros da staff olhando
+ * a mesma auditoria veriam horas diferentes. Onde o valor é um carimbo do que
+ * aconteceu, o fuso precisa ser fixo.
+ *
+ * @param {Date|string|number} d
+ * @returns {string} ex.: `15/08/2026 17:04 (UTC-3)`
+ */
+export function brDateTime(d) {
+  // `new Date(null)` é o epoch, não uma data inválida — sem esta guarda um campo
+  // vazio no banco vira "31/12/1969" em vez de um traço.
+  if (d === null || d === undefined || d === '') return '—';
+  const date = new Date(d);
+  if (Number.isNaN(date.getTime())) return '—';
+  const s = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: TIMEZONE,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+  return `${s.replace(', ', ' ')} (UTC-3)`;
+}
+
 // Barra de progresso em texto (portável — sem emojis customizados de servidor).
 export function xpBar(percent, size = 12) {
   const p = Math.max(0, Math.min(100, Number(percent) || 0));

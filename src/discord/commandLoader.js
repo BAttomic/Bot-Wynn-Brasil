@@ -30,8 +30,9 @@ import apelacao from './commands/apelacao.js';
 import aspects from './commands/aspects.js';
 import evento from './commands/evento.js';
 import giveaway from './commands/giveaway.js';
+import guilds from './commands/guilds.js';
 
-const commands = [link, unlink, config, apply, season, leaderboard, profile, war, tome, loan, calc, points, verificar, reconciliar, membros, registro, missao, ban, warn, forcelink, uniforme, modpack, booth, apelacao, aspects, evento, giveaway];
+const commands = [link, unlink, config, apply, season, leaderboard, profile, war, tome, loan, calc, points, verificar, reconciliar, membros, registro, missao, ban, warn, forcelink, uniforme, modpack, booth, apelacao, aspects, evento, giveaway, guilds];
 const byName = new Map(commands.map((c) => [c.data.name, c]));
 
 /** Só para o selftest conferir os limites do Discord sem ligar o bot. */

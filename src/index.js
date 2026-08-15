@@ -21,6 +21,7 @@ import { ensurePingRolePanels, attachPingRoleHandler } from './services/pingRole
 import { ensureDownloadsPanel, ensureLeaderboardPanel } from './services/leaderboardPanel.js';
 import { ensureTomePanel } from './services/tomes.js';
 import { ensureAspectBaselines } from './services/aspects.js';
+import { warnIfEmpty } from './services/guildList.js';
 import { runPingsCleanup } from './jobs/pingsCleanup.js';
 import { runTomeCleanup } from './jobs/tomeCleanup.js';
 import { runRecruitCleanup } from './jobs/recruitCleanup.js';
@@ -68,6 +69,9 @@ async function main() {
   // Fixa a baseline dos aspects no valor atual de guild raids: todo mundo passa
   // a contar do ZERO a partir de agora. Idempotente (só mexe em quem falta).
   await ensureAspectBaselines();
+  // Black-list vazia não quebra nada, mas também não bane ninguém — e como o
+  // auto-ban é silencioso, o log é o único lugar onde isso aparece.
+  await warnIfEmpty();
   await registerCommands();
 
   const client = createClient();

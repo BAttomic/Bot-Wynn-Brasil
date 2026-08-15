@@ -13,9 +13,12 @@ import { optional } from '../config/env.js';
 import { audit } from './audit.js';
 import { isHigherRank } from './guildData.js';
 import { findBan, findExemption, recordBan, BAN_REASON_BLACKLIST_GUILD } from './bans.js';
+import { loadGuildIndex, allyRoleIds } from './guildList.js';
+import { applyAllyRole, ensureAllyRole } from './allyRoles.js';
 import { ensurePanel } from './panels.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { log } from '../util/log.js';
+import { pick } from '../util/i18n.js';
 
 export const BUTTON_ID = 'registro:verificar';
 export const MODAL_ID = 'registro:modal';
@@ -28,33 +31,56 @@ const PANEL_STATE_ID = 'registrationPanel';
 const RECRUIT_CHANNEL = '1309848293278486578';
 const STATUS_CHANNEL = '1524920847637155861';
 
-// UUID da guilda é imutável; o prefixo pode ser trocado pelo dono a qualquer
-// momento, então ele serve só de fallback. Ambos podem vir do ambiente.
-// Lido preguiçosamente porque loadEnv() roda depois da avaliação dos imports.
-export function blacklistGuild() {
-  return {
-    uuid: optional('WYNN_BLACKLIST_GUILD_UUID', 'f7e7cc4e-212d-422f-a3e6-744a8689b108'),
-    prefix: optional('WYNN_BLACKLIST_GUILD_PREFIX', 'GsW'),
-  };
-}
-
-// 'member' = está na nossa guilda | 'banned' = está na guilda da black-list |
-// 'neutral' = nenhuma das duas (sem guilda ou em outra qualquer).
-export function classifyPlayer(player) {
-  const g = player?.guild;
-  if (!g) return 'neutral';
-  const bl = blacklistGuild();
-  if (g.uuid === bl.uuid || g.prefix === bl.prefix) return 'banned';
+// A nossa guilda ainda vem do ambiente: ela é uma só e não muda. As OUTRAS
+// (black-list e aliadas) vivem no banco, geridas por `/guilds` — ver
+// services/guildList.js.
+function isOurGuild(g) {
   const ourUuid = optional('WYNN_GUILD_UUID');
   const ourPrefix = optional('WYNN_GUILD_PREFIX');
-  if ((ourUuid && g.uuid === ourUuid) || (ourPrefix && g.prefix === ourPrefix)) return 'member';
+  return (!!ourUuid && g.uuid === ourUuid) || (!!ourPrefix && g.prefix === ourPrefix);
+}
+
+/**
+ * 'member'  = está na nossa guilda
+ * 'ally'    = está numa guilda aliada
+ * 'banned'  = está numa guilda da black-list
+ * 'neutral' = nenhuma delas (sem guilda ou em outra qualquer)
+ *
+ * A ordem importa: a black-list vence tudo, e a nossa guilda vem antes de
+ * aliada — se alguém aparecer nas duas listas por engano, ser nosso ganha.
+ *
+ * Assíncrona porque a lista de guildas mora no banco; o índice é cacheado em
+ * memória, então na prática isto não custa I/O.
+ * @returns {Promise<'member'|'ally'|'neutral'|'banned'>}
+ */
+export async function classifyPlayer(player) {
+  const g = player?.guild;
+  if (!g) return 'neutral';
+  const idx = await loadGuildIndex();
+  // UUID é imutável; o prefixo pode ser trocado pelo dono, então serve só de
+  // reforço. Qualquer um dos dois batendo já classifica.
+  if (idx.blacklistUuids.has(g.uuid) || idx.blacklistPrefixes.has(g.prefix)) return 'banned';
+  if (isOurGuild(g)) return 'member';
+  if (idx.allyByUuid.has(g.uuid) || idx.allyByPrefix.has(g.prefix)) return 'ally';
   return 'neutral';
+}
+
+/** A guilda aliada de um jogador, ou null. */
+export async function allyGuildOf(player) {
+  const g = player?.guild;
+  if (!g) return null;
+  const idx = await loadGuildIndex();
+  return idx.allyByUuid.get(g.uuid) ?? idx.allyByPrefix.get(g.prefix) ?? null;
 }
 
 // Cargos que cada classificação DEVE ter. O membro da guilda também é da
 // comunidade — a recíproca não vale: o neutro tem só o de comunidade.
+//
+// O aliado é um neutro com identificação: mesmo acesso, mais o cargo `[TAG]
+// Nome` da guilda dele, que é aplicado à parte (ver applyAllyRole).
 const ROLES_BY_KIND = {
   member: ['guildMember', 'community'],
+  ally: ['community'],
   neutral: ['community'],
   banned: [],
 };
@@ -63,6 +89,7 @@ const ALL_CLASSIFICATION_KEYS = ['guildMember', 'community', 'banned'];
 
 const KIND_LABEL = {
   member: 'Membro da Wynn Brasil',
+  ally: 'Aliado',
   neutral: 'Neutro',
 };
 
@@ -73,7 +100,10 @@ const KIND_LABEL = {
 // Eles saem do nick que a pessoa digitou, que ninguém verificou — dar Capitão a
 // quem só escreveu o nick de um Capitão seria entregar a guilda. Rank é sempre
 // aplicado à mão pela staff; o bot no máximo avisa (ver peakRank em roleSync).
-export async function applyClassificationRoles(member, cfg, kind) {
+// O 4º argumento é o cargo `[TAG] Nome` da guilda aliada. Ele é opcional de
+// propósito: quem não passa nada (ban.js, warn.js) está dizendo "esta pessoa não
+// é aliada", e o cargo de aliada que ela porventura tivesse é retirado.
+export async function applyClassificationRoles(member, cfg, kind, allyRoleId = null) {
   const wantedKeys = ROLES_BY_KIND[kind] ?? [];
   const wantedIds = wantedKeys.map((k) => cfg.roles?.[k]).filter(Boolean);
 
@@ -94,7 +124,13 @@ export async function applyClassificationRoles(member, cfg, kind) {
     if (!member.roles.cache.has(id)) await member.roles.add(id).catch(() => {});
   }
 
-  return kind === 'banned' ? bannedId : wantedIds[0] ?? null;
+  // Exatamente um cargo de aliada, ou nenhum. Sempre: é isto que tira o `[TAG]`
+  // de quem saiu da guilda aliada, entrou na nossa, ou foi banido.
+  await applyAllyRole(member, await allyRoleIds(), kind === 'ally' ? allyRoleId : null);
+
+  if (kind === 'banned') return bannedId;
+  if (kind === 'ally' && allyRoleId) return allyRoleId;
+  return wantedIds[0] ?? null;
 }
 
 // Deixa o apelido no Discord igual ao nick do WynnCraft.
@@ -110,7 +146,7 @@ export async function syncNickname(member, username) {
   return ok;
 }
 
-// Só o registro de um NEUTRO vira aviso: é um recruta em potencial.
+// Só o registro de um NEUTRO (ou aliado) vira aviso: é um recruta em potencial.
 //
 // Vai para `recruitAlerts`, um canal de staff — e não para o de recrutamento,
 // que é público e onde o próprio candidato está lendo o painel. Sem esse canal
@@ -119,8 +155,10 @@ export async function syncNickname(member, username) {
 // Um banido não gera mensagem nenhuma, em canal nenhum. Basta um print vazar
 // para a regra da black-list virar pública, e aí quem é da guilda proibida passa
 // a saber que precisa sair dela antes de se registrar.
+// O aliado entra aqui junto com o neutro: antes desta lista existir ele ERA um
+// neutro, e sumir do aviso seria perder informação que a staff já tinha.
 async function notifyRecruitAlert(client, cfg, { player, kind, discordId }) {
-  if (kind !== 'neutral') return;
+  if (kind !== 'neutral' && kind !== 'ally') return;
   const channelId = cfg.channels?.recruitAlerts ?? cfg.channels?.logs;
   if (!channelId) return;
   const channel = await client.channels.fetch(channelId).catch(() => null);
@@ -134,8 +172,8 @@ async function notifyRecruitAlert(client, cfg, { player, kind, discordId }) {
     .send({
       embeds: [
         {
-          title: '🆕 Possível novo membro',
-          color: 0x95a5a6,
+          title: kind === 'ally' ? '🤝 Aliado registrado' : '🆕 Possível novo membro',
+          color: kind === 'ally' ? 0x1abc9c : 0x95a5a6,
           description:
 `**Discord:** <@${discordId}>
 **Nick:** \`${player.username}\`
@@ -168,12 +206,22 @@ async function notifyRecruitAlert(client, cfg, { player, kind, discordId }) {
 async function performLink({ client, guildId, targetDiscordId, targetMember, rawNick, actorId, force = false, silent = false }) {
   const nick = rawNick.trim();
   if (!/^\w{1,20}$/.test(nick)) {
-    return { ok: false, code: 'invalid_nick', error: 'Nick inválido. Use apenas letras, números e `_` (até 20 caracteres).' };
+    return {
+      ok: false,
+      code: 'invalid_nick',
+      error: 'Nick inválido. Use apenas letras, números e `_` (até 20 caracteres).',
+      errorEn: 'Invalid username. Use letters, numbers and `_` only (up to 20 characters).',
+    };
   }
 
   const player = await wynn.player(nick).catch(() => null);
   if (!player || !player.uuid) {
-    return { ok: false, code: 'not_found', error: `Não encontrei o jogador **${nick}** na API do WynnCraft. Confira a escrita do nick.` };
+    return {
+      ok: false,
+      code: 'not_found',
+      error: `Não encontrei o jogador **${nick}** na API do WynnCraft. Confira a escrita do nick.`,
+      errorEn: `I couldn't find the player **${nick}** in the WynnCraft API. Check the spelling.`,
+    };
   }
 
   const members = collections.members();
@@ -182,10 +230,20 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
 
   // Conflitos: no fluxo normal são erro; no forçado, a staff assume e sobrescreve.
   if (byUuid && byUuid.discordId !== targetDiscordId && !force) {
-    return { ok: false, code: 'conflict', error: 'Essa conta do WynnCraft já está vinculada a outro usuário. Fale com a staff se for engano.' };
+    return {
+      ok: false,
+      code: 'conflict',
+      error: 'Essa conta do WynnCraft já está vinculada a outro usuário. Fale com a staff se for engano.',
+      errorEn: 'This WynnCraft account is already linked to someone else. Talk to the staff if this is a mistake.',
+    };
   }
   if (byDiscord && byDiscord.uuid !== player.uuid && !force) {
-    return { ok: false, code: 'conflict', error: `Seu Discord já está vinculado a **${byDiscord.username}**. Peça à staff um \`/unlink\` para trocar.` };
+    return {
+      ok: false,
+      code: 'conflict',
+      error: `Seu Discord já está vinculado a **${byDiscord.username}**. Peça à staff um \`/unlink\` para trocar.`,
+      errorEn: `Your Discord is already linked to **${byDiscord.username}**. Ask the staff for an \`/unlink\` to switch.`,
+    };
   }
 
   // Ao forçar sobre conflitos, apaga os vínculos antigos para não colidir com os
@@ -202,11 +260,11 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
   // o par (uuid, discord), então trocar de conta ou de Discord só amplia a teia.
   const priorBan = await findBan({ uuid: player.uuid, discordId: targetDiscordId });
   // Isenção da staff vem antes de tudo: sem isto, bastava a pessoa se registrar
-  // de novo para `classifyPlayer` reconhecer a GsW e recriar o banimento.
-  // Continuar na GsW isento não vira 'member' — vira 'neutral', o mesmo que
-  // qualquer um de fora, e é o `inGuild` que decide se sobe para membro.
+  // de novo para `classifyPlayer` reconhecer a guilda proibida e recriar o
+  // banimento. Continuar nela isento não vira 'member' — vira 'neutral', o mesmo
+  // que qualquer um de fora, e é o `inGuild` que decide se sobe para membro.
   const exemption = await findExemption({ uuid: player.uuid, discordId: targetDiscordId });
-  let kind = classifyPlayer(player);
+  let kind = await classifyPlayer(player);
   if (exemption) {
     if (kind === 'banned') kind = 'neutral';
   } else if (priorBan || kind === 'banned') {
@@ -224,6 +282,10 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
   // minúsculas. Normalizamos aqui para o resto do bot comparar sem surpresa.
   const rank = player.guild?.rank ? player.guild.rank.toLowerCase() : null;
 
+  // Só interessa a guilda aliada de quem REALMENTE é aliado: um banido ou um
+  // membro nosso não carrega `[TAG]` de ninguém.
+  const allyGuild = kind === 'ally' ? await allyGuildOf(player) : null;
+
   const set = {
     uuid: player.uuid,
     discordId: targetDiscordId,
@@ -231,6 +293,7 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
     inGuild: kind === 'member',
     guildRank: rank,
     classification: kind,
+    allyGuildUuid: allyGuild?.uuid ?? null,
   };
   if (kind === 'member' && isHigherRank(rank, byUuid?.peakRank)) {
     set.peakRank = rank;
@@ -246,7 +309,12 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
   const cfg = await getConfig(guildId);
   let roleId = null;
   if (targetMember?.roles?.add) {
-    roleId = await applyClassificationRoles(targetMember, cfg, kind);
+    // O cargo da aliada é criado sob demanda: a guilda pode ter entrado na lista
+    // sem ninguém dela no servidor ainda.
+    const allyRoleId = allyGuild
+      ? await ensureAllyRole(targetMember.guild, cfg, allyGuild).catch(() => null)
+      : null;
+    roleId = await applyClassificationRoles(targetMember, cfg, kind, allyRoleId);
     await syncNickname(targetMember, player.username);
   }
 
@@ -269,6 +337,10 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
 
 // Vincula o nick ao Discord de quem clicou e devolve o texto de confirmação
 // (a interação já respondeu de forma ephemeral por quem chamou).
+//
+// Responde no idioma do Discord de quem clicou. O texto do BANIDO é o mesmo dos
+// dois lados por um motivo: ele precisa ser indistinguível de um sucesso comum,
+// e uma tradução mais seca ou mais curta já seria uma pista.
 export async function linkAndClassify(interaction, rawNick) {
   const res = await performLink({
     client: interaction.client,
@@ -277,18 +349,38 @@ export async function linkAndClassify(interaction, rawNick) {
     targetMember: interaction.member,
     rawNick,
   });
-  if (!res.ok) return res.error;
+  if (!res.ok) return pick(interaction, { pt: res.error, en: res.errorEn ?? res.error });
 
-  // O banimento é SILENCIOSO: confirmação comum, sem citar cargo, GsW ou motivo,
-  // e sem sugerir candidatura, que só chamaria atenção.
-  const roleNote = res.roleId && res.kind !== 'banned' ? ` Cargo <@&${res.roleId}> aplicado.` : '';
+  const nome = res.player.username;
+  // O banimento é SILENCIOSO: confirmação comum, sem citar cargo, guilda ou
+  // motivo, e sem sugerir candidatura, que só chamaria atenção.
   if (res.kind === 'banned') {
-    return `Conta **${res.player.username}** vinculada com sucesso!`;
+    return pick(interaction, {
+      pt: `Conta **${nome}** vinculada com sucesso!`,
+      en: `Account **${nome}** linked successfully!`,
+    });
   }
+
+  const roleNote = res.roleId
+    ? pick(interaction, { pt: ` Cargo <@&${res.roleId}> aplicado.`, en: ` Role <@&${res.roleId}> applied.` })
+    : '';
+
   if (res.kind === 'member') {
-    return `Conta **${res.player.username}** vinculada! Bem-vindo de volta, membro da **Wynn Brasil**.${roleNote}`;
+    return pick(interaction, {
+      pt: `Conta **${nome}** vinculada! Bem-vindo de volta, membro da **Wynn Brasil**.${roleNote}`,
+      en: `Account **${nome}** linked! Welcome back, **Wynn Brasil** member.${roleNote}`,
+    });
   }
-  return `Conta **${res.player.username}** vinculada! Quer entrar na guilda? Vá ao canal de recrutamento e clique em **Enviar candidatura**.${roleNote}`;
+  if (res.kind === 'ally') {
+    return pick(interaction, {
+      pt: `Conta **${nome}** vinculada! Você foi reconhecido como **aliado** da Wynn Brasil.${roleNote}`,
+      en: `Account **${nome}** linked! You've been recognised as a Wynn Brasil **ally**.${roleNote}`,
+    });
+  }
+  return pick(interaction, {
+    pt: `Conta **${nome}** vinculada! Quer entrar na guilda? Vá ao canal de recrutamento e clique em **Enviar candidatura**.${roleNote}`,
+    en: `Account **${nome}** linked! Want to join the guild? Head to the recruitment channel and click **Enviar candidatura**.${roleNote}`,
+  });
 }
 
 /**
@@ -335,7 +427,7 @@ export async function forceLink({ interaction, targetUser, targetMember, rawNick
  *
  * @param {import('discord.js').Guild} guild
  * @param {{ actorId?: string }} [opts]
- * @returns {Promise<{scanned:number, already:number, registered:number, notFound:number, conflicts:number, failed:number, byKind:{member:number, neutral:number, banned:number}}>}
+ * @returns {Promise<{scanned:number, already:number, registered:number, notFound:number, conflicts:number, failed:number, byKind:{member:number, ally:number, neutral:number, banned:number}}>}
  */
 export async function registerAllByNick(guild, { actorId } = {}) {
   await guild.members.fetch().catch(() => {});
@@ -344,7 +436,7 @@ export async function registerAllByNick(guild, { actorId } = {}) {
 
   const summary = {
     scanned: 0, already: 0, registered: 0, notFound: 0, conflicts: 0, failed: 0,
-    byKind: { member: 0, neutral: 0, banned: 0 },
+    byKind: { member: 0, ally: 0, neutral: 0, banned: 0 },
   };
 
   for (const member of guild.members.cache.values()) {
@@ -404,6 +496,8 @@ export function panelPayload() {
 > Seu apelido no Discord vira o seu nick, e se atualiza sozinho caso você troque de nome no jogo.
 > Guild XP, guerras, guild raids e objetivos semanais viram **pontos de contribuição**, que definem a fila de Tomes e a sua margem de inatividade. O botão **Meus pontos**, em <#${STATUS_CHANNEL}>, mostra os seus.
 
+🇬🇧 **English** — Click **Verificar minha conta** below and type your WynnCraft username. The bot checks the official API and gives you the right role: guild member, ally, or community. Your Discord nickname is set to your in-game name and kept in sync. The bot replies in English if your Discord is set to English.
+
 -# Só você enxerga a resposta da verificação. Este canal não aceita mensagens.`,
         footer: { text: 'Dados verificados na API oficial do Wynncraft' },
       },
@@ -420,16 +514,16 @@ export function panelPayload() {
   };
 }
 
-export function nickModal() {
+export function nickModal(interaction = null) {
   return new ModalBuilder()
     .setCustomId(MODAL_ID)
-    .setTitle('Verificação de conta')
+    .setTitle(pick(interaction, { pt: 'Verificação de conta', en: 'Account verification' }))
     .addComponents(
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId(NICK_FIELD)
-          .setLabel('Seu nick no WynnCraft')
-          .setPlaceholder('Ex.: B_Attomic')
+          .setLabel(pick(interaction, { pt: 'Seu nick no WynnCraft', en: 'Your WynnCraft username' }))
+          .setPlaceholder(pick(interaction, { pt: 'Ex.: B_Attomic', en: 'e.g. B_Attomic' }))
           .setStyle(TextInputStyle.Short)
           .setMinLength(1)
           .setMaxLength(20)

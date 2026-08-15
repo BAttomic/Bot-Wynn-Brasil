@@ -24,7 +24,7 @@ export default {
 
   async handleComponent(interaction) {
     if (interaction.isButton() && interaction.customId === BUTTON_ID) {
-      return interaction.showModal(nickModal());
+      return interaction.showModal(nickModal(interaction));
     }
     if (interaction.isModalSubmit() && interaction.customId === MODAL_ID) {
       await interaction.deferReply({ ephemeral: true });

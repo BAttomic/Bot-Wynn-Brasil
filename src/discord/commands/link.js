@@ -8,8 +8,22 @@ export default {
   data: new SlashCommandBuilder()
     .setName('link')
     .setDescription('Vincula sua conta do WynnCraft ao seu Discord')
+    // O /link é a porta de entrada de quem chega de fora; a descrição em inglês
+    // é o que faz o comando ser encontrável para eles. A resposta em si já sai
+    // no idioma de quem chamou (ver linkAndClassify).
+    .setDescriptionLocalizations({
+      'en-US': 'Link your WynnCraft account to your Discord',
+      'en-GB': 'Link your WynnCraft account to your Discord',
+    })
     .addStringOption((o) =>
-      o.setName('nick').setDescription('Seu nick no WynnCraft').setRequired(true),
+      o
+        .setName('nick')
+        .setDescription('Seu nick no WynnCraft')
+        .setDescriptionLocalizations({
+          'en-US': 'Your WynnCraft username',
+          'en-GB': 'Your WynnCraft username',
+        })
+        .setRequired(true),
     )
     .toJSON(),
 

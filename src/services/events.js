@@ -1,7 +1,7 @@
 import { collections } from '../db/mongo.js';
 import { getConfig } from '../config/guildConfig.js';
 import { awardPoints } from './points.js';
-import { shortNumber } from '../util/format.js';
+import { shortNumber, TIMEZONE } from '../util/format.js';
 import { log } from '../util/log.js';
 import { blockedUuids, isEventBlocked } from './eventBlacklist.js';
 
@@ -104,8 +104,9 @@ export const METRICS = Object.freeze({
   xp: { label: 'XP contribuído', emoji: '', unit: 'XP', type: 'contribution', short: true },
 });
 
-/** Fuso em que a staff pensa as datas. O Brasil não tem mais horário de verão. */
-export const TIMEZONE = 'America/Sao_Paulo';
+// Fuso em que a staff pensa as datas. Mora em util/format.js, junto do
+// formatador; re-exportado aqui porque este módulo é a casa das datas de evento.
+export { TIMEZONE };
 
 /** @param {Date|string} d @returns {number} epoch em segundos, p/ <t:…> do Discord. */
 const unix = (d) => Math.floor(new Date(d).getTime() / 1000);

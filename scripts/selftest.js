@@ -77,13 +77,9 @@ async function main() {
   const anon = await (await fetch('https://api.wynncraft.com/v3/guild/prefix/WnBR')).json();
   check('sem chave, a missão some para todos', preenchido(anon), 0);
 
-  section('3. Classificação de registro (cargo por guilda)');
-  const donoGsw = Object.keys(gsw.members.owner)[0];
-  const donoWnbr = Object.keys(wnbr.members.owner)[0];
-  check(`${donoGsw} (GsW) => banned`, reg.classifyPlayer(await wynn.player(donoGsw)), 'banned');
-  check(`${donoWnbr} (WnBR) => member`, reg.classifyPlayer(await wynn.player(donoWnbr)), 'member');
-  check('sem guilda => neutral', reg.classifyPlayer({ guild: null }), 'neutral');
-  check('GsW com prefixo trocado ainda => banned', reg.classifyPlayer({ guild: { uuid: reg.blacklistGuild().uuid, prefix: 'ZZZ' } }), 'banned');
+  // A seção 3 (classificação) migrou para depois da conexão com o Mongo: a lista
+  // de guildas rastreadas virou dado no banco, então `classifyPlayer` precisa
+  // dele. Ver "3. Classificação de registro", mais abaixo.
 
   section('4. Multiplicador de território (fórmula da wiki)');
   check('normal, 0 fronteiras => x1.0', terr.towerMultiplier({ connections: 0 }), 1);
@@ -213,6 +209,48 @@ async function main() {
 
   await connectMongo();
   try {
+    // ------------------------------------------- Classificação por guilda
+    //
+    // Fica aqui, e não lá em cima com as outras checagens de API, porque a lista
+    // de guildas rastreadas mora no banco desde que a black-list deixou de ser
+    // uma constante no código.
+    section('3. Classificação de registro (cargo por guilda)');
+    const gl = await import('../src/services/guildList.js');
+
+    const donoGsw = Object.keys(gsw.members.owner)[0];
+    const donoWnbr = Object.keys(wnbr.members.owner)[0];
+
+    check('sem lista, ninguém é banido', await reg.classifyPlayer(await wynn.player(donoGsw)), 'neutral');
+    check('black-list começa vazia', await gl.warnIfEmpty(), 0);
+
+    await gl.addGuild({ tag: 'GsW', kind: 'blacklist', by: 'staff1' });
+    const blUuid = [...(await gl.loadGuildIndex()).blacklistUuids][0];
+    check('a guilda entrou na black-list', (await gl.listGuilds('blacklist')).length, 1);
+    check(`${donoGsw} (GsW) => banned`, await reg.classifyPlayer(await wynn.player(donoGsw)), 'banned');
+    check(`${donoWnbr} (WnBR) => member`, await reg.classifyPlayer(await wynn.player(donoWnbr)), 'member');
+    check('sem guilda => neutral', await reg.classifyPlayer({ guild: null }), 'neutral');
+    check(
+      'black-list com prefixo trocado ainda => banned',
+      await reg.classifyPlayer({ guild: { uuid: blUuid, prefix: 'ZZZ' } }),
+      'banned',
+    );
+    check('guilda qualquer => neutral', await reg.classifyPlayer({ guild: { uuid: 'nada', prefix: 'ZZZ' } }), 'neutral');
+
+    // Uma guilda aliada de verdade, adicionada pela TAG como a staff faria.
+    const tagAliada = gsw.prefix; // reaproveita uma guilda que sabemos existir
+    await gl.removeGuild({ uuid: blUuid });
+    const add = await gl.addGuild({ tag: tagAliada, kind: 'ally' });
+    check('addGuild resolve a TAG na API', add.ok, true);
+    check(`membro de [${tagAliada}] => ally`, await reg.classifyPlayer(await wynn.player(donoGsw)), 'ally');
+    check('a nossa própria guilda é recusada', (await gl.addGuild({ tag: 'WnBR', kind: 'ally' })).ok, false);
+    check('TAG inexistente é recusada', (await gl.addGuild({ tag: 'ZZZZ_NAO_EXISTE', kind: 'ally' })).ok, false);
+
+    // Volta ao estado de black-list: mover de papel é um $set no mesmo doc.
+    const moved = await gl.addGuild({ tag: tagAliada, kind: 'blacklist' });
+    check('mover de aliada para black-list reaproveita o documento', moved.movedFrom, 'ally');
+    check('só um documento por guilda', (await gl.listGuilds()).length, 1);
+    check(`${donoGsw} volta a banned`, await reg.classifyPlayer(await wynn.player(donoGsw)), 'banned');
+
     // Regressão: config antiga no banco não pode apagar pesos novos.
     // Um merge raso zeraria guildRaid/weekly/territoryBase silenciosamente.
     const { getConfig } = await import('../src/config/guildConfig.js');

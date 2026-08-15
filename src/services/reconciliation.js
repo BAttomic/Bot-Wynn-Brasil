@@ -1,7 +1,9 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from 'discord.js';
 import { collections } from '../db/mongo.js';
 import { fetchGuildMembers, RANKS, RANK_LABEL } from './guildData.js';
-import { applyClassificationRoles, blacklistGuild } from './registration.js';
+import { applyClassificationRoles, syncNickname } from './registration.js';
+import { loadGuildIndex } from './guildList.js';
+import { ensureAllyRole, syncAllyIdentity } from './allyRoles.js';
 import { loadBanIndex, recordBan, exemptInIndex, BAN_REASON_BLACKLIST_GUILD } from './bans.js';
 import { getConfig } from '../config/guildConfig.js';
 import { optional } from '../config/env.js';
@@ -12,19 +14,26 @@ import { optional } from '../config/env.js';
  * a pessoa realmente tem. Diferente do /verificar (que só lê a coleção de
  * vínculos), aqui a fonte é o próprio servidor do Discord.
  *
- * Custa 2 chamadas à API (roster da nossa guilda + roster da black-list), nunca
- * uma por membro. A identidade é resolvida por, nesta ordem: vínculo salvo →
- * apelido casado contra os rosters → coleção de membros por username.
+ * Custa uma chamada à API por guilda rastreada (a nossa + cada black-list + cada
+ * aliada), nunca uma por membro. A identidade é resolvida por, nesta ordem:
+ * vínculo salvo → apelido casado contra os rosters → coleção de membros por
+ * username.
+ *
+ * O apelido também é cobrado, e aí a comparação é EXATA — inclusive na caixa.
+ * Identificar a pessoa continua sendo caso-insensível (é o que a acha), mas
+ * `b_attomic` no Discord com `B_Attomic` no jogo é divergência, e o painel
+ * corrige junto com o cargo.
  */
 
 const CLASSIFICATION_KEYS = ['community', 'guildMember', 'banned'];
 
-const KIND_LABEL = { member: 'Membro', neutral: 'Comunidade', banned: 'Banido' };
-const KIND_EMOJI = { member: '🟢', neutral: '⚪', banned: '🚫' };
+const KIND_LABEL = { member: 'Membro', ally: 'Aliado', neutral: 'Comunidade', banned: 'Banido' };
+const KIND_EMOJI = { member: '🟢', ally: '🤝', neutral: '⚪', banned: '🚫' };
 
 /** Cargos que cada classificação DEVE ter (espelha registration.js). */
 const ROLES_BY_KIND = {
   member: ['guildMember', 'community'],
+  ally: ['community'],
   neutral: ['community'],
   banned: ['banned'],
 };
@@ -55,22 +64,37 @@ function rankRoleIds(guild) {
  * vínculo, cruzando com os rosters e a lista de bans.
  */
 function resolveKind({ nickLower, uuid, discordId }, ctx) {
-  const { guildUuids, guildNames, blUuids, blNames, ban } = ctx;
+  const { guildUuids, guildNames, blUuids, blNames, allyByUuid, allyByName, ban } = ctx;
   const banned = ban.discordIds.has(discordId) || (uuid && ban.uuids.has(uuid));
   const inBlacklist = (uuid && blUuids.has(uuid)) || blNames.has(nickLower);
-  // Isento pela staff continua na GsW, e é essa a ideia: `inBlacklist` sozinho
-  // não pode bastar, senão a reconciliação rebaixaria a pessoa a banido de novo
-  // sem nem consultar a lista.
+  const isOurs = (uuid && guildUuids.has(uuid)) || guildNames.has(nickLower);
+  const isAlly = (uuid && allyByUuid.has(uuid)) || allyByName.has(nickLower);
+  // Isento pela staff continua na guilda proibida, e é essa a ideia:
+  // `inBlacklist` sozinho não pode bastar, senão a reconciliação rebaixaria a
+  // pessoa a banido de novo sem nem consultar a lista.
   if (exemptInIndex(ban, { uuid, discordId })) {
-    return (uuid && guildUuids.has(uuid)) || guildNames.has(nickLower) ? 'member' : 'neutral';
+    return isOurs ? 'member' : isAlly ? 'ally' : 'neutral';
   }
   if (banned || inBlacklist) return 'banned';
-  if ((uuid && guildUuids.has(uuid)) || guildNames.has(nickLower)) return 'member';
+  if (isOurs) return 'member';
+  if (isAlly) return 'ally';
   return 'neutral';
 }
 
+/** A guilda aliada deste jogador e o cargo dela, ou nulos. */
+function allyFor({ nickLower, uuid }, ctx) {
+  const doc = (uuid && ctx.allyByUuid.get(uuid)) || ctx.allyByName.get(nickLower) || null;
+  return { doc, roleId: doc ? ctx.allyRoleByGuild.get(doc.uuid) ?? null : null };
+}
+
 /**
- * Monta o retrato completo. Não aplica nada — só descreve.
+ * Monta o retrato completo. Não mexe em membro nenhum — só descreve.
+ *
+ * A uma exceção: os cargos `[TAG] Nome` das guildas aliadas são criados aqui se
+ * ainda não existirem. Sem o cargo não há com o que comparar, e o painel diria
+ * "tudo certo" para um aliado que não tem cargo nenhum. A operação é idempotente
+ * e não toca em ninguém — cria o cargo, não o distribui.
+ *
  * @param {import('discord.js').Guild} guild
  * @returns {Promise<object|null>}
  */
@@ -87,7 +111,57 @@ export async function computeReconciliation(guild) {
 
   const ours = await fetchGuildMembers(prefix);
   if (!ours) return null;
-  const bl = await fetchGuildMembers(blacklistGuild().prefix).catch(() => null);
+
+  const tracked = await loadGuildIndex();
+
+  // Grafia OFICIAL de cada nick, como a API a escreve. É contra isto que o
+  // apelido do Discord é comparado — com caixa e tudo. Alimentado por todo
+  // roster que passar por aqui.
+  const canonicalByUuid = new Map();
+  const canonicalByName = new Map();
+  // Índice reverso do apelido para o uuid. Sem ele, um banido identificado só
+  // pelo nome entraria em `recordBan` sem uuid — e `recordBan` exige uuid.
+  const uuidByName = new Map();
+  const remember = (m) => {
+    if (m.uuid) {
+      canonicalByUuid.set(m.uuid, m.username);
+      uuidByName.set(norm(m.username), m.uuid);
+    }
+    canonicalByName.set(norm(m.username), m.username);
+  };
+  for (const m of ours.members) remember(m);
+
+  // Black-list: a união de todas as guildas proibidas.
+  const blUuids = new Set();
+  const blNames = new Set();
+  for (const doc of tracked.blacklist) {
+    const roster = await fetchGuildMembers(doc.prefix).catch(() => null);
+    if (!roster) continue;
+    for (const m of roster.members) {
+      blUuids.add(m.uuid);
+      blNames.add(norm(m.username));
+      remember(m);
+    }
+  }
+
+  // Aliadas: cada jogador aponta para o documento da guilda dele, e cada guilda
+  // para o cargo `[TAG] Nome` correspondente.
+  const allyByUuid = new Map();
+  const allyByName = new Map();
+  const allyRoleByGuild = new Map();
+  for (let doc of tracked.ally) {
+    const roster = await fetchGuildMembers(doc.prefix).catch(() => null);
+    if (!roster) continue;
+    doc = await syncAllyIdentity(doc, roster.guild);
+    const roleId = await ensureAllyRole(guild, cfg, doc);
+    if (roleId) allyRoleByGuild.set(doc.uuid, roleId);
+    for (const m of roster.members) {
+      allyByUuid.set(m.uuid, doc);
+      allyByName.set(norm(m.username), doc);
+      remember(m);
+    }
+  }
+
   const ban = await loadBanIndex();
   const links = await collections.members().find({}).toArray();
   await guild.members.fetch().catch(() => {});
@@ -95,8 +169,11 @@ export async function computeReconciliation(guild) {
   const ctx = {
     guildUuids: new Set(ours.members.map((m) => m.uuid)),
     guildNames: new Set(ours.members.map((m) => norm(m.username))),
-    blUuids: new Set(bl?.members.map((m) => m.uuid) ?? []),
-    blNames: new Set(bl?.members.map((m) => norm(m.username)) ?? []),
+    blUuids,
+    blNames,
+    allyByUuid,
+    allyByName,
+    allyRoleByGuild,
     ban,
   };
   const linkByDiscord = new Map(links.map((l) => [l.discordId, l]));
@@ -105,6 +182,7 @@ export async function computeReconciliation(guild) {
 
   const buckets = {
     toMember: [], // deveria ser Membro (ganha guilda+comunidade)
+    toAlly: [], // deveria ser Aliado (comunidade + cargo [TAG])
     toNeutral: [], // deveria ser só Comunidade (perde cargo de guilda indevido)
     toBanned: [], // deveria ser Banido
     rankWithoutGuild: [], // tem cargo de rank sem estar na guilda (só aviso)
@@ -116,12 +194,13 @@ export async function computeReconciliation(guild) {
     const nick = member.nickname || member.user.username;
     const nickLower = norm(nick);
     const link = linkByDiscord.get(member.id);
-    const uuid = link?.uuid ?? matchUuid(nickLower, ours, bl, linkByName);
+    const uuid = link?.uuid ?? matchUuid(nickLower, uuidByName, linkByName);
     let kind = resolveKind({ nickLower, uuid, discordId: member.id }, ctx);
 
     // Banimento é PERMANENTE: quem já carrega o cargo de banido não o perde por
-    // reconciliação. Sair da GsW não devolve o acesso sozinho — a remoção só vem
-    // de /ban remove, depois de uma apelação. (Mesma regra do roleSync/bans.js.)
+    // reconciliação. Sair da guilda proibida não devolve o acesso sozinho — a
+    // remoção só vem de /ban remove, depois de uma apelação. (Mesma regra do
+    // roleSync/bans.js.)
     //
     // O isento é a exceção, e ela precisa estar AQUI também: entre o /ban remove
     // e o roleSync que tira o cargo existe uma janela em que a pessoa ainda o
@@ -136,8 +215,30 @@ export async function computeReconciliation(guild) {
     const holds = CLASSIFICATION_KEYS.filter((k) => roleIds[k] && member.roles.cache.has(roleIds[k]));
     const holdIds = new Set(holds.map((k) => roleIds[k]));
 
-    const inSync =
-      wantedIds.size === holdIds.size && [...wantedIds].every((id) => holdIds.has(id));
+    // O cargo `[TAG] Nome` entra na conta junto: um aliado sem o cargo da guilda
+    // dele está tão fora de sincronia quanto um membro sem o cargo de membro.
+    const ally = kind === 'ally' ? allyFor({ nickLower, uuid }, ctx) : { doc: null, roleId: null };
+    const allyRoleId = ally.roleId;
+    const allyOk =
+      (!allyRoleId || member.roles.cache.has(allyRoleId)) &&
+      ![...ctx.allyRoleByGuild.values()].some((id) => id !== allyRoleId && member.roles.cache.has(id));
+
+    const rolesInSync =
+      wantedIds.size === holdIds.size &&
+      [...wantedIds].every((id) => holdIds.has(id)) &&
+      allyOk;
+
+    // Apelido: comparação EXATA contra a grafia da API, caixa inclusa. Achar a
+    // pessoa continua sendo caso-insensível (norm), mas `b_attomic` no Discord
+    // com `B_Attomic` no jogo é divergência.
+    //
+    // `member.nickname` é null quando não há apelido definido — e aí o certo é
+    // definir um, não deixar o username global valendo por acaso. Sem grafia
+    // conhecida (nick que não casa com roster nem vínculo) não há o que cobrar.
+    const canonical = link?.username ?? (uuid ? canonicalByUuid.get(uuid) : null) ?? canonicalByName.get(nickLower) ?? null;
+    const nickWrong = !!canonical && member.nickname !== canonical;
+
+    const inSync = rolesInSync && !nickWrong;
 
     // Aviso: segura um cargo de rank sem estar na guilda (ex.: Recrutador).
     if (kind !== 'member') {
@@ -162,27 +263,33 @@ export async function computeReconciliation(guild) {
       uuid,
       kind,
       holds, // chaves que ele tem hoje
+      allyRoleId,
+      allyGuildUuid: ally.doc?.uuid ?? null,
+      canonical, // grafia oficial do nick (null = desconhecida)
+      nickWrong,
+      rolesInSync,
     };
     if (kind === 'member') buckets.toMember.push(entry);
     else if (kind === 'banned') buckets.toBanned.push(entry);
+    else if (kind === 'ally') buckets.toAlly.push(entry);
     else buckets.toNeutral.push(entry);
   }
 
   return { buckets, okCount, cfg, roleIds, guildName: ours.guild.name, prefix };
 }
 
-/** Tenta achar o UUID do jogador a partir do apelido, sem chamar a API. */
-function matchUuid(nickLower, ours, bl, linkByName) {
-  const inOurs = ours.members.find((m) => norm(m.username) === nickLower);
-  if (inOurs) return inOurs.uuid;
-  const inBl = bl?.members.find((m) => norm(m.username) === nickLower);
-  if (inBl) return inBl.uuid;
-  return linkByName.get(nickLower)?.uuid ?? null;
+/**
+ * Tenta achar o UUID do jogador a partir do apelido, sem chamar a API. Os
+ * rosters (nossa guilda, black-lists e aliadas) já foram varridos em
+ * `uuidByName`; a coleção de vínculos é o último recurso.
+ */
+function matchUuid(nickLower, uuidByName, linkByName) {
+  return uuidByName.get(nickLower) ?? linkByName.get(nickLower)?.uuid ?? null;
 }
 
 /** Todos os desalinhados, em ordem de exibição. */
 function outOfSync(buckets) {
-  return [...buckets.toBanned, ...buckets.toMember, ...buckets.toNeutral];
+  return [...buckets.toBanned, ...buckets.toMember, ...buckets.toAlly, ...buckets.toNeutral];
 }
 
 function block(list, render, max = 1000) {
@@ -205,27 +312,33 @@ export function reconciliationPanel(data, note = null) {
     if (v) fields.push({ name: `${emoji} ${label} (${list.length})`, value: v });
   };
 
-  add('🟢', 'Vão receber cargo de Membro', buckets.toMember, (e) => `**${e.nick}** — tem: ${holdLabel(e.holds)}`);
-  add('⚪', 'Vão ficar só como Comunidade', buckets.toNeutral, (e) => `**${e.nick}** — tem: ${holdLabel(e.holds)}`);
-  add('🚫', 'Vão receber banimento', buckets.toBanned, (e) => `**${e.nick}** — tem: ${holdLabel(e.holds)}`);
+  add('🟢', 'Membro — a corrigir', buckets.toMember, renderEntry);
+  add('🤝', 'Aliado — a corrigir', buckets.toAlly, renderEntry);
+  add('⚪', 'Comunidade — a corrigir', buckets.toNeutral, renderEntry);
+  add('🚫', 'Banimento — a corrigir', buckets.toBanned, renderEntry);
   add('⚠️', 'Cargo de rank sem estar na guilda', buckets.rankWithoutGuild, (e) => `**${e.nick}** — ${e.roles}`);
 
   if (!fields.length) {
-    fields.push({ name: '✅ Tudo sincronizado', value: 'Nenhum cargo a corrigir.' });
+    fields.push({ name: '✅ Tudo sincronizado', value: 'Nenhum cargo nem apelido a corrigir.' });
   }
 
+  const nickCount = pending.filter((e) => e.nickWrong).length;
   const embed = {
-    title: `🔧 Reconciliação de cargos — ${guildName} [${prefix}]`,
+    title: `🔧 Reconciliação — ${guildName} [${prefix}]`,
     color: 0x9b59b6,
-    description: note ?? `Cruzando o apelido de cada membro do Discord com a guilda, a black-list e a lista de bans.\n**${okCount}** já corretos · **${pending.length}** a corrigir.`,
+    description:
+      note ??
+      `Cruzando o apelido de cada membro do Discord com a guilda, as aliadas, a black-list e a lista de bans.\n` +
+        `**${okCount}** já corretos · **${pending.length}** a corrigir${nickCount ? ` (${nickCount} por apelido)` : ''}.`,
     fields,
-    footer: { text: 'Cargos de rank são gestão manual — o bot só avisa, não mexe.' },
+    footer: { text: 'Apelido é comparado letra por letra, maiúscula inclusa. Cargos de rank são gestão manual.' },
     timestamp: new Date().toISOString(),
   };
 
   const components = [];
   const row1 = new ActionRowBuilder();
   if (buckets.toMember.length) row1.addComponents(btn('recon:apply:member', `Membro (${buckets.toMember.length})`, ButtonStyle.Success, '🟢'));
+  if (buckets.toAlly.length) row1.addComponents(btn('recon:apply:ally', `Aliado (${buckets.toAlly.length})`, ButtonStyle.Secondary, '🤝'));
   if (buckets.toNeutral.length) row1.addComponents(btn('recon:apply:neutral', `Comunidade (${buckets.toNeutral.length})`, ButtonStyle.Secondary, '⚪'));
   if (buckets.toBanned.length) row1.addComponents(btn('recon:apply:banned', `Banir (${buckets.toBanned.length})`, ButtonStyle.Danger, '🚫'));
   if (row1.components.length) {
@@ -246,9 +359,9 @@ export function reconciliationPanel(data, note = null) {
       .setMaxValues(Math.min(pending.length, 25))
       .addOptions(
         pending.slice(0, 25).map((e) => ({
-          label: e.nick.slice(0, 100),
+          label: (e.canonical ?? e.nick).slice(0, 100),
           value: e.discordId,
-          description: `→ ${KIND_LABEL[e.kind]}`,
+          description: `→ ${KIND_LABEL[e.kind]}${e.nickWrong ? ' · corrige apelido' : ''}`.slice(0, 100),
           emoji: KIND_EMOJI[e.kind],
         })),
       );
@@ -256,6 +369,17 @@ export function reconciliationPanel(data, note = null) {
   }
 
   return { embeds: [embed], components };
+}
+
+/**
+ * Uma linha do painel. Quem está listado só por causa do apelido não pode
+ * aparecer como se fosse trocar de cargo — o marcador diz o que de fato muda.
+ */
+function renderEntry(e) {
+  const partes = [];
+  if (!e.rolesInSync) partes.push(`tem: ${holdLabel(e.holds)}`);
+  if (e.nickWrong) partes.push(`apelido: \`${e.nick}\` → \`${e.canonical}\``);
+  return `**${e.canonical ?? e.nick}** — ${partes.join(' · ')}`;
 }
 
 function holdLabel(holds) {
@@ -271,7 +395,7 @@ function btn(id, label, style, emoji) {
 /**
  * Aplica a classificação correta e devolve o retrato atualizado para re-render.
  * @param {import('discord.js').Guild} guild
- * @param {'member'|'neutral'|'banned'|'all'} scope  qual grupo aplicar
+ * @param {'member'|'ally'|'neutral'|'banned'|'all'} scope  qual grupo aplicar
  * @param {string[]|null} only  restringe a estes discordIds (menu de seleção)
  * @returns {Promise<{applied:number, data:object}>}
  */
@@ -291,14 +415,21 @@ export async function applyReconciliation(guild, scope, only = null) {
   for (const e of targets) {
     const member = guild.members.cache.get(e.discordId) || (await guild.members.fetch(e.discordId).catch(() => null));
     if (!member) continue;
-    await applyClassificationRoles(member, cfg, e.kind);
-    // Detectou GsW/banido? Grava o banimento PERMANENTE (uuid + discord). Assim,
-    // sair da GsW depois não devolve o acesso — a remoção só vem de /ban remove.
+    await applyClassificationRoles(member, cfg, e.kind, e.allyRoleId);
+    // Apelido exato. Só quando sabemos a grafia oficial — renomear para um
+    // palpite seria pior que deixar como está.
+    if (e.nickWrong && e.canonical) await syncNickname(member, e.canonical);
+    // Detectou guilda proibida/banido? Grava o banimento PERMANENTE (uuid +
+    // discord). Assim, sair da guilda depois não devolve o acesso — a remoção só
+    // vem de /ban remove.
     if (e.kind === 'banned' && e.uuid) {
-      await recordBan({ uuid: e.uuid, username: e.nick, discordId: e.discordId, reason: BAN_REASON_BLACKLIST_GUILD });
+      await recordBan({ uuid: e.uuid, username: e.canonical ?? e.nick, discordId: e.discordId, reason: BAN_REASON_BLACKLIST_GUILD });
     }
     // Mantém a coleção de vínculos coerente com /verificar (só se já houver vínculo).
-    await collections.members().updateOne({ discordId: e.discordId }, { $set: { classification: e.kind } });
+    await collections.members().updateOne(
+      { discordId: e.discordId },
+      { $set: { classification: e.kind, allyGuildUuid: e.allyGuildUuid ?? null } },
+    );
     applied += 1;
   }
 
