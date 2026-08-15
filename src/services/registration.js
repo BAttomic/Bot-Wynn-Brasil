@@ -26,10 +26,21 @@ export const NICK_FIELD = 'nick';
 
 const PANEL_STATE_ID = 'registrationPanel';
 
-// Consultas à API por rodada do "registrar todos pelo apelido". A 0,6s cada
-// (limite com chave), 150 dão ~1min30 — bem dentro dos 15 minutos que o token da
-// interação dura, com folga para a resposta.
-const MAX_LOOKUPS_PER_RUN = 150;
+// Quanto tempo o "registrar todos pelo apelido" pode varrer numa rodada.
+//
+// Era um teto de 150 CONSULTAS, e ele mentia sobre o que limita de verdade: o
+// que acaba não são requisições, é o token da interação do Discord, que morre em
+// 15 minutos. Contar tempo deixa a rodada ir até onde der — num servidor com
+// centenas de não-registrados, 150 consultas nunca terminavam o serviço, e o
+// resultado era gente com conta na API vivendo sem vínculo (que é justamente o
+// que este botão existe para impedir). Os 10 minutos deixam 5 de folga para a
+// resposta final e para o retrato que vem depois dela.
+const RUN_BUDGET_MS = 10 * 60_000;
+
+// De quantas em quantas consultas o progresso é publicado no painel. A 0,6s por
+// consulta isso é uma edição a cada ~15s: o suficiente para não parecer travado,
+// longe o bastante do rate limit do Discord.
+const PROGRESS_EVERY = 25;
 
 // Canais citados no painel de registro. Mention <#id> aponta para o canal e
 // nunca pinga ninguém. IDs fixos, no mesmo espírito de staticPanels.js.
@@ -539,33 +550,64 @@ export async function forceLink({ interaction, targetUser, targetMember, rawNick
 }
 
 /**
- * Registro em massa pelo apelido. Varre todos os membros do Discord e, para quem
- * ainda NÃO tem vínculo, olha o apelido na API do Wynn; se o jogador existir,
- * cria o vínculo — a mesma lógica do registro, só que disparada pela staff.
+ * Varredura completa do servidor, em duas fases:
+ *
+ *  A. **Sem vínculo** → olha o apelido na API do Wynn e, se o jogador existir,
+ *     cria o vínculo (a mesma lógica do registro, disparada pela staff).
+ *  B. **Com vínculo** → confere se o `username` guardado ainda é o nick atual da
+ *     pessoa. Quem trocou de nome no jogo tinha o nome ANTIGO gravado para
+ *     sempre, e o pior é que o /reconciliar então "corrigia" o apelido no
+ *     Discord de volta para o nome velho. Para quem está em roster o nome sai de
+ *     graça do roster já baixado; só quem não aparece em roster nenhum (os
+ *     neutros) custa uma consulta — e ela é feita pelo UUID, que é imutável.
+ *
+ * Ter as duas fases num lugar só é o que sustenta a regra: ninguém no servidor
+ * fica com conta na API e sem vínculo, nem com vínculo apontando para um nick
+ * que não existe mais.
  *
  * Usa `force: false` de propósito: se o apelido de alguém casa com uma conta já
  * vinculada a outra pessoa, o vínculo do dono NÃO é roubado — a colisão só entra
  * no resumo. Roubar exige o `/forcelink` individual, uma decisão consciente.
  *
  * A API serializa e espaça as chamadas sozinha, então não há throttle extra
- * aqui. O que existe é um TETO de consultas por rodada: o resultado volta numa
- * interação do Discord, cujo token morre em 15 minutos, e sem teto uma varredura
- * de centenas de membros estourava esse prazo (além do rate limit). Quem passar
- * do teto fica para a próxima — é só clicar de novo.
+ * aqui. O limite da rodada é de TEMPO (ver RUN_BUDGET_MS), não de consultas: a
+ * varredura vai até o fim da lista se couber no orçamento, e quem sobrar fica
+ * para o próximo clique. `onProgress` recebe o resumo parcial de tempos em
+ * tempos, para quem chamou mostrar que a coisa anda.
  *
  * @param {import('discord.js').Guild} guild
- * @param {{ actorId?: string }} [opts]
- * @returns {Promise<{scanned:number, already:number, registered:number, notFound:number, invalid:number, conflicts:number, ambiguous:number, failed:number, lookups:number, remaining:number, rateLimited:boolean, byKind:{member:number, ally:number, neutral:number, banned:number}}>}
+ * @param {{ actorId?: string, budgetMs?: number, onProgress?: (s: object) => any, canonicalByUuid?: Map<string,string> }} [opts]
+ * @returns {Promise<object>} resumo contado por categoria
  */
-export async function registerAllByNick(guild, { actorId, maxLookups = MAX_LOOKUPS_PER_RUN } = {}) {
+export async function sweepMembers(guild, {
+  actorId,
+  budgetMs = RUN_BUDGET_MS,
+  onProgress = null,
+  canonicalByUuid = new Map(),
+} = {}) {
   await guild.members.fetch().catch(() => {});
-  const linked = await collections.members().find({}, { projection: { discordId: 1 } }).toArray();
+  const linked = await collections.members()
+    .find({}, { projection: { discordId: 1, uuid: 1, username: 1 } })
+    .toArray();
   const linkedDiscord = new Set(linked.map((l) => l.discordId));
 
+  const inicio = Date.now();
   const summary = {
     scanned: 0, already: 0, registered: 0, notFound: 0, invalid: 0, conflicts: 0, ambiguous: 0, failed: 0,
-    lookups: 0, remaining: 0, rateLimited: false,
+    lookups: 0, remaining: 0, rateLimited: false, timedOut: false,
+    // Fase B: vínculos conferidos e quantos estavam com o nick desatualizado.
+    revalidated: 0, renamed: 0, renames: [],
     byKind: { member: 0, ally: 0, neutral: 0, banned: 0 },
+  };
+
+  const noPrazo = () => Date.now() - inicio <= budgetMs;
+  const progresso = async () => {
+    if (!onProgress) return;
+    try {
+      await onProgress(summary);
+    } catch {
+      // Progresso é enfeite: se a edição da mensagem falhar, a varredura segue.
+    }
   };
 
   for (const member of guild.members.cache.values()) {
@@ -588,11 +630,16 @@ export async function registerAllByNick(guild, { actorId, maxLookups = MAX_LOOKU
       continue;
     }
 
-    if (summary.lookups >= maxLookups) {
+    // Acabou o tempo da rodada: o resto fica para o próximo clique. Continuar
+    // seria varrer com um token de interação já morto — trabalho feito que
+    // ninguém veria.
+    if (!noPrazo()) {
+      summary.timedOut = true;
       summary.remaining += 1;
       continue;
     }
     summary.lookups += 1;
+    if (summary.lookups % PROGRESS_EVERY === 0) await progresso();
 
     // Uma pessoa não pode custar a varredura inteira. Antes deste `catch`,
     // qualquer erro inesperado da API (foi um 300 de nick ambíguo que apareceu
@@ -636,6 +683,52 @@ export async function registerAllByNick(guild, { actorId, maxLookups = MAX_LOOKU
     } else {
       summary.failed += 1;
     }
+  }
+
+  // ── Fase B: quem JÁ tem vínculo ────────────────────────────────────────────
+  //
+  // O roster vem primeiro porque é grátis: quem está na nossa guilda, numa
+  // aliada ou numa proibida já teve o nome atual baixado pelo retrato. Sobra
+  // consulta só para o neutro, que não aparece em roster nenhum e por isso é o
+  // único que ninguém mais atualiza.
+  for (const l of linked) {
+    if (!l.uuid) continue;
+    let atual = canonicalByUuid.get(l.uuid) ?? null;
+
+    if (!atual) {
+      if (!noPrazo()) {
+        summary.timedOut = true;
+        summary.remaining += 1;
+        continue;
+      }
+      summary.lookups += 1;
+      if (summary.lookups % PROGRESS_EVERY === 0) await progresso();
+      try {
+        // Pelo UUID, que é imutável: perguntar pelo nick antigo acharia a conta
+        // errada se outra pessoa tiver adotado aquele nome.
+        const player = await wynn.player(l.uuid);
+        atual = player?.username ?? null;
+      } catch (e) {
+        if (isRateLimited(e)) {
+          summary.rateLimited = true;
+          summary.remaining += 1;
+          break;
+        }
+        log.warn(`Revalidação: falhei no uuid ${l.uuid}:`, e?.message ?? e);
+        summary.failed += 1;
+        continue;
+      }
+    }
+
+    summary.revalidated += 1;
+    if (!atual || atual === l.username) continue;
+
+    // Trocou de nick no jogo. Só o banco é atualizado aqui; o apelido no Discord
+    // sai da passada de cargos/apelidos, que já sabe montar a TAG na frente.
+    const anterior = l.username; // antes do update: o driver pode devolver o mesmo objeto
+    await collections.members().updateOne({ uuid: l.uuid }, { $set: { username: atual } });
+    summary.renamed += 1;
+    if (summary.renames.length < 10) summary.renames.push(`${anterior} → ${atual}`);
   }
 
   return summary;

@@ -6,6 +6,7 @@ import {
   syncNickname,
   expectedNickname,
   stripNickTag,
+  isValidNick,
 } from './registration.js';
 import { loadGuildIndex } from './guildList.js';
 import { ensureAllyRole, syncAllyIdentity } from './allyRoles.js';
@@ -231,6 +232,13 @@ export async function computeReconciliation(guild) {
     rankWithoutGuild: [], // tem cargo de rank sem estar na guilda (só aviso)
   };
   let okCount = 0;
+  // Gente sem vínculo cujo apelido AINDA PODE ser um nick de verdade. Não dá
+  // para saber daqui se a conta existe (isso custaria uma consulta por pessoa),
+  // mas dá para saber que ninguém perguntou. Sem este número o painel dizia
+  // "tudo sincronizado" para um servidor cheio de gente por registrar: quem não
+  // tem vínculo NEM cargo está tecnicamente em dia com a regra de cargos, e
+  // sumia do retrato.
+  let pendingRegistration = 0;
 
   for (const member of guild.members.cache.values()) {
     if (member.user.bot) continue;
@@ -239,6 +247,7 @@ export async function computeReconciliation(guild) {
     // roster. O `nick` original continua sendo o que se compara com o esperado.
     const nickLower = norm(stripNickTag(nick));
     const link = linkByDiscord.get(member.id);
+    if (!link && isValidNick(stripNickTag(nick))) pendingRegistration += 1;
     const uuid = link?.uuid ?? matchUuid(nickLower, uuidByName, linkByName);
     let kind = resolveKind({ nickLower, uuid, discordId: member.id, linked: !!link }, ctx);
 
@@ -280,7 +289,11 @@ export async function computeReconciliation(guild) {
     // `member.nickname` é null quando não há apelido definido — e aí o certo é
     // definir um, não deixar o username global valendo por acaso. Sem grafia
     // conhecida (nick que não casa com roster nem vínculo) não há o que cobrar.
-    const nickReal = link?.username ?? (uuid ? canonicalByUuid.get(uuid) : null) ?? canonicalByName.get(nickLower) ?? null;
+    // O ROSTER vem antes do vínculo, e a ordem importa: o roster foi baixado
+    // agora, o vínculo pode ter o nick de antes de a pessoa se renomear no jogo.
+    // Com a ordem invertida, o painel "corrigia" o apelido de quem trocou de
+    // nome de volta para o nome velho, toda vez, para sempre.
+    const nickReal = (uuid ? canonicalByUuid.get(uuid) : null) ?? link?.username ?? canonicalByName.get(nickLower) ?? null;
     // Quem é de guilda rastreada carrega a TAG na frente. Vem da mesma função
     // que o registro e o roleSync usam, senão os três ficariam se corrigindo em
     // círculo — um escreve `[GsW] Fulano`, o outro "conserta" para `Fulano`.
@@ -325,7 +338,10 @@ export async function computeReconciliation(guild) {
     else buckets.toNeutral.push(entry);
   }
 
-  return { buckets, okCount, cfg, roleIds, guildName: ours.guild.name, prefix };
+  // `canonicalByUuid` sai daqui para a varredura não pagar de novo por um nome
+  // que este retrato já baixou: só quem não aparece em roster nenhum custa
+  // consulta lá.
+  return { buckets, okCount, pendingRegistration, canonicalByUuid, cfg, roleIds, guildName: ours.guild.name, prefix };
 }
 
 /**
@@ -359,9 +375,18 @@ function block(list, render, max = 1000) {
  * @param {object} data  saída de computeReconciliation
  */
 export function reconciliationPanel(data, note = null) {
-  const { buckets, okCount, guildName, prefix } = data;
+  const { buckets, okCount, guildName, prefix, pendingRegistration = 0 } = data;
   const pending = outOfSync(buckets);
   const fields = [];
+
+  if (pendingRegistration) {
+    fields.push({
+      name: `🔗 Sem vínculo — a registrar (${pendingRegistration})`,
+      value:
+        'Apelidos que parecem nick e que ninguém conferiu na API ainda. ' +
+        'Clique em **Varrer tudo** para consultar cada um e vincular quem existir.',
+    });
+  }
 
   const add = (emoji, label, list, render) => {
     const v = block(list, render);
@@ -378,7 +403,10 @@ export function reconciliationPanel(data, note = null) {
   add('⚠️', 'Cargo de rank sem estar na guilda', buckets.rankWithoutGuild, (e) => `**${e.nick}** — ${e.roles}`);
 
   if (!fields.length) {
-    fields.push({ name: '✅ Tudo sincronizado', value: 'Nenhum cargo nem apelido a corrigir.' });
+    fields.push({
+      name: '✅ Tudo sincronizado',
+      value: 'Todo mundo vinculado, com os cargos e o apelido certos.',
+    });
   }
 
   const nickCount = pending.filter((e) => e.nickWrong).length;
@@ -388,7 +416,8 @@ export function reconciliationPanel(data, note = null) {
     description:
       note ??
       `Cruzando o **vínculo** de cada membro do Discord com a guilda, as aliadas, a black-list e a lista de bans.\n` +
-        `**${okCount}** já corretos · **${pending.length}** a corrigir${nickCount ? ` (${nickCount} por apelido)` : ''}.`,
+        `**${okCount}** já corretos · **${pending.length}** a corrigir${nickCount ? ` (${nickCount} por apelido)` : ''}` +
+        `${pendingRegistration ? ` · **${pendingRegistration}** sem vínculo` : ''}.`,
     fields,
     footer: {
       text: 'Sem registro = sem cargo: comunidade atesta um vínculo. Apelido é comparado letra por letra, maiúscula inclusa.',
@@ -409,8 +438,16 @@ export function reconciliationPanel(data, note = null) {
 
   const row2 = new ActionRowBuilder();
   if (pending.length) row2.addComponents(btn('recon:apply:all', `Tudo (${pending.length})`, ButtonStyle.Primary, '⚡'));
+  // A varredura completa: registra quem falta, confere o nick de quem já tem
+  // vínculo e aplica cargos/apelidos de todo mundo numa tacada. É o botão que
+  // faz valer a regra "ninguém com conta na API e sem registro".
   row2.addComponents(
-    btn('recon:register', 'Registrar todos pelo apelido', ButtonStyle.Primary, '🔗'),
+    btn(
+      'recon:register',
+      pendingRegistration ? `Varrer tudo (${pendingRegistration} sem vínculo)` : 'Varrer tudo',
+      ButtonStyle.Primary,
+      '🔗',
+    ),
     btn('recon:refresh', 'Atualizar', ButtonStyle.Secondary, '🔄'),
   );
   components.push(row2);

@@ -4,7 +4,7 @@ import {
   reconciliationPanel,
   applyReconciliation,
 } from '../../services/reconciliation.js';
-import { registerAllByNick } from '../../services/registration.js';
+import { sweepMembers } from '../../services/registration.js';
 import { getConfig } from '../../config/guildConfig.js';
 import { audit } from '../../services/audit.js';
 
@@ -45,19 +45,36 @@ export default {
       return interaction.editReply(reconciliationPanel(data));
     }
 
-    // Registro em massa: olha o apelido de cada membro sem vínculo na API e,
-    // se o jogador existir, cria o vínculo (mesma lógica do registro).
+    // Varredura completa, na ordem em que uma coisa habilita a outra:
+    //
+    //   1. registra quem não tem vínculo (consultando o apelido na API);
+    //   2. confere se o nick de quem JÁ tem vínculo continua sendo o do jogo;
+    //   3. aplica cargos e apelidos de todo mundo que estiver fora de sincronia.
+    //
+    // Os passos 1 e 2 precisam vir antes do 3: é o vínculo que revela a grafia
+    // oficial do nick, e sem ele o passo 3 não teria o que comparar.
     if (action === 'register') {
       await interaction.deferUpdate();
-      const summary = await registerAllByNick(interaction.guild, { actorId: interaction.user.id });
+
+      const inicial = await computeReconciliation(interaction.guild);
+      if (!inicial) return interaction.editReply({ content: 'Não consegui obter os dados da guilda.', embeds: [], components: [] });
+
+      const summary = await sweepMembers(interaction.guild, {
+        actorId: interaction.user.id,
+        // Os nomes que o retrato já baixou dos rosters saem de graça: só o
+        // neutro, que não está em roster nenhum, custa consulta.
+        canonicalByUuid: inicial.canonicalByUuid,
+        onProgress: (s) => interaction.editReply(progressPanel(s)),
+      });
+
+      const { applied, data } = await applyReconciliation(interaction.guild, 'all');
       audit(
         interaction.client,
         interaction.guildId,
-        `🔗 <@${interaction.user.id}> registrou em massa pelo apelido: **${summary.registered}** novo(s) vínculo(s) de **${summary.scanned}** membros.`,
+        `🔗 <@${interaction.user.id}> varreu o servidor: **${summary.registered}** novo(s) vínculo(s), ` +
+          `**${summary.renamed}** nick(s) atualizado(s) e **${applied}** membro(s) reconciliado(s) de **${summary.scanned}** varridos.`,
       );
-      const data = await computeReconciliation(interaction.guild);
-      if (!data) return interaction.editReply({ content: 'Não consegui obter os dados da guilda.', embeds: [], components: [] });
-      return interaction.editReply(reconciliationPanel(data, registerNote(summary)));
+      return interaction.editReply(reconciliationPanel(data ?? inicial, sweepNote(summary, applied)));
     }
 
     // Seleção de indivíduos: aplica cada um com a classificação recomputada.
@@ -94,12 +111,37 @@ function note(applied) {
     : 'Nada a aplicar — ninguém elegível na seleção.';
 }
 
-function registerNote(s) {
+/**
+ * O painel enquanto a varredura corre. Sem botões de propósito: um segundo
+ * clique dispararia uma varredura paralela sobre os mesmos membros.
+ */
+function progressPanel(s) {
+  return {
+    embeds: [
+      {
+        title: '🔗 Varrendo o servidor…',
+        color: 0x3498db,
+        description:
+          `**${s.scanned}** membros vistos · **${s.lookups}** consultas à API\n` +
+          `**${s.registered}** vinculado(s) · **${s.revalidated}** vínculo(s) conferido(s) · **${s.renamed}** nick(s) atualizado(s)`,
+        footer: { text: 'O painel volta sozinho quando terminar.' },
+      },
+    ],
+    components: [],
+  };
+}
+
+function sweepNote(s, applied) {
   const partes = [
-    `🔗 Registro em massa: **${s.registered}** novo(s) vínculo(s) de **${s.scanned}** membros.`,
+    `🔗 Varredura: **${s.registered}** novo(s) vínculo(s) de **${s.scanned}** membros, e **${applied}** membro(s) com cargo/apelido corrigido(s).`,
     `Já vinculados: **${s.already}** · Apelido que não é nick: **${s.invalid}** · Nick não encontrado na API: **${s.notFound}**`,
     `-# Consultas à API nesta rodada: ${s.lookups}.`,
   ];
+  // Quem trocou de nome no jogo: o vínculo passou a apontar para o nick novo, e
+  // o apelido no Discord foi junto.
+  if (s.renamed) {
+    partes.push(`🪪 Nicks atualizados: **${s.renamed}** de **${s.revalidated}** vínculos conferidos — ${s.renames.join(', ')}${s.renamed > s.renames.length ? ' …' : ''}`);
+  }
   if (s.conflicts) partes.push(`⚠️ Conflitos (apelido de conta já vinculada a outro): **${s.conflicts}** — use \`/forcelink\` caso queira sobrescrever.`);
   // Nick que casa com mais de uma conta do WynnCraft. O bot não chuta qual é —
   // vincular a errada daria a conta de alguém a outra pessoa.
@@ -109,7 +151,7 @@ function registerNote(s) {
   if (s.rateLimited) {
     partes.push(`⏳ A API do WynnCraft começou a limitar e eu parei por aí. **${s.remaining}** ficaram para depois — espere um minuto e clique de novo.`);
   } else if (s.remaining) {
-    partes.push(`⏳ **${s.remaining}** não couberam no teto de consultas desta rodada. Clique de novo para continuar de onde parou.`);
+    partes.push(`⏳ **${s.remaining}** não couberam no tempo desta rodada (10 min, limite do token da interação). Clique de novo para continuar de onde parou.`);
   }
   return partes.join('\n');
 }

@@ -40,6 +40,13 @@ export async function runRoleSync(client) {
   if (!res) return;
   const rankByUuid = new Map(res.members.map((m) => [m.uuid, m.rank]));
 
+  // Nick ATUAL de quem aparece em algum roster, na grafia da API. Alimentado por
+  // todo roster que este ciclo baixar — sai de graça, já que eles vêm de
+  // qualquer jeito. Sem isto, o job renomeava a pessoa para o `username` gravado
+  // no vínculo, que nunca era atualizado: quem trocasse de nome no jogo ficava
+  // com o apelido antigo restaurado a cada 10 minutos, para sempre.
+  const nameByUuid = new Map(res.members.map((m) => [m.uuid, m.username]));
+
   // Uma requisição por guilda rastreada, não uma por membro. O cache de 60s da
   // API absorve a repetição entre ciclos vizinhos, e a lista é curta por
   // natureza — é uma decisão manual da staff, não um catálogo.
@@ -57,6 +64,7 @@ export async function runRoleSync(client) {
     for (const m of roster.members) {
       blacklistedUuids.add(m.uuid);
       blTagByPlayer.set(m.uuid, roster.guild?.prefix ?? doc.prefix);
+      nameByUuid.set(m.uuid, m.username);
     }
   }
 
@@ -76,6 +84,7 @@ export async function runRoleSync(client) {
     if (!roleId) continue;
     for (const m of roster.members) {
       allyByPlayer.set(m.uuid, { roleId, guildUuid: doc.uuid, tag: doc.prefix });
+      nameByUuid.set(m.uuid, m.username);
     }
   }
 
@@ -114,12 +123,20 @@ export async function runRoleSync(client) {
     const allyRoleId = ally?.roleId ?? null;
     const kind = banned ? 'banned' : inGuild ? 'member' : ally ? 'ally' : 'neutral';
 
+    // Trocou de nome no jogo? O roster é a fonte fresca; o vínculo é o que
+    // estava guardado. O nome novo passa a valer para o banco E para o apelido.
+    const nomeAtual = nameByUuid.get(m.uuid) ?? m.username;
+
     const update = {
       inGuild,
       guildRank: rank,
       classification: kind,
       allyGuildUuid: ally?.guildUuid ?? null,
     };
+    if (nomeAtual !== m.username) {
+      update.username = nomeAtual;
+      audit(client, guildDiscordId, `🪪 <@${m.discordId}> trocou de nick no jogo: **${m.username}** → **${nomeAtual}**.`);
+    }
 
     // Cargo mais alto que a pessoa já teve. Sobrevive a kick por inatividade,
     // então quando ela voltar dá para devolver o cargo que tinha.
@@ -156,7 +173,7 @@ export async function runRoleSync(client) {
     // da guilda de fora na frente do apelido. A TAG vem da guilda REAL, não do
     // `kind`: quem está na guilda proibida carrega a TAG dela mesmo isento.
     const tag = blTagByPlayer.get(m.uuid) ?? ally?.tag ?? null;
-    await syncNickname(member, m.username, tag);
+    await syncNickname(member, nomeAtual, tag);
   }
   log.info(
     `Role sync concluído (${linked.length} vínculos, ${res.members.length} membros na guilda, ` +
