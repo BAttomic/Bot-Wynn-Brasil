@@ -26,6 +26,13 @@ services:
       # Domínio público do bot (/modpack, /gsw). Defina PUBLIC_URL na aba
       # Environment do Dokploy (= o Host das labels abaixo, com https).
       PUBLIC_URL: ${PUBLIC_URL}
+      # Onde o modpack gerado é gravado. Precisa bater com o volume abaixo.
+      DATA_DIR: /app/data
+    # O modpack é remontado em runtime a partir do Modrinth, então não pode
+    # morar na imagem: sem volume, todo redeploy jogaria fora o pacote e o
+    # /modpack voltaria a servir o mods.rar congelado até o job rodar de novo.
+    volumes:
+      - vol-bot-modpack:/app/data
     networks:
       - net-bot-data
       - dokploy-network
@@ -55,6 +62,7 @@ services:
 
 volumes:
   vol-bot-mongo:
+  vol-bot-modpack:
 
 networks:
   net-bot-data:

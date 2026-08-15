@@ -31,7 +31,7 @@ Todos os módulos do roadmap. Comandos:
 | `/points show\|leaderboard\|add` | Sistema de pontos unificado |
 | `/calc` | Conversor de esmeraldas (stx/le/eb/em) |
 | `/uniforme` | Baixa o uniforme e a capa oficiais da Wynn Brasil |
-| `/modpack` | Devolve o link de download do modpack oficial (`mods.rar`) |
+| `/modpack` | Devolve o modpack oficial, sempre atualizado (`.mrpack` + `.zip`) |
 | `/booth registrar\|status\|cancelar` | Lembrete de reset do booth (24h): avisa o dono ~5 min antes, no canal `booth`, com botão de parar |
 | `/evento criar\|ranking\|listar\|encerrar\|cancelar\|apurar` | Competição por período: quem mais fizer guild raids, guerras ou XP leva a recompensa |
 | `/giveaway criar\|encerrar\|reroll\|listar` | Sorteio com inscrição por botão |
@@ -48,6 +48,8 @@ Automático (jobs):
   botões antes de qualquer expulsão (ver abaixo)
 - **Eventos e sorteios**: painel do evento se atualiza sozinho, o evento fecha e
   anuncia o pódio no prazo, e o sorteio é apurado no minuto do vencimento
+- **Modpack**: remonta o pack a cada 6h com a versão mais recente de cada mod
+  (ver abaixo)
 - **Auditoria** (`logs`) e **erros do bot** (`errors`)
 
 ## Guildas rastreadas
@@ -218,12 +220,54 @@ guilda, ou pontos mínimos. O sorteio é apurado no minuto do vencimento; a staf
 pode antecipar com `/giveaway encerrar` ou refazer com `/giveaway reroll`
 (que exclui quem já ganhou).
 
+## Modpack
+
+O pack **não é mais um arquivo commitado**. A fonte é o manifesto
+`src/data/modpack.json`, que lista os mods pelo **slug do Modrinth**:
+
+```json
+{
+  "minecraft": "1.21.11",
+  "loader": "fabric",
+  "mods": [{ "slug": "wynntils", "name": "Wynntils" }]
+}
+```
+
+A cada 6h o bot resolve a **última release** de cada mod para essa versão do
+Minecraft e, se algo mudou, regera dois arquivos:
+
+| Arquivo | Para quem | Atualiza sozinho? |
+|---|---|---|
+| `${PUBLIC_URL}/modpack.mrpack` | Modrinth App, Prism, ATLauncher | **Sim** — o launcher avisa e aplica |
+| `${PUBLIC_URL}/modpack` (`.zip`) | quem não usa launcher | Não — baixar de novo na mão |
+
+O `.mrpack` tem ~1,5 KB: ele só aponta para os jars no CDN da Modrinth (URL +
+sha1/sha512 + tamanho), então o bot nem hospeda mod nenhum nesse caminho — o que
+também evita redistribuir jar de terceiro. O `.zip` (~30 MB) é montado com os
+jars baixados e conferidos pelo sha1.
+
+Mexendo no manifesto:
+
+- **Adicionar/remover mod**: edite a lista e suba. O slug é o final da URL do
+  Modrinth (`modrinth.com/mod/wynntils` → `wynntils`).
+- **Subir a versão do Minecraft**: troque `minecraft`. É decisão da staff, de
+  propósito — seguir "a última" automaticamente quebraria todo mundo que ainda
+  não atualizou o jogo no dia em que o WynnCraft mudasse de versão.
+- **Só tem beta para a versão nova?** `"allowBeta": true` naquele mod. Sem isso
+  o pack só distribui release — nenhuma guilda quer receber beta por acidente.
+
+Toda atualização vira uma linha no canal de auditoria (`logs`), com o de/para de
+cada mod.
+
 ## Ops (VPS / Easypanel)
 
 - **Healthcheck:** HTTP em `:$PORT/health` (use no health check do Easypanel).
-- **Download do modpack:** o mesmo servidor HTTP serve o `mods.rar` em
-  `:$PORT/modpack`. Exponha um domínio no Dokploy apontando para `:$PORT` e
-  informe-o em `PUBLIC_URL` — o `/modpack` monta o link `${PUBLIC_URL}/modpack`.
+- **Download do modpack:** o mesmo servidor HTTP serve o pack em `:$PORT/modpack`
+  (`.zip`) e `:$PORT/modpack.mrpack`. Exponha um domínio no Dokploy apontando
+  para `:$PORT` e informe-o em `PUBLIC_URL` — o `/modpack` monta os links a
+  partir dele. Os arquivos são **gerados em runtime** e vivem em `DATA_DIR`, que
+  precisa ser um volume (ver `docker-compose.yml`): sem ele, o redeploy limpa o
+  pack e o `/modpack` cai no `mods.rar` legado até o job rodar de novo.
 - **Dossiê GsW:** o mesmo servidor abre a página em `:$PORT/gsw` —
   `${PUBLIC_URL}/gsw` no domínio público. É um HTML autocontido (os prints vão
   embutidos em base64), gerado por `gsw/build.ps1` direto em `src/assets/`.
@@ -245,6 +289,8 @@ Variáveis de ambiente (veja `.env.example`):
 | `MONGO_DB` | Nome do banco (padrão: `wynn_guild`) |
 | `WYNN_GUILD_PREFIX` | TAG da guilda na API |
 | `WYNN_API_KEY` | (Opcional) chave da API v3 |
+| `PUBLIC_URL` | Domínio público do bot (links de `/modpack` e `/gsw`) |
+| `DATA_DIR` | Onde o modpack gerado é gravado (padrão: `./data`; em produção, o volume) |
 
 ### Intent privilegiado
 

@@ -282,7 +282,8 @@ function downloadsPanelPayload() {
           'Tudo que você precisa para entrar no clima da guilda:\n\n' +
           '🎽 **Skin da Seleção** — camada transparente para sobrepor na sua skin.\n' +
           '🧣 **Capa da Guilda** — a capa oficial da Wynn Brasil.\n' +
-          '📦 **Modpack** — os mods recomendados (`mods.rar`) + o **Fabric Installer**.\n\n' +
+          '📦 **Modpack** — os mods recomendados, sempre na versão mais recente ' +
+          '(instale pelo `.mrpack` e o launcher atualiza sozinho).\n\n' +
           '-# Clique num botão abaixo — a resposta aparece só para você.',
       },
     ],

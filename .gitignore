@@ -1,6 +1,11 @@
 node_modules/
 npm-debug.log*
 
+# Modpack gerado em runtime (DATA_DIR). É artefato, não fonte — a fonte é
+# src/data/modpack.json. A barra inicial é obrigatória: sem ela o padrão
+# casaria também com src/data/, e o manifesto nunca seria commitado.
+/data/
+
 # Segredos — NUNCA commitar
 .env
 .env.*

@@ -6,3 +6,6 @@ node_modules
 npm-debug.log*
 docker-compose.yml
 *.md
+# Modpack gerado localmente. Em produção ele vive no volume (DATA_DIR), e mandar
+# 30 MB de jar para o build context só engordaria a imagem.
+data

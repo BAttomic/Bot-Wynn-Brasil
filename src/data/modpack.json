@@ -1,0 +1,15 @@
+{
+  "name": "Wynn Brasil",
+  "summary": "Modpack oficial da guilda Wynn Brasil",
+  "minecraft": "1.21.11",
+  "loader": "fabric",
+  "mods": [
+    { "slug": "fabric-api", "name": "Fabric API" },
+    { "slug": "wynntils", "name": "Wynntils" },
+    { "slug": "wynnventory", "name": "WynnVentory" },
+    { "slug": "chatshot", "name": "ChatShot" },
+    { "slug": "longer-chat-history", "name": "Longer Chat History" },
+    { "slug": "sodium", "name": "Sodium" },
+    { "slug": "lithium", "name": "Lithium" }
+  ]
+}

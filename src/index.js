@@ -13,6 +13,7 @@ import { runBoothReminders } from './jobs/boothReminders.js';
 import { runEventTick } from './jobs/eventTick.js';
 import { runGiveawayDraw } from './jobs/giveawayDraw.js';
 import { runVerificationReport } from './jobs/verificationReport.js';
+import { runModpackUpdate } from './jobs/modpackUpdate.js';
 import { runInactivityCheck } from './services/inactivityCheck.js';
 import { runGuildWatch, flushTerritoryDigest } from './services/watcher.js';
 import { ensurePanels, attachRegistrationGuard } from './services/registration.js';
@@ -139,6 +140,11 @@ async function main() {
     everyMinutes(60, 'inactivityCheck', () => runInactivityCheck(client), { runOnStart: true });
     // Vira a season (ou entra em off-season) assim que o jogo virar.
     everyMinutes(60, 'seasonSync', () => ensureActiveSeason(), { runOnStart: true });
+    // Modpack: confere as versões no Modrinth e regera o .mrpack/.zip quando
+    // muda. `runOnStart` porque um deploy novo começa com o volume vazio, e até
+    // o job rodar o /modpack serve o mods.rar antigo. Sem mudança, a passada
+    // custa 7 chamadas à API e não escreve nada.
+    everyMinutes(360, 'modpackUpdate', () => runModpackUpdate(client, guildId), { runOnStart: true });
     everyMinutes(minutes, 'roleSync', () => runRoleSync(client), { runOnStart: true });
     // Depende do `inGuild` que o roleSync mantém, então roda com folga sobre ele.
     everyMinutes(30, 'warQueue', () => runWarQueue(client), { runOnStart: true });
