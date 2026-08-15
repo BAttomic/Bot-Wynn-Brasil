@@ -101,6 +101,10 @@ function registerNote(s) {
     `-# Consultas à API nesta rodada: ${s.lookups}.`,
   ];
   if (s.conflicts) partes.push(`⚠️ Conflitos (apelido de conta já vinculada a outro): **${s.conflicts}** — use \`/forcelink\` caso queira sobrescrever.`);
+  // Nick que casa com mais de uma conta do WynnCraft. O bot não chuta qual é —
+  // vincular a errada daria a conta de alguém a outra pessoa.
+  if (s.ambiguous) partes.push(`❓ Apelido que corresponde a mais de uma conta: **${s.ambiguous}** — resolva com \`/forcelink\` usando a grafia exata do nick.`);
+  if (s.failed) partes.push(`⚠️ Falhas inesperadas: **${s.failed}** — a varredura seguiu; veja o log do bot.`);
   if (s.registered) partes.push(`Classificação: 🟢 ${s.byKind.member} membro(s) · 🤝 ${s.byKind.ally} aliado(s) · ⚪ ${s.byKind.neutral} comunidade · 🚫 ${s.byKind.banned} banido(s).`);
   if (s.rateLimited) {
     partes.push(`⏳ A API do WynnCraft começou a limitar e eu parei por aí. **${s.remaining}** ficaram para depois — espere um minuto e clique de novo.`);

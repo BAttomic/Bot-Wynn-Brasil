@@ -1,6 +1,6 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { collections } from '../../db/mongo.js';
-import { wynn } from '../../wynn/api.js';
+import { wynn, isAmbiguousPlayer } from '../../wynn/api.js';
 
 const RANK_LABEL = {
   owner: 'Líder',
@@ -29,7 +29,18 @@ export default {
       nick = me.username;
     }
 
-    const p = await wynn.player(nick);
+    // Nick que pertence a mais de uma conta: a API responde 300 com os
+    // candidatos, e a saída é a grafia exata (a caixa costuma ser a diferença).
+    let p;
+    try {
+      p = await wynn.player(nick);
+    } catch (e) {
+      if (!isAmbiguousPlayer(e)) throw e;
+      const nomes = (e.choices ?? []).map((c) => `\`${c.username ?? c.uuid}\``).join(', ');
+      return interaction.editReply(
+        `O nick **${nick}** corresponde a mais de uma conta${nomes ? ` (${nomes})` : ''}. Repita com a grafia exata.`,
+      );
+    }
     if (!p || !p.uuid) return interaction.editReply(`Não encontrei o jogador **${nick}**.`);
     const stats = await collections.guildStats().findOne({ uuid: p.uuid });
     const link = await collections.members().findOne({ uuid: p.uuid });

@@ -7,7 +7,7 @@ import {
   TextInputStyle,
 } from 'discord.js';
 import { collections } from '../db/mongo.js';
-import { wynn, isRateLimited } from '../wynn/api.js';
+import { wynn, isRateLimited, isAmbiguousPlayer } from '../wynn/api.js';
 import { getConfig } from '../config/guildConfig.js';
 import { optional } from '../config/env.js';
 import { audit } from './audit.js';
@@ -309,11 +309,26 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
   // ficava tentando escrever de outro jeito um nick que estava certo.
   let player = null;
   let apiDown = false;
+  let ambiguous = null;
   try {
     player = await wynn.player(nick);
   } catch (e) {
     apiDown = isRateLimited(e);
-    if (!apiDown) throw e;
+    // Nick que pertence a mais de uma conta e que a API não resolveu sozinha.
+    // Vincular no chute seria dar a conta de alguém a outra pessoa, então o
+    // caminho é dizer quais são os candidatos e deixar a staff escolher a grafia
+    // exata no /forcelink.
+    if (isAmbiguousPlayer(e)) ambiguous = e.choices ?? [];
+    if (!apiDown && !ambiguous) throw e;
+  }
+  if (ambiguous) {
+    const nomes = ambiguous.map((c) => `\`${c.username ?? c.uuid}\``).join(', ');
+    return {
+      ok: false,
+      code: 'ambiguous',
+      error: `O nick **${nick}** corresponde a mais de uma conta do WynnCraft${nomes ? ` (${nomes})` : ''}. Escreva o nick com a grafia exata (maiúsculas inclusas).`,
+      errorEn: `The username **${nick}** matches more than one WynnCraft account${nomes ? ` (${nomes})` : ''}. Type it with the exact spelling (capitalisation included).`,
+    };
   }
   if (apiDown) {
     return {
@@ -540,7 +555,7 @@ export async function forceLink({ interaction, targetUser, targetMember, rawNick
  *
  * @param {import('discord.js').Guild} guild
  * @param {{ actorId?: string }} [opts]
- * @returns {Promise<{scanned:number, already:number, registered:number, notFound:number, invalid:number, conflicts:number, failed:number, lookups:number, remaining:number, rateLimited:boolean, byKind:{member:number, ally:number, neutral:number, banned:number}}>}
+ * @returns {Promise<{scanned:number, already:number, registered:number, notFound:number, invalid:number, conflicts:number, ambiguous:number, failed:number, lookups:number, remaining:number, rateLimited:boolean, byKind:{member:number, ally:number, neutral:number, banned:number}}>}
  */
 export async function registerAllByNick(guild, { actorId, maxLookups = MAX_LOOKUPS_PER_RUN } = {}) {
   await guild.members.fetch().catch(() => {});
@@ -548,7 +563,7 @@ export async function registerAllByNick(guild, { actorId, maxLookups = MAX_LOOKU
   const linkedDiscord = new Set(linked.map((l) => l.discordId));
 
   const summary = {
-    scanned: 0, already: 0, registered: 0, notFound: 0, invalid: 0, conflicts: 0, failed: 0,
+    scanned: 0, already: 0, registered: 0, notFound: 0, invalid: 0, conflicts: 0, ambiguous: 0, failed: 0,
     lookups: 0, remaining: 0, rateLimited: false,
     byKind: { member: 0, ally: 0, neutral: 0, banned: 0 },
   };
@@ -579,16 +594,27 @@ export async function registerAllByNick(guild, { actorId, maxLookups = MAX_LOOKU
     }
     summary.lookups += 1;
 
-    const res = await performLink({
-      client: guild.client,
-      guildId: guild.id,
-      targetDiscordId: member.id,
-      targetMember: member,
-      rawNick,
-      actorId,
-      force: false,
-      silent: true,
-    });
+    // Uma pessoa não pode custar a varredura inteira. Antes deste `catch`,
+    // qualquer erro inesperado da API (foi um 300 de nick ambíguo que apareceu
+    // na prática) subia até o handler do botão: a rodada morria no meio, sem
+    // resumo e sem auditoria, e clicar de novo parava exatamente no mesmo nick.
+    let res;
+    try {
+      res = await performLink({
+        client: guild.client,
+        guildId: guild.id,
+        targetDiscordId: member.id,
+        targetMember: member,
+        rawNick,
+        actorId,
+        force: false,
+        silent: true,
+      });
+    } catch (e) {
+      log.warn(`Registro em massa: falhei em ${rawNick} (${member.id}):`, e?.message ?? e);
+      summary.failed += 1;
+      continue;
+    }
 
     if (res.ok) {
       summary.registered += 1;
@@ -605,6 +631,8 @@ export async function registerAllByNick(guild, { actorId, maxLookups = MAX_LOOKU
       summary.invalid += 1;
     } else if (res.code === 'conflict') {
       summary.conflicts += 1;
+    } else if (res.code === 'ambiguous') {
+      summary.ambiguous += 1;
     } else {
       summary.failed += 1;
     }

@@ -77,6 +77,19 @@ function request(path, { fresh = false } = {}) {
       });
       if (res.status === 404) return null;
 
+      // 300 Multiple Choices: o nome consultado casa com MAIS DE UMA conta
+      // (alguém já usou esse nick antes, ou duas contas diferem só na caixa). O
+      // corpo traz os candidatos — quem chamou é que sabe escolher, então ele
+      // viaja no erro em vez de virar um `throw` genérico. Sem isto, um único
+      // nick ambíguo derrubava a varredura inteira do /reconciliar.
+      if (res.status === 300) {
+        const body = await res.json().catch(() => null);
+        const err = new Error(`WynnCraft API 300 (mais de uma conta) em ${path}`);
+        err.code = 'multiple_choices';
+        err.choices = normalizeChoices(body);
+        throw err;
+      }
+
       if (res.status === 429) {
         const espera = backoffMs(res, tentativa);
         pausedUntil = Date.now() + espera;
@@ -105,6 +118,62 @@ function request(path, { fresh = false } = {}) {
 }
 
 /**
+ * O corpo do 300 é um mapa `uuid -> { storedName, uuid }`. Algumas respostas
+ * trazem só a string do nome no lugar do objeto, então os dois formatos são
+ * aceitos. Sai uma lista simples de `{ uuid, username }`.
+ */
+function normalizeChoices(body) {
+  if (!body || typeof body !== 'object') return [];
+  const out = [];
+  for (const [uuid, v] of Object.entries(body)) {
+    const username = typeof v === 'string' ? v : v?.storedName ?? v?.username ?? null;
+    out.push({ uuid: v?.uuid ?? uuid, username });
+  }
+  return out.filter((c) => c.uuid);
+}
+
+/**
+ * Consulta de jogador com o 300 resolvido.
+ *
+ * A escolha é conservadora de propósito: vincular a conta ERRADA é pior que não
+ * vincular. Só decidimos quando não há dúvida — grafia idêntica, ou um único
+ * candidato que case ignorando a caixa. Fora isso o erro sobe com a lista de
+ * candidatos, para quem chamou dizer à staff qual grafia usar.
+ */
+async function playerLookup(nick, opts) {
+  const alvo = String(nick ?? '').trim();
+  try {
+    return await request(`/player/${encodeURIComponent(alvo)}?fullResult`, opts);
+  } catch (e) {
+    if (e?.code !== 'multiple_choices') throw e;
+
+    const choices = e.choices ?? [];
+    const exato = choices.filter((c) => c.username === alvo);
+    const semCaixa = choices.filter((c) => c.username?.toLowerCase() === alvo.toLowerCase());
+    const escolhido = exato.length === 1 ? exato[0] : semCaixa.length === 1 ? semCaixa[0] : null;
+
+    if (!escolhido) {
+      e.message = `WynnCraft API: "${alvo}" corresponde a mais de uma conta (${
+        choices.map((c) => c.username ?? c.uuid).join(', ') || 'candidatos desconhecidos'
+      })`;
+      throw e;
+    }
+    // O UUID é único, então esta segunda consulta nunca volta 300.
+    return request(`/player/${encodeURIComponent(escolhido.uuid)}?fullResult`, opts);
+  }
+}
+
+/**
+ * "Esse nick pertence a mais de uma conta e não dá para adivinhar qual."
+ *
+ * Diferente de "não existe": o jogador existe, o que falta é a grafia exata.
+ * `err.choices` traz os candidatos.
+ */
+export function isAmbiguousPlayer(err) {
+  return err instanceof Error && err.code === 'multiple_choices';
+}
+
+/**
  * Distingue "a API disse que não existe" de "não consegui perguntar".
  *
  * Importa porque quase todo chamador faz `.catch(() => null)`, e sem esta
@@ -116,7 +185,7 @@ export function isRateLimited(err) {
 }
 
 export const wynn = {
-  player: (nick, opts) => request(`/player/${encodeURIComponent(nick)}?fullResult`, opts),
+  player: (nick, opts) => playerLookup(nick, opts),
   guildByPrefix: (prefix, opts) => request(`/guild/prefix/${encodeURIComponent(prefix)}`, opts),
   guildByName: (name, opts) => request(`/guild/name/${encodeURIComponent(name)}`, opts),
   territoryList: (opts) => request(`/guild/list/territory`, opts),
