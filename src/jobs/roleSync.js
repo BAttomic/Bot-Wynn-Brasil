@@ -46,13 +46,18 @@ export async function runRoleSync(client) {
   const tracked = await loadGuildIndex();
 
   const blacklistedUuids = new Set();
+  // uuid -> TAG da guilda proibida, para o apelido virar `[GsW] Fulano`.
+  const blTagByPlayer = new Map();
   for (const doc of tracked.blacklist) {
     const roster = await fetchGuildMembers(doc.prefix).catch(() => null);
     if (!roster) {
       log.warn(`Roster da black-list [${doc.prefix}] indisponível neste ciclo.`);
       continue;
     }
-    for (const m of roster.members) blacklistedUuids.add(m.uuid);
+    for (const m of roster.members) {
+      blacklistedUuids.add(m.uuid);
+      blTagByPlayer.set(m.uuid, roster.guild?.prefix ?? doc.prefix);
+    }
   }
 
   // uuid do jogador -> { roleId, guildUuid } da guilda aliada dele.
@@ -69,7 +74,9 @@ export async function runRoleSync(client) {
     doc = await syncAllyIdentity(doc, roster.guild);
     const roleId = await ensureAllyRole(guild, cfg, doc);
     if (!roleId) continue;
-    for (const m of roster.members) allyByPlayer.set(m.uuid, { roleId, guildUuid: doc.uuid });
+    for (const m of roster.members) {
+      allyByPlayer.set(m.uuid, { roleId, guildUuid: doc.uuid, tag: doc.prefix });
+    }
   }
 
   const banIndex = await loadBanIndex();
@@ -145,8 +152,11 @@ export async function runRoleSync(client) {
     if (!member) continue;
 
     await applyClassificationRoles(member, cfg, kind, allyRoleId);
-    // Pega quem trocou de nick no Minecraft depois de registrado.
-    await syncNickname(member, m.username);
+    // Pega quem trocou de nick no Minecraft depois de registrado, e mantém a TAG
+    // da guilda de fora na frente do apelido. A TAG vem da guilda REAL, não do
+    // `kind`: quem está na guilda proibida carrega a TAG dela mesmo isento.
+    const tag = blTagByPlayer.get(m.uuid) ?? ally?.tag ?? null;
+    await syncNickname(member, m.username, tag);
   }
   log.info(
     `Role sync concluído (${linked.length} vínculos, ${res.members.length} membros na guilda, ` +

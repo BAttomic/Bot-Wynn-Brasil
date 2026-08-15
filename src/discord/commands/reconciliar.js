@@ -8,7 +8,7 @@ import { registerAllByNick } from '../../services/registration.js';
 import { getConfig } from '../../config/guildConfig.js';
 import { audit } from '../../services/audit.js';
 
-const APPLY_SCOPES = new Set(['member', 'ally', 'neutral', 'banned', 'all']);
+const APPLY_SCOPES = new Set(['member', 'ally', 'neutral', 'banned', 'unregistered', 'all']);
 
 /**
  * Quem pode usar o painel: os mesmos cargos de liderança do /forcelink
@@ -97,9 +97,15 @@ function note(applied) {
 function registerNote(s) {
   const partes = [
     `🔗 Registro em massa: **${s.registered}** novo(s) vínculo(s) de **${s.scanned}** membros.`,
-    `Já vinculados: **${s.already}** · Nick não encontrado na API: **${s.notFound}**`,
+    `Já vinculados: **${s.already}** · Apelido que não é nick: **${s.invalid}** · Nick não encontrado na API: **${s.notFound}**`,
+    `-# Consultas à API nesta rodada: ${s.lookups}.`,
   ];
   if (s.conflicts) partes.push(`⚠️ Conflitos (apelido de conta já vinculada a outro): **${s.conflicts}** — use \`/forcelink\` caso queira sobrescrever.`);
   if (s.registered) partes.push(`Classificação: 🟢 ${s.byKind.member} membro(s) · 🤝 ${s.byKind.ally} aliado(s) · ⚪ ${s.byKind.neutral} comunidade · 🚫 ${s.byKind.banned} banido(s).`);
+  if (s.rateLimited) {
+    partes.push(`⏳ A API do WynnCraft começou a limitar e eu parei por aí. **${s.remaining}** ficaram para depois — espere um minuto e clique de novo.`);
+  } else if (s.remaining) {
+    partes.push(`⏳ **${s.remaining}** não couberam no teto de consultas desta rodada. Clique de novo para continuar de onde parou.`);
+  }
   return partes.join('\n');
 }

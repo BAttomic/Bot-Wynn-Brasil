@@ -7,7 +7,7 @@ import {
   TextInputStyle,
 } from 'discord.js';
 import { collections } from '../db/mongo.js';
-import { wynn } from '../wynn/api.js';
+import { wynn, isRateLimited } from '../wynn/api.js';
 import { getConfig } from '../config/guildConfig.js';
 import { optional } from '../config/env.js';
 import { audit } from './audit.js';
@@ -26,10 +26,34 @@ export const NICK_FIELD = 'nick';
 
 const PANEL_STATE_ID = 'registrationPanel';
 
+// Consultas à API por rodada do "registrar todos pelo apelido". A 0,6s cada
+// (limite com chave), 150 dão ~1min30 — bem dentro dos 15 minutos que o token da
+// interação dura, com folga para a resposta.
+const MAX_LOOKUPS_PER_RUN = 150;
+
 // Canais citados no painel de registro. Mention <#id> aponta para o canal e
 // nunca pinga ninguém. IDs fixos, no mesmo espírito de staticPanels.js.
 const RECRUIT_CHANNEL = '1309848293278486578';
 const STATUS_CHANNEL = '1524920847637155861';
+
+/**
+ * O que PODE ser um nick do Minecraft: letras, números e `_`, até 20.
+ *
+ * Vive aqui porque é a regra do registro, e o registro é a única fonte de
+ * identidade do bot. Serve para dois fins:
+ *
+ *  1. recusar o que nunca existiria (`Ninja no celular` tem espaços — não é
+ *     nick, é apelido de Discord);
+ *  2. evitar a consulta à API para algo que já sabemos que não é nick. Numa
+ *     varredura de centenas de membros isso é a diferença entre caber no rate
+ *     limit e não caber.
+ *
+ * @param {string} nick
+ * @returns {boolean}
+ */
+export function isValidNick(nick) {
+  return /^\w{1,20}$/.test(String(nick ?? '').trim());
+}
 
 // A nossa guilda ainda vem do ambiente: ela é uma só e não muda. As OUTRAS
 // (black-list e aliadas) vivem no banco, geridas por `/guilds` — ver
@@ -73,6 +97,22 @@ export async function allyGuildOf(player) {
   return idx.allyByUuid.get(g.uuid) ?? idx.allyByPrefix.get(g.prefix) ?? null;
 }
 
+/**
+ * A TAG que vai na frente do apelido: a da guilda RASTREADA da pessoa, aliada ou
+ * da black-list. `null` para membro nosso e para quem está em guilda que não
+ * acompanhamos — esses ficam com o nick puro.
+ */
+export async function nickTagOf(player) {
+  const g = player?.guild;
+  if (!g) return null;
+  const idx = await loadGuildIndex();
+  if (isOurGuild(g)) return null;
+  const aliada = idx.allyByUuid.get(g.uuid) ?? idx.allyByPrefix.get(g.prefix);
+  if (aliada) return aliada.prefix;
+  const proibida = idx.blacklist.find((b) => b.uuid === g.uuid || b.prefix === g.prefix);
+  return proibida?.prefix ?? null;
+}
+
 // Cargos que cada classificação DEVE ter. O membro da guilda também é da
 // comunidade — a recíproca não vale: o neutro tem só o de comunidade.
 //
@@ -83,6 +123,11 @@ const ROLES_BY_KIND = {
   ally: ['community'],
   neutral: ['community'],
   banned: [],
+  // Sem registro não é uma classificação: é a AUSÊNCIA de uma. O cargo de
+  // comunidade atesta "esta pessoa provou que é dona de uma conta do
+  // WynnCraft", e quem nunca se registrou não provou nada. Só existe pelo
+  // /reconciliar, que enxerga o servidor inteiro e não só quem tem vínculo.
+  unregistered: [],
 };
 
 const ALL_CLASSIFICATION_KEYS = ['guildMember', 'community', 'banned'];
@@ -133,16 +178,61 @@ export async function applyClassificationRoles(member, cfg, kind, allyRoleId = n
   return wantedIds[0] ?? null;
 }
 
-// Deixa o apelido no Discord igual ao nick do WynnCraft.
+/** Limite do Discord para apelido de membro. */
+const NICK_MAX = 32;
+
+/**
+ * O apelido que a pessoa DEVE ter no Discord.
+ *
+ * Quem é de fora — guilda aliada ou da black-list — carrega a TAG na frente:
+ * `[GsW] Fulano`. Isso torna a guilda de origem legível na lista de membros e em
+ * qualquer menção, sem depender de ninguém abrir o perfil. Membro nosso e neutro
+ * ficam com o nick puro: aqui é a Wynn Brasil, marcar todo mundo com [WnBR] só
+ * geraria ruído.
+ *
+ * Existe como função única porque três lugares precisam concordar sobre isso —
+ * o registro, o roleSync e o /reconciliar. Se cada um montasse a string, o
+ * painel de reconciliação passaria a vida "corrigindo" o que o job acabou de
+ * escrever.
+ *
+ * @param {string} username  nick do WynnCraft, na grafia da API
+ * @param {string|null} [tag]  prefixo da guilda, se a pessoa for de fora
+ * @returns {string}
+ */
+/**
+ * `[GsW] Fulano` -> `Fulano`.
+ *
+ * Indispensável desde que o apelido passou a carregar a TAG: a identificação de
+ * quem NÃO tem vínculo é feita casando o apelido contra os rosters, e
+ * `[gsw] fulano` não casa com `fulano`. Sem descascar, o próprio bot marcaria
+ * como "sem registro" alguém que ele mesmo acabou de renomear.
+ */
+export function stripNickTag(nick) {
+  return String(nick ?? '')
+    .replace(/^\[[^\]]{1,8}\]\s*/, '')
+    .trim();
+}
+
+export function expectedNickname(username, tag = null) {
+  if (!tag) return username;
+  const comTag = `[${tag}] ${username}`;
+  // Nick do Wynncraft vai a 20 e TAG a 4, então isto não deveria disparar; se
+  // um dia disparar, o nick puro é melhor que um apelido truncado no meio.
+  return comTag.length <= NICK_MAX ? comTag : username.slice(0, NICK_MAX);
+}
+
+// Deixa o apelido no Discord igual ao esperado (nick, com a TAG na frente se a
+// pessoa for de guilda aliada ou da black-list).
 //
 // Falha silenciosamente em dois casos que o Discord não deixa contornar: o dono
 // do servidor nunca pode ser renomeado por um bot, e nem quem tem cargo acima do
 // cargo do bot. Não é erro do registro, então não atrapalha o resto.
-export async function syncNickname(member, username) {
+export async function syncNickname(member, username, tag = null) {
   if (!member?.manageable) return false;
-  if (member.nickname === username) return true;
-  const ok = await member.setNickname(username).then(() => true).catch(() => false);
-  if (!ok) log.warn(`Não consegui renomear ${member.user?.tag ?? member.id} para "${username}".`);
+  const alvo = expectedNickname(username, tag);
+  if (member.nickname === alvo) return true;
+  const ok = await member.setNickname(alvo).then(() => true).catch(() => false);
+  if (!ok) log.warn(`Não consegui renomear ${member.user?.tag ?? member.id} para "${alvo}".`);
   return ok;
 }
 
@@ -205,7 +295,7 @@ async function notifyRecruitAlert(client, cfg, { player, kind, discordId }) {
  */
 async function performLink({ client, guildId, targetDiscordId, targetMember, rawNick, actorId, force = false, silent = false }) {
   const nick = rawNick.trim();
-  if (!/^\w{1,20}$/.test(nick)) {
+  if (!isValidNick(nick)) {
     return {
       ok: false,
       code: 'invalid_nick',
@@ -214,7 +304,25 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
     };
   }
 
-  const player = await wynn.player(nick).catch(() => null);
+  // Rate limit NÃO é "não existe". Sem esta distinção, uma janela de 429 fazia o
+  // registro dizer a gente de verdade que o nick dela não existe — e a pessoa
+  // ficava tentando escrever de outro jeito um nick que estava certo.
+  let player = null;
+  let apiDown = false;
+  try {
+    player = await wynn.player(nick);
+  } catch (e) {
+    apiDown = isRateLimited(e);
+    if (!apiDown) throw e;
+  }
+  if (apiDown) {
+    return {
+      ok: false,
+      code: 'api_unavailable',
+      error: 'A API do WynnCraft está limitando as consultas agora. Tente de novo em um minuto — não é problema com o seu nick.',
+      errorEn: 'The WynnCraft API is rate limiting right now. Try again in a minute — nothing is wrong with your username.',
+    };
+  }
   if (!player || !player.uuid) {
     return {
       ok: false,
@@ -315,7 +423,9 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
       ? await ensureAllyRole(targetMember.guild, cfg, allyGuild).catch(() => null)
       : null;
     roleId = await applyClassificationRoles(targetMember, cfg, kind, allyRoleId);
-    await syncNickname(targetMember, player.username);
+    // A TAG sai da guilda REAL do jogador, não do `kind`: um banido isento
+    // continua na guilda proibida e continua sendo identificado por ela.
+    await syncNickname(targetMember, player.username, await nickTagOf(player));
   }
 
   // Em registro em massa (silent) não geramos aviso de recruta nem uma linha de
@@ -422,20 +532,24 @@ export async function forceLink({ interaction, targetUser, targetMember, rawNick
  * vinculada a outra pessoa, o vínculo do dono NÃO é roubado — a colisão só entra
  * no resumo. Roubar exige o `/forcelink` individual, uma decisão consciente.
  *
- * A API já serializa e espaça as chamadas (MIN_GAP_MS), então não há throttle
- * extra aqui; com muitos membros a varredura apenas leva mais tempo.
+ * A API serializa e espaça as chamadas sozinha, então não há throttle extra
+ * aqui. O que existe é um TETO de consultas por rodada: o resultado volta numa
+ * interação do Discord, cujo token morre em 15 minutos, e sem teto uma varredura
+ * de centenas de membros estourava esse prazo (além do rate limit). Quem passar
+ * do teto fica para a próxima — é só clicar de novo.
  *
  * @param {import('discord.js').Guild} guild
  * @param {{ actorId?: string }} [opts]
- * @returns {Promise<{scanned:number, already:number, registered:number, notFound:number, conflicts:number, failed:number, byKind:{member:number, ally:number, neutral:number, banned:number}}>}
+ * @returns {Promise<{scanned:number, already:number, registered:number, notFound:number, invalid:number, conflicts:number, failed:number, lookups:number, remaining:number, rateLimited:boolean, byKind:{member:number, ally:number, neutral:number, banned:number}}>}
  */
-export async function registerAllByNick(guild, { actorId } = {}) {
+export async function registerAllByNick(guild, { actorId, maxLookups = MAX_LOOKUPS_PER_RUN } = {}) {
   await guild.members.fetch().catch(() => {});
   const linked = await collections.members().find({}, { projection: { discordId: 1 } }).toArray();
   const linkedDiscord = new Set(linked.map((l) => l.discordId));
 
   const summary = {
-    scanned: 0, already: 0, registered: 0, notFound: 0, conflicts: 0, failed: 0,
+    scanned: 0, already: 0, registered: 0, notFound: 0, invalid: 0, conflicts: 0, failed: 0,
+    lookups: 0, remaining: 0, rateLimited: false,
     byKind: { member: 0, ally: 0, neutral: 0, banned: 0 },
   };
 
@@ -447,7 +561,24 @@ export async function registerAllByNick(guild, { actorId } = {}) {
       continue;
     }
 
-    const rawNick = member.nickname || member.user.username;
+    // Descasca a TAG: quem já foi renomeado para `[GsW] Fulano` tem `Fulano`
+    // como nick, e sem isto a consulta iria com o colchete e não acharia nada.
+    const rawNick = stripNickTag(member.nickname || member.user.username);
+
+    // Apelido que não pode ser nick nem chega à API. É a maioria dos casos numa
+    // varredura de servidor grande ("Ninja no celular", "joão | BR", emojis) e
+    // era ele que enchia a fila de requisições inúteis.
+    if (!isValidNick(rawNick)) {
+      summary.invalid += 1;
+      continue;
+    }
+
+    if (summary.lookups >= maxLookups) {
+      summary.remaining += 1;
+      continue;
+    }
+    summary.lookups += 1;
+
     const res = await performLink({
       client: guild.client,
       guildId: guild.id,
@@ -462,8 +593,16 @@ export async function registerAllByNick(guild, { actorId } = {}) {
     if (res.ok) {
       summary.registered += 1;
       summary.byKind[res.kind] = (summary.byKind[res.kind] ?? 0) + 1;
-    } else if (res.code === 'not_found' || res.code === 'invalid_nick') {
+    } else if (res.code === 'api_unavailable') {
+      // A janela fechou. Continuar é gastar 15 minutos de interação para colher
+      // "não encontrei" de gente que existe — melhor parar e dizer isso.
+      summary.rateLimited = true;
+      summary.remaining += 1;
+      break;
+    } else if (res.code === 'not_found') {
       summary.notFound += 1;
+    } else if (res.code === 'invalid_nick') {
+      summary.invalid += 1;
     } else if (res.code === 'conflict') {
       summary.conflicts += 1;
     } else {

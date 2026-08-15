@@ -1,7 +1,12 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from 'discord.js';
 import { collections } from '../db/mongo.js';
 import { fetchGuildMembers, RANKS, RANK_LABEL } from './guildData.js';
-import { applyClassificationRoles, syncNickname } from './registration.js';
+import {
+  applyClassificationRoles,
+  syncNickname,
+  expectedNickname,
+  stripNickTag,
+} from './registration.js';
 import { loadGuildIndex } from './guildList.js';
 import { ensureAllyRole, syncAllyIdentity } from './allyRoles.js';
 import { loadBanIndex, recordBan, exemptInIndex, BAN_REASON_BLACKLIST_GUILD } from './bans.js';
@@ -27,8 +32,14 @@ import { optional } from '../config/env.js';
 
 const CLASSIFICATION_KEYS = ['community', 'guildMember', 'banned'];
 
-const KIND_LABEL = { member: 'Membro', ally: 'Aliado', neutral: 'Comunidade', banned: 'Banido' };
-const KIND_EMOJI = { member: '🟢', ally: '🤝', neutral: '⚪', banned: '🚫' };
+const KIND_LABEL = {
+  member: 'Membro',
+  ally: 'Aliado',
+  neutral: 'Comunidade',
+  banned: 'Banido',
+  unregistered: 'Sem registro',
+};
+const KIND_EMOJI = { member: '🟢', ally: '🤝', neutral: '⚪', banned: '🚫', unregistered: '❔' };
 
 /** Cargos que cada classificação DEVE ter (espelha registration.js). */
 const ROLES_BY_KIND = {
@@ -36,6 +47,9 @@ const ROLES_BY_KIND = {
   ally: ['community'],
   neutral: ['community'],
   banned: ['banned'],
+  // Nenhum. Ver a nota em registration.js: comunidade atesta um registro, e
+  // quem não tem vínculo nem aparece em roster nenhum não tem o que atestar.
+  unregistered: [],
 };
 
 /** Normaliza para casar nome de cargo/nick sem tropeçar em acento ou caixa. */
@@ -63,7 +77,7 @@ function rankRoleIds(guild) {
  * Deduz o `kind` correto de um membro do Discord a partir do apelido e do
  * vínculo, cruzando com os rosters e a lista de bans.
  */
-function resolveKind({ nickLower, uuid, discordId }, ctx) {
+function resolveKind({ nickLower, uuid, discordId, linked }, ctx) {
   const { guildUuids, guildNames, blUuids, blNames, allyByUuid, allyByName, ban } = ctx;
   const banned = ban.discordIds.has(discordId) || (uuid && ban.uuids.has(uuid));
   const inBlacklist = (uuid && blUuids.has(uuid)) || blNames.has(nickLower);
@@ -78,13 +92,34 @@ function resolveKind({ nickLower, uuid, discordId }, ctx) {
   if (banned || inBlacklist) return 'banned';
   if (isOurs) return 'member';
   if (isAlly) return 'ally';
-  return 'neutral';
+
+  // Aqui está a diferença entre "não está em guilda nenhuma" e "não existe para
+  // o bot". Neutro é quem SE REGISTROU e não entrou em guilda alguma; o cargo de
+  // comunidade é o que atesta esse registro.
+  //
+  // Quem não tem vínculo e cujo apelido não casa com roster nenhum nunca provou
+  // ser dono de conta do WynnCraft — e apelido de Discord não é nick: `Ninja no
+  // celular` tem espaços, coisa que nick do Minecraft não pode ter. Antes disto
+  // essa pessoa caía em 'neutral' e o painel oferecia dar comunidade a ela.
+  return linked ? 'neutral' : 'unregistered';
 }
 
 /** A guilda aliada deste jogador e o cargo dela, ou nulos. */
 function allyFor({ nickLower, uuid }, ctx) {
   const doc = (uuid && ctx.allyByUuid.get(uuid)) || ctx.allyByName.get(nickLower) || null;
   return { doc, roleId: doc ? ctx.allyRoleByGuild.get(doc.uuid) ?? null : null };
+}
+
+/**
+ * A TAG que vai na frente do apelido: a da guilda RASTREADA da pessoa, aliada ou
+ * proibida. Independe da classificação — quem está na guilda proibida carrega a
+ * TAG dela mesmo isento pela staff.
+ */
+function nickTagFor({ nickLower, uuid }, ctx) {
+  const proibida = (uuid && ctx.blByUuid.get(uuid)) || ctx.blByName.get(nickLower);
+  if (proibida) return proibida.prefix;
+  const aliada = (uuid && ctx.allyByUuid.get(uuid)) || ctx.allyByName.get(nickLower);
+  return aliada?.prefix ?? null;
 }
 
 /**
@@ -131,15 +166,20 @@ export async function computeReconciliation(guild) {
   };
   for (const m of ours.members) remember(m);
 
-  // Black-list: a união de todas as guildas proibidas.
+  // Black-list: a união de todas as guildas proibidas. Guardamos o documento por
+  // jogador (e não só o uuid) porque a TAG dele vai para o apelido.
   const blUuids = new Set();
   const blNames = new Set();
+  const blByUuid = new Map();
+  const blByName = new Map();
   for (const doc of tracked.blacklist) {
     const roster = await fetchGuildMembers(doc.prefix).catch(() => null);
     if (!roster) continue;
     for (const m of roster.members) {
       blUuids.add(m.uuid);
       blNames.add(norm(m.username));
+      blByUuid.set(m.uuid, doc);
+      blByName.set(norm(m.username), doc);
       remember(m);
     }
   }
@@ -171,6 +211,8 @@ export async function computeReconciliation(guild) {
     guildNames: new Set(ours.members.map((m) => norm(m.username))),
     blUuids,
     blNames,
+    blByUuid,
+    blByName,
     allyByUuid,
     allyByName,
     allyRoleByGuild,
@@ -185,6 +227,7 @@ export async function computeReconciliation(guild) {
     toAlly: [], // deveria ser Aliado (comunidade + cargo [TAG])
     toNeutral: [], // deveria ser só Comunidade (perde cargo de guilda indevido)
     toBanned: [], // deveria ser Banido
+    toUnregistered: [], // não tem registro: perde os cargos de classificação
     rankWithoutGuild: [], // tem cargo de rank sem estar na guilda (só aviso)
   };
   let okCount = 0;
@@ -192,10 +235,12 @@ export async function computeReconciliation(guild) {
   for (const member of guild.members.cache.values()) {
     if (member.user.bot) continue;
     const nick = member.nickname || member.user.username;
-    const nickLower = norm(nick);
+    // A TAG é descascada só para IDENTIFICAR: `[GsW] Fulano` é o Fulano do
+    // roster. O `nick` original continua sendo o que se compara com o esperado.
+    const nickLower = norm(stripNickTag(nick));
     const link = linkByDiscord.get(member.id);
     const uuid = link?.uuid ?? matchUuid(nickLower, uuidByName, linkByName);
-    let kind = resolveKind({ nickLower, uuid, discordId: member.id }, ctx);
+    let kind = resolveKind({ nickLower, uuid, discordId: member.id, linked: !!link }, ctx);
 
     // Banimento é PERMANENTE: quem já carrega o cargo de banido não o perde por
     // reconciliação. Sair da guilda proibida não devolve o acesso sozinho — a
@@ -235,7 +280,11 @@ export async function computeReconciliation(guild) {
     // `member.nickname` é null quando não há apelido definido — e aí o certo é
     // definir um, não deixar o username global valendo por acaso. Sem grafia
     // conhecida (nick que não casa com roster nem vínculo) não há o que cobrar.
-    const canonical = link?.username ?? (uuid ? canonicalByUuid.get(uuid) : null) ?? canonicalByName.get(nickLower) ?? null;
+    const nickReal = link?.username ?? (uuid ? canonicalByUuid.get(uuid) : null) ?? canonicalByName.get(nickLower) ?? null;
+    // Quem é de guilda rastreada carrega a TAG na frente. Vem da mesma função
+    // que o registro e o roleSync usam, senão os três ficariam se corrigindo em
+    // círculo — um escreve `[GsW] Fulano`, o outro "conserta" para `Fulano`.
+    const canonical = nickReal ? expectedNickname(nickReal, nickTagFor({ nickLower, uuid }, ctx)) : null;
     const nickWrong = !!canonical && member.nickname !== canonical;
 
     const inSync = rolesInSync && !nickWrong;
@@ -272,6 +321,7 @@ export async function computeReconciliation(guild) {
     if (kind === 'member') buckets.toMember.push(entry);
     else if (kind === 'banned') buckets.toBanned.push(entry);
     else if (kind === 'ally') buckets.toAlly.push(entry);
+    else if (kind === 'unregistered') buckets.toUnregistered.push(entry);
     else buckets.toNeutral.push(entry);
   }
 
@@ -289,7 +339,13 @@ function matchUuid(nickLower, uuidByName, linkByName) {
 
 /** Todos os desalinhados, em ordem de exibição. */
 function outOfSync(buckets) {
-  return [...buckets.toBanned, ...buckets.toMember, ...buckets.toAlly, ...buckets.toNeutral];
+  return [
+    ...buckets.toBanned,
+    ...buckets.toMember,
+    ...buckets.toAlly,
+    ...buckets.toNeutral,
+    ...buckets.toUnregistered,
+  ];
 }
 
 function block(list, render, max = 1000) {
@@ -316,6 +372,9 @@ export function reconciliationPanel(data, note = null) {
   add('🤝', 'Aliado — a corrigir', buckets.toAlly, renderEntry);
   add('⚪', 'Comunidade — a corrigir', buckets.toNeutral, renderEntry);
   add('🚫', 'Banimento — a corrigir', buckets.toBanned, renderEntry);
+  add('❔', 'Sem registro — vão PERDER os cargos', buckets.toUnregistered, (e) =>
+    `**${e.nick}** — tem: ${holdLabel(e.holds)}`,
+  );
   add('⚠️', 'Cargo de rank sem estar na guilda', buckets.rankWithoutGuild, (e) => `**${e.nick}** — ${e.roles}`);
 
   if (!fields.length) {
@@ -328,27 +387,33 @@ export function reconciliationPanel(data, note = null) {
     color: 0x9b59b6,
     description:
       note ??
-      `Cruzando o apelido de cada membro do Discord com a guilda, as aliadas, a black-list e a lista de bans.\n` +
+      `Cruzando o **vínculo** de cada membro do Discord com a guilda, as aliadas, a black-list e a lista de bans.\n` +
         `**${okCount}** já corretos · **${pending.length}** a corrigir${nickCount ? ` (${nickCount} por apelido)` : ''}.`,
     fields,
-    footer: { text: 'Apelido é comparado letra por letra, maiúscula inclusa. Cargos de rank são gestão manual.' },
+    footer: {
+      text: 'Sem registro = sem cargo: comunidade atesta um vínculo. Apelido é comparado letra por letra, maiúscula inclusa.',
+    },
     timestamp: new Date().toISOString(),
   };
 
   const components = [];
+  // Cinco classificações e o "Tudo" não cabem numa linha só (o Discord aceita 5
+  // botões por linha), então o "Tudo" desceu para a segunda.
   const row1 = new ActionRowBuilder();
   if (buckets.toMember.length) row1.addComponents(btn('recon:apply:member', `Membro (${buckets.toMember.length})`, ButtonStyle.Success, '🟢'));
   if (buckets.toAlly.length) row1.addComponents(btn('recon:apply:ally', `Aliado (${buckets.toAlly.length})`, ButtonStyle.Secondary, '🤝'));
   if (buckets.toNeutral.length) row1.addComponents(btn('recon:apply:neutral', `Comunidade (${buckets.toNeutral.length})`, ButtonStyle.Secondary, '⚪'));
   if (buckets.toBanned.length) row1.addComponents(btn('recon:apply:banned', `Banir (${buckets.toBanned.length})`, ButtonStyle.Danger, '🚫'));
-  if (row1.components.length) {
-    row1.addComponents(btn('recon:apply:all', `Tudo (${pending.length})`, ButtonStyle.Primary, '⚡'));
-    components.push(row1);
-  }
-  components.push(new ActionRowBuilder().addComponents(
+  if (buckets.toUnregistered.length) row1.addComponents(btn('recon:apply:unregistered', `Sem registro (${buckets.toUnregistered.length})`, ButtonStyle.Danger, '❔'));
+  if (row1.components.length) components.push(row1);
+
+  const row2 = new ActionRowBuilder();
+  if (pending.length) row2.addComponents(btn('recon:apply:all', `Tudo (${pending.length})`, ButtonStyle.Primary, '⚡'));
+  row2.addComponents(
     btn('recon:register', 'Registrar todos pelo apelido', ButtonStyle.Primary, '🔗'),
     btn('recon:refresh', 'Atualizar', ButtonStyle.Secondary, '🔄'),
-  ));
+  );
+  components.push(row2);
 
   // Menu para escolher indivíduos (limite de 25 do Discord).
   if (pending.length) {
@@ -425,11 +490,15 @@ export async function applyReconciliation(guild, scope, only = null) {
     if (e.kind === 'banned' && e.uuid) {
       await recordBan({ uuid: e.uuid, username: e.canonical ?? e.nick, discordId: e.discordId, reason: BAN_REASON_BLACKLIST_GUILD });
     }
-    // Mantém a coleção de vínculos coerente com /verificar (só se já houver vínculo).
-    await collections.members().updateOne(
-      { discordId: e.discordId },
-      { $set: { classification: e.kind, allyGuildUuid: e.allyGuildUuid ?? null } },
-    );
+    // Mantém a coleção de vínculos coerente com /verificar (só se já houver
+    // vínculo). Quem está como 'unregistered' não tem vínculo por definição —
+    // gravar classificação para ele seria inventar o registro que ele não tem.
+    if (e.kind !== 'unregistered') {
+      await collections.members().updateOne(
+        { discordId: e.discordId },
+        { $set: { classification: e.kind, allyGuildUuid: e.allyGuildUuid ?? null } },
+      );
+    }
     applied += 1;
   }
 
