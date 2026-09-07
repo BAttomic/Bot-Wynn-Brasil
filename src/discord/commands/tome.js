@@ -220,8 +220,10 @@ async function promptAspectDelivery(interaction) {
  * receber. A staff edita quem precisar — inclusive para MAIS, e deixar em branco
  * (ou zero) pula aquela pessoa.
  *
- * Os uuids vão no customId porque o modal não carrega estado próprio, e a ordem
- * dos campos precisa casar com a ordem deles na hora de aplicar.
+ * O customId do modal é FIXO. Quem carrega o uuid é o campo de cada pessoa
+ * (`amt:<uuid>`), e é de lá que a aplicação relê a lista. Serializar os uuids
+ * aqui estourava o teto de 100 caracteres do customId a partir do terceiro
+ * destinatário: dois cabiam, o terceiro derrubava a entrega inteira.
  */
 async function promptAspectAmount(interaction) {
   if (!(await isTomeManager(interaction))) {
@@ -236,7 +238,7 @@ async function promptAspectAmount(interaction) {
   }
 
   const modal = new ModalBuilder()
-    .setCustomId(`tome:aspectAmount:${alvos.map((a) => a.uuid).join(',')}`)
+    .setCustomId('tome:aspectAmount')
     .setTitle('Entregar aspects')
     .addComponents(
       ...alvos.map((a) =>
@@ -268,7 +270,11 @@ async function applyAspectDelivery(interaction) {
   }
   await interaction.deferReply({ ephemeral: true });
 
-  const uuids = interaction.customId.split(':')[2].split(',').filter(Boolean);
+  // Os campos são `amt:<uuid>`, na ordem em que o modal foi montado: a própria
+  // submissão diz a quem entregar, sem estado no customId.
+  const uuids = [...interaction.fields.fields.keys()]
+    .filter((k) => k.startsWith('amt:'))
+    .map((k) => k.slice('amt:'.length));
 
   const entregues = [];
   const invalidos = [];
