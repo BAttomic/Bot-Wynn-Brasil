@@ -9,7 +9,7 @@ import { log } from './util/log.js';
 // Arquivos servidos publicamente. Vêm de dois lugares:
 //
 //   asset — src/assets/, versionado no git e embutido na imagem Docker (o
-//           .dockerignore só corta *.md, node_modules, .env e .git).
+//           .dockerignore corta o que não roda em produção, nunca src/assets/).
 //   data  — DATA_DIR, gerado em runtime e guardado em volume. É o modpack, que
 //           o job diário remonta a partir do Modrinth (ver services/modpack.js).
 const ROUTES = {

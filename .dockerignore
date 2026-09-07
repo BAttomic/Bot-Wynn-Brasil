@@ -9,3 +9,6 @@ docker-compose.yml
 # Modpack gerado localmente. Em produção ele vive no volume (DATA_DIR), e mandar
 # 30 MB de jar para o build context só engordaria a imagem.
 data
+# Fonte do dossiê GsW. Quem é servido em /gsw é src/assets/gsw.html, já montado;
+# o template e os prints originais só servem para rodar o build.ps1 na mão.
+gsw

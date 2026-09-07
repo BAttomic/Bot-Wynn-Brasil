@@ -10,3 +10,9 @@ npm-debug.log*
 .env
 .env.*
 !.env.example
+
+# Fonte do dossiê GsW (template + prints + build.ps1). O que o bot serve em
+# /gsw é o HTML já montado em src/assets/gsw.html — esse SIM é versionado. Aqui
+# ficam só os 138 KB de template e os prints soltos, que ninguém consome em
+# runtime. A barra inicial evita casar com src/assets/gsw.html.
+/gsw/
