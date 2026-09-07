@@ -38,6 +38,30 @@ export async function computeVerification() {
     else (isRecruiter ? shouldBeRecruit : recruitNoLink).push(nick(gm.username));
   }
 
+  // FILA DE ENTRADA: aprovados na votação que ainda não apareceram no jogo.
+  //
+  // O critério de "já entrou" é o roster que a API acabou de devolver, e não o
+  // campo `inGuild` do registro: o flag depende do roleSync ter rodado, e um
+  // atraso dele deixaria alguém já dentro da guilda ocupando a fila.
+  //
+  // Ordem de chegada = ordem de aprovação (`decidedAt`), que é o que a staff
+  // usa para saber quem convidar primeiro.
+  const naGuilda = new Set(res.members.map((m) => m.uuid));
+  const queue = (
+    await collections
+      .applications()
+      .find({ status: { $in: ['approved', 'invited'] }, decidedAt: { $ne: null } })
+      .sort({ decidedAt: 1 })
+      .toArray()
+  )
+    .filter((a) => !naGuilda.has(a.uuid))
+    .map((a) => ({
+      username: a.username,
+      discordId: a.memberDiscordId,
+      decidedAt: a.decidedAt,
+      invited: a.status === 'invited',
+    }));
+
   const guildDiscordId = optional('DISCORD_GUILD_ID');
   let inactivity = { kick: [], waiting: [] };
   if (guildDiscordId) {
@@ -61,6 +85,7 @@ export async function computeVerification() {
     shouldBeRecruit,
     recruitNoLink,
     inactivity,
+    queue,
     total: res.members.length,
   };
 }
@@ -163,6 +188,36 @@ function inactivityFields(inactivity) {
 }
 
 /**
+ * Fila de quem já passou na votação e ainda não entrou na guilda, numerada por
+ * ordem de aprovação. Quem já foi convidado leva a marca — a staff precisa
+ * distinguir "ninguém chamou ainda" de "chamado, mas não entrou".
+ * @param {Array<{username: string, decidedAt: Date, invited: boolean}>} queue
+ */
+function queueField(queue) {
+  const desc = '> Aprovados na votação que ainda não entraram na guilda, por ordem de chegada.\n';
+  if (!queue.length) {
+    return { name: '📥 Fila de entrada (0)', value: '> Ninguém aprovado esperando para entrar.' };
+  }
+
+  const linhas = [];
+  let len = desc.length;
+  for (const [i, q] of queue.entries()) {
+    const quando = q.decidedAt ? ` <t:${Math.floor(new Date(q.decidedAt).getTime() / 1000)}:R>` : '';
+    const marca = q.invited ? ' · já convidado' : '';
+    const linha = `\`${String(i + 1).padStart(2, ' ')}.\` \`${q.username}\` — aprovado${quando}${marca}`;
+    if (len + linha.length + RESTO_RESERVA > FIELD_LIMIT) break;
+    linhas.push(linha);
+    len += linha.length + 1;
+  }
+
+  const resto = queue.length - linhas.length;
+  return {
+    name: `📥 Fila de entrada (${queue.length})`,
+    value: `${desc}${linhas.join('\n')}${resto > 0 ? `\n-# … e mais ${resto}.` : ''}`,
+  };
+}
+
+/**
  * O Discord recusa o embed INTEIRO se a soma passar de 6000 caracteres — com uma
  * guilda cheia, os quatro campos de listagem mais as duas listas de inatividade
  * chegam perto. Quando aperta, encurtamos as LISTAGENS (informativas) e
@@ -195,6 +250,7 @@ export function verificationEmbed(data) {
       field('⬆️ No Discord', 'Na guilda e com registro — falta virar Recruiter.', data.missingRecruiter),
       field('⬇️ Na guilda', 'Recruiter sem registro — deveria ser Recruit.', data.shouldBeRecruit),
       field('🤙 Sem vínculo no Discord', 'Recruit sem registro — tá certo.', data.recruitNoLink),
+      queueField(data.queue ?? []),
       ...inactivityFields(data.inactivity ?? { kick: [], waiting: [] }),
     ],
     footer: { text: 'Quem tem registro pode ser Recruiter; quem não tem deve ser Recruit. Ranks do jogo são manuais — o bot só avisa. Use /reconciliar para auditar cargos.' },
