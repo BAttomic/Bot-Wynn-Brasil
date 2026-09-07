@@ -261,7 +261,16 @@ export async function memberEvents(uuid, limit = 10) {
 
 // ---- Leaderboard materializado (reconstruído 1x/dia) ----
 
-const CACHE_LIMIT = 15;
+// O cache guarda TODO MUNDO que já pontuou, sem corte.
+//
+// O corte antigo em 15 escondia quem parou de pontuar: ex-membro não perde o
+// histórico (nada apaga guildStats), mas ia sendo ultrapassado por quem segue
+// ativo até cair da lista — e aí parecia que sair da guilda zerava a
+// contribuição. Contribuição é permanente, e o painel mostra isso: pagina de
+// 20 em 20 (ver services/leaderboardPanel.js), quantas páginas forem precisas.
+//
+// Sem risco de estourar o documento: são ~50 bytes por linha, e o teto de um
+// doc no Mongo é 16 MB — daria para uma guilda com mais de 300 mil membros.
 
 function pointsId(seasonId) {
   return seasonId ? `season:${seasonId}` : 'alltime';
@@ -276,7 +285,6 @@ async function buildCategoryBoard(cache, _id, collection, field, extraFilter, bu
   const rows = await collection
     .find({ ...extraFilter, [field]: { $gt: 0 } })
     .sort({ [field]: -1 })
-    .limit(CACHE_LIMIT)
     .toArray();
 
   await cache.updateOne(
@@ -310,7 +318,6 @@ export async function rebuildLeaderboards() {
   const alltime = await stats
     .find({ points: { $gt: 0 } })
     .sort({ points: -1 })
-    .limit(CACHE_LIMIT)
     .toArray();
   await cache.updateOne(
     { _id: pointsId(null) },
@@ -322,7 +329,6 @@ export async function rebuildLeaderboards() {
     const rows = await part
       .find({ seasonId, points: { $gt: 0 } })
       .sort({ points: -1 })
-      .limit(CACHE_LIMIT)
       .toArray();
     await cache.updateOne(
       { _id: pointsId(seasonId) },

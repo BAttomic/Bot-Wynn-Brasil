@@ -18,6 +18,7 @@ import {
   ensureLeaderboardPanel,
   renderPoints,
   renderCategory,
+  PAGE_SIZE,
 } from '../../services/leaderboardPanel.js';
 import { modpackReply } from './modpack.js';
 
@@ -31,13 +32,20 @@ async function resolveSeason(raw) {
 export default {
   data: new SlashCommandBuilder()
     .setName('leaderboard')
-    .setDescription('Placar da guilda (apurado 1x por dia, top 15)')
+    .setDescription('Placar da guilda — o ranking inteiro, apurado 1x por dia')
     .addSubcommand((s) =>
       s
         .setName('pontos')
         .setDescription('Ranking de pontos de contribuição')
         .addStringOption((o) =>
           o.setName('season').setDescription('ID da season, ou "atual" (padrão: acumulado)').setRequired(false),
+        )
+        .addIntegerOption((o) =>
+          o
+            .setName('pagina')
+            .setDescription(`Página do ranking (${PAGE_SIZE} por página)`)
+            .setMinValue(1)
+            .setRequired(false),
         ),
     )
     .addSubcommand((s) =>
@@ -58,6 +66,13 @@ export default {
         )
         .addStringOption((o) =>
           o.setName('season').setDescription('ID da season, ou "atual" (padrão: acumulado)').setRequired(false),
+        )
+        .addIntegerOption((o) =>
+          o
+            .setName('pagina')
+            .setDescription(`Página do ranking (${PAGE_SIZE} por página)`)
+            .setMinValue(1)
+            .setRequired(false),
         ),
     )
     .toJSON(),
@@ -96,14 +111,16 @@ export default {
 
     await interaction.deferReply();
     const seasonId = await resolveSeason(interaction.options.getString('season'));
+    // Opção é 1-based (é o que o usuário vê); o render conta do 0.
+    const page = (interaction.options.getInteger('pagina') ?? 1) - 1;
 
     if (sub === 'pontos') {
       const doc = await pointsLeaderboard(seasonId ? 'season' : 'alltime', seasonId);
-      return interaction.editReply({ embeds: [renderPoints(doc, seasonId)] });
+      return interaction.editReply({ embeds: [renderPoints(doc, seasonId, page)] });
     }
 
     const key = interaction.options.getString('tipo', true);
     const doc = await categoryLeaderboard(key, seasonId);
-    return interaction.editReply({ embeds: [renderCategory(key, doc, seasonId)] });
+    return interaction.editReply({ embeds: [renderCategory(key, doc, seasonId, page)] });
   },
 };

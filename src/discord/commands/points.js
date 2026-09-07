@@ -7,12 +7,13 @@ import {
   recomputePoints,
   rebuildLeaderboards,
 } from '../../services/points.js';
-import { ensureLeaderboardPanel } from '../../services/leaderboardPanel.js';
+import { ensureLeaderboardPanel, PAGE_SIZE } from '../../services/leaderboardPanel.js';
 import { runProgressSnapshot } from '../../jobs/progressSnapshot.js';
 import { audit } from '../../services/audit.js';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
-
+// O ranking inteiro não cabe num embed (o limite é 4096 caracteres), então o
+// comando fatia igual ao painel. Sem página pedida, mostra a primeira.
 async function resolveUuid(discordId) {
   const m = await collections.members().findOne({ discordId });
   return m?.uuid ? { uuid: m.uuid, username: m.username } : null;
@@ -25,7 +26,19 @@ export default {
     .addSubcommand((s) =>
       s.setName('show').setDescription('Mostra os pontos de um membro').addStringOption((o) => o.setName('nick').setDescription('Nick (padrão: você)').setRequired(false)),
     )
-    .addSubcommand((s) => s.setName('leaderboard').setDescription('Ranking por pontos').addStringOption((o) => o.setName('season').setDescription('ID da season (padrão: acumulado)').setRequired(false)))
+    .addSubcommand((s) =>
+      s
+        .setName('leaderboard')
+        .setDescription('Ranking por pontos')
+        .addStringOption((o) => o.setName('season').setDescription('ID da season (padrão: acumulado)').setRequired(false))
+        .addIntegerOption((o) =>
+          o
+            .setName('pagina')
+            .setDescription(`Página do ranking (${PAGE_SIZE} por página)`)
+            .setMinValue(1)
+            .setRequired(false),
+        ),
+    )
     .addSubcommand((s) =>
       s
         .setName('add')
@@ -98,13 +111,17 @@ export default {
       }
       const { rows, builtAt } = await pointsLeaderboard(scope, seasonId);
       if (!rows.length) return interaction.editReply('Ainda não há pontos registrados.');
-      const lines = rows.map((r, i) => `${MEDALS[i] || `\`${String(i + 1).padStart(2, ' ')}\``} **${r.username}** — ${r.points} pts`);
+      const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+      const page = Math.min(Math.max(0, (interaction.options.getInteger('pagina') ?? 1) - 1), pages - 1);
+      const inicio = page * PAGE_SIZE;
+      // A numeração segue a posição REAL: a página 2 começa no 21, não no 1.
+      const lines = rows.slice(inicio, inicio + PAGE_SIZE).map((r, i) => `${MEDALS[inicio + i] || `\`${String(inicio + i + 1).padStart(2, ' ')}\``} **${r.username}** — ${r.points} pts`);
       return interaction.editReply({
         embeds: [{
           title: `⭐ Ranking de Pontos${scope === 'season' ? ` — Season ${seasonId}` : ' — Acumulado'}`,
           description: lines.join('\n'),
           color: 0xf1c40f,
-          footer: { text: 'Apurado uma vez por dia' },
+          footer: { text: `Apurado uma vez por dia${pages > 1 ? ` · página ${page + 1}/${pages}` : ''}` },
           timestamp: builtAt ? new Date(builtAt).toISOString() : undefined,
         }],
       });

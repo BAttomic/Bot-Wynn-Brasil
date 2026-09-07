@@ -16,6 +16,14 @@ export const SELECT_ID = 'lb:view';
 export const VIEW_PREFIX = 'lb:v:';
 /** Botão de escopo: `lb:s:alltime` | `lb:s:season`. */
 export const SCOPE_PREFIX = 'lb:s:';
+/** Botão de página: `lb:p:<índice base 0>`. */
+export const PAGE_PREFIX = 'lb:p:';
+/**
+ * Linhas por página. O ranking inteiro é paginado — quantas páginas forem
+ * precisas —, e a navegação é por setas justamente por isso: botão numerado
+ * por página não caberia numa guilda grande.
+ */
+export const PAGE_SIZE = 20;
 export const ME_ID = 'lb:me';
 /** Botões de download das peças oficiais, no painel de status. */
 export const SKIN_ID = 'lb:skin';
@@ -29,9 +37,21 @@ const MEDALS = ['🥇', '🥈', '🥉'];
 
 const badge = (i) => MEDALS[i] || `\`${String(i + 1).padStart(2, ' ')}\``;
 
-function stamp(doc, seasonId) {
+/**
+ * Fatia a página pedida, devolvendo também o índice ABSOLUTO do primeiro item
+ * — sem ele a página 2 recomeçaria a numeração no 1º lugar.
+ */
+function paginar(rows, page) {
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const p = Math.min(Math.max(0, Number(page) || 0), pages - 1);
+  const inicio = p * PAGE_SIZE;
+  return { fatia: rows.slice(inicio, inicio + PAGE_SIZE), inicio, page: p, pages };
+}
+
+function stamp(doc, seasonId, page = 0, pages = 1, total = 0) {
+  const dePagina = pages > 1 ? ` · página ${page + 1}/${pages}` : '';
   return {
-    footer: { text: `${seasonId ? `Season ${seasonId}` : 'Acumulado'} · apurado uma vez por dia · top 15` },
+    footer: { text: `${seasonId ? `Season ${seasonId}` : 'Acumulado'} · apurado uma vez por dia · ${total} no ranking${dePagina}` },
     timestamp: doc.builtAt ? new Date(doc.builtAt).toISOString() : undefined,
   };
 }
@@ -41,15 +61,16 @@ function stamp(doc, seasonId) {
  * @param {string|null} seasonId
  * @returns {import('discord.js').APIEmbed}
  */
-export function renderPoints(doc, seasonId = null) {
+export function renderPoints(doc, seasonId = null, page = 0) {
   const rows = doc?.rows ?? [];
   if (!rows.length) {
     return { title: '🏆 Pontos de contribuição', color: 0xf1c40f, description: 'Ainda não há pontos apurados.' };
   }
-  const lines = rows.map(
-    (r, i) => `${badge(i)} **${r.username}** — ${r.points} pts · :crossed_swords: ${r.guildWars} · 🛡️ ${r.guildRaids}`,
+  const { fatia, inicio, page: p, pages } = paginar(rows, page);
+  const lines = fatia.map(
+    (r, i) => `${badge(inicio + i)} **${r.username}** — ${r.points} pts · :crossed_swords: ${r.guildWars} · 🛡️ ${r.guildRaids}`,
   );
-  return { title: '🏆 Pontos de contribuição', color: 0xf1c40f, description: lines.join('\n'), ...stamp(doc, seasonId) };
+  return { title: '🏆 Pontos de contribuição', color: 0xf1c40f, description: lines.join('\n'), ...stamp(doc, seasonId, p, pages, rows.length) };
 }
 
 /**
@@ -58,7 +79,7 @@ export function renderPoints(doc, seasonId = null) {
  * @param {string|null} seasonId
  * @returns {import('discord.js').APIEmbed}
  */
-export function renderCategory(key, doc, seasonId = null) {
+export function renderCategory(key, doc, seasonId = null, page = 0) {
   const cat = CATEGORIES[key];
   if (!cat) return { title: 'Ranking desconhecido', color: 0xe74c3c, description: 'Essa categoria não existe.' };
 
@@ -67,8 +88,9 @@ export function renderCategory(key, doc, seasonId = null) {
     return { title: `${cat.emoji} ${cat.label}`, color: 0x3498db, description: 'Ninguém pontuou aqui ainda.' };
   }
   const fmt = (v) => (cat.short ? shortNumber(v) : Number(v).toLocaleString('pt-BR'));
-  const lines = rows.map((r, i) => `${badge(i)} **${r.username}** — \`${fmt(r.value)}\` ${cat.unit}`);
-  return { title: `${cat.emoji} ${cat.label}`, color: 0x3498db, description: lines.join('\n'), ...stamp(doc, seasonId) };
+  const { fatia, inicio, page: p, pages } = paginar(rows, page);
+  const lines = fatia.map((r, i) => `${badge(inicio + i)} **${r.username}** — \`${fmt(r.value)}\` ${cat.unit}`);
+  return { title: `${cat.emoji} ${cat.label}`, color: 0x3498db, description: lines.join('\n'), ...stamp(doc, seasonId, p, pages, rows.length) };
 }
 
 /** Visão padrão do painel. @type {string} */
@@ -94,14 +116,18 @@ function validScope(s) {
  */
 async function currentState() {
   const doc = await collections.watcherState().findOne({ _id: STATE_ID });
-  return { view: validView(doc?.view), scope: validScope(doc?.scope) };
+  return {
+    view: validView(doc?.view),
+    scope: validScope(doc?.scope),
+    page: Math.max(0, Number(doc?.page) || 0),
+  };
 }
 
-/** @param {{view: string, scope: string}} state */
-function saveState({ view, scope }) {
+/** @param {{view: string, scope: string, page?: number}} state */
+function saveState({ view, scope, page = 0 }) {
   return collections
     .watcherState()
-    .updateOne({ _id: STATE_ID }, { $set: { view, scope } }, { upsert: true });
+    .updateOne({ _id: STATE_ID }, { $set: { view, scope, page } }, { upsert: true });
 }
 
 /**
@@ -121,6 +147,41 @@ function viewRow(view) {
     btn(DEFAULT_VIEW, 'Pontos', '🏆'),
     // O Discord só aceita Unicode (ou <:nome:id>) no emoji de um botão.
     ...Object.entries(CATEGORIES).map(([id, c]) => btn(id, c.btn, c.menuEmoji || c.emoji)),
+  );
+}
+
+/**
+ * Navegação por setas: primeira, anterior, próxima, última.
+ *
+ * Some quando só há uma página — botão que não leva a lugar nenhum é ruído. As
+ * pontas ficam desabilitadas no começo e no fim, em vez de dar a volta: clicar
+ * em "anterior" na primeira página e cair na última confunde mais do que ajuda.
+ *
+ * @param {number} page   página atual, base 0
+ * @param {number} pages  quantas existem
+ */
+function pageRow(page, pages) {
+  if (pages <= 1) return null;
+  const noComeco = page <= 0;
+  const noFim = page >= pages - 1;
+  // O alvo vai clampado: botão desabilitado ainda precisa de um customId válido.
+  //
+  // A TAG no fim do id existe só para ele ser único na mensagem. O Discord
+  // recusa a mensagem inteira se dois componentes tiverem o mesmo custom_id, e
+  // nas pontas dois botões miram a mesma página: na 2ª, "<<" e "<" vão os dois
+  // para a 1ª. Quem lê o id ignora a tag.
+  const seta = (tag, label, alvo, off) =>
+    new ButtonBuilder()
+      .setCustomId(`${PAGE_PREFIX}${Math.min(Math.max(0, alvo), pages - 1)}:${tag}`)
+      .setLabel(label)
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(off);
+
+  return new ActionRowBuilder().addComponents(
+    seta('f', '<<', 0, noComeco),
+    seta('p', '<', page - 1, noComeco),
+    seta('n', '>', page + 1, noFim),
+    seta('l', '>>', pages - 1, noFim),
   );
 }
 
@@ -184,14 +245,17 @@ export async function handleAssetDownload(interaction, peca) {
 }
 
 /**
- * Monta o painel na visão/escopo pedidos (ou nos últimos escolhidos).
+ * Monta o painel na visão/escopo/página pedidos (ou nos últimos escolhidos).
  * @param {string} [view]
  * @param {string} [scope]  'alltime' | 'season'
+ * @param {number} [page]   índice base 0
  */
-export async function buildLeaderboardPanel(view, scope) {
-  const saved = view === undefined || scope === undefined ? await currentState() : null;
+export async function buildLeaderboardPanel(view, scope, page) {
+  const saved =
+    view === undefined || scope === undefined || page === undefined ? await currentState() : null;
   const v = validView(view ?? saved.view);
   const s = validScope(scope ?? saved.scope);
+  const pedida = page ?? saved?.page ?? 0;
 
   // A season é lida sempre: o botão precisa mostrar o ID vigente mesmo quando o
   // escopo exibido é o acumulado.
@@ -199,12 +263,24 @@ export async function buildLeaderboardPanel(view, scope) {
   // Escopo de season sem season ativa cai no acumulado, em vez de mostrar vazio.
   const seasonId = s === 'season' && season ? season.seasonId : null;
 
-  const embed =
+  // O doc vem antes de renderizar: a linha de páginas precisa saber quantas
+  // linhas existem, e reler o cache só para isso seria uma ida a mais ao Mongo.
+  const doc =
     v === DEFAULT_VIEW
-      ? renderPoints(await pointsLeaderboard(seasonId ? 'season' : 'alltime', seasonId), seasonId)
-      : renderCategory(v, await categoryLeaderboard(v, seasonId), seasonId);
+      ? await pointsLeaderboard(seasonId ? 'season' : 'alltime', seasonId)
+      : await categoryLeaderboard(v, seasonId);
+  const total = doc?.rows?.length ?? 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // Página salva pode não existir mais (o ranking encolheu entre um clique e
+  // outro): cai na última em vez de mostrar embed vazio.
+  const pg = Math.min(Math.max(0, Number(pedida) || 0), pages - 1);
 
-  return brandWithLogo({ embeds: [embed], components: [viewRow(v), scopeRow(s, season)] });
+  const embed = v === DEFAULT_VIEW ? renderPoints(doc, seasonId, pg) : renderCategory(v, doc, seasonId, pg);
+
+  const linhas = [viewRow(v), scopeRow(s, season)];
+  const paginas = pageRow(pg, pages);
+  if (paginas) linhas.push(paginas);
+  return brandWithLogo({ embeds: [embed], components: linhas });
 }
 
 /**
@@ -359,19 +435,39 @@ export async function handleLeaderboardControl(interaction) {
   // do banco fazia o clique morrer sem erro nenhum — o botão simplesmente não
   // respondia, e nem "Interação falhou" aparecia. Ler o estado depois do ack não
   // tem prazo.
-  if (!id.startsWith(VIEW_PREFIX) && !id.startsWith(SCOPE_PREFIX) && id !== SELECT_ID) {
+  if (
+    !id.startsWith(VIEW_PREFIX) &&
+    !id.startsWith(SCOPE_PREFIX) &&
+    !id.startsWith(PAGE_PREFIX) &&
+    id !== SELECT_ID
+  ) {
     return interaction.reply({ content: 'Controle desconhecido.', ephemeral: true });
   }
   await interaction.deferUpdate();
 
   const state = await currentState();
-  if (id.startsWith(VIEW_PREFIX)) state.view = id.slice(VIEW_PREFIX.length);
-  else if (id.startsWith(SCOPE_PREFIX)) state.scope = id.slice(SCOPE_PREFIX.length);
-  else state.view = interaction.values?.[0];
+  // Trocar de ranking ou de escopo volta para a primeira página: a página 4 de
+  // um ranking não quer dizer nada no outro, e costuma nem existir.
+  // `lb:p:<página>:<tag>` — a tag só serve para o id ser único (ver pageRow).
+  if (id.startsWith(PAGE_PREFIX)) state.page = Number(id.slice(PAGE_PREFIX.length).split(':')[0]) || 0;
+  else if (id.startsWith(VIEW_PREFIX)) {
+    state.view = id.slice(VIEW_PREFIX.length);
+    state.page = 0;
+  } else if (id.startsWith(SCOPE_PREFIX)) {
+    state.scope = id.slice(SCOPE_PREFIX.length);
+    state.page = 0;
+  } else {
+    state.view = interaction.values?.[0];
+    state.page = 0;
+  }
 
   // Ranking desconhecido cai no padrão em vez de virar erro: o clique já foi
   // aceito, e um followUp de reclamação só polui a tela de quem clicou.
-  const next = { view: validView(state.view), scope: validScope(state.scope) };
+  const next = {
+    view: validView(state.view),
+    scope: validScope(state.scope),
+    page: Math.max(0, Number(state.page) || 0),
+  };
   await saveState(next);
-  await interaction.editReply(await buildLeaderboardPanel(next.view, next.scope));
+  await interaction.editReply(await buildLeaderboardPanel(next.view, next.scope, next.page));
 }
