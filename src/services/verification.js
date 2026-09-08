@@ -1,5 +1,6 @@
 import { collections } from '../db/mongo.js';
 import { fetchGuildMembers, isHigherRank } from './guildData.js';
+import { membersLimit } from '../util/format.js';
 import { inactivityStatus } from './inactivityCheck.js';
 import { getConfig } from '../config/guildConfig.js';
 import { optional } from '../config/env.js';
@@ -49,19 +50,21 @@ export async function computeVerification() {
   // candidatura fechada pelo roleSync, que roda a cada 10 min, e nessa janela a
   // pessoa já está no jogo sem precisar continuar ocupando a fila.
   const naGuilda = new Set(res.members.map((m) => m.uuid));
-  const queue = (await queueApplications())
-    .filter((a) => !naGuilda.has(a.uuid))
-    .map((a) => ({
-      username: a.username,
-      discordId: a.memberDiscordId,
-      decidedAt: a.decidedAt,
-      invited: a.status === 'invited',
-    }));
+  const esperando = (await queueApplications()).filter((a) => !naGuilda.has(a.uuid)).length;
+
+  // Vaga livre + gente esperando = alguém tem de mandar convite. Só o CRUZAMENTO
+  // dos dois merece aviso: fila sem vaga é espera legítima, e vaga sem fila não
+  // tem o que fazer. O relatório aponta para o canal da fila em vez de repetir a
+  // lista — ela já vive lá, e duas cópias divergem no primeiro convite.
+  const limite = membersLimit(res.guild?.level);
+  const slots = Math.max(0, limite - res.members.length);
 
   const guildDiscordId = optional('DISCORD_GUILD_ID');
   let inactivity = { kick: [], waiting: [] };
+  let recrutamento = null;
   if (guildDiscordId) {
-    const { params } = await getConfig(guildDiscordId);
+    const { params, channels } = await getConfig(guildDiscordId);
+    recrutamento = { slots, esperando, canal: channels?.recruiters ?? null };
     const stats = await collections
       .guildStats()
       .find({}, { projection: { uuid: 1, points: 1 } })
@@ -81,7 +84,7 @@ export async function computeVerification() {
     shouldBeRecruit,
     recruitNoLink,
     inactivity,
-    queue,
+    recrutamento,
     total: res.members.length,
   };
 }
@@ -184,36 +187,6 @@ function inactivityFields(inactivity) {
 }
 
 /**
- * Fila de quem já passou na votação e ainda não entrou na guilda, numerada por
- * ordem de aprovação. Quem já foi convidado leva a marca — a staff precisa
- * distinguir "ninguém chamou ainda" de "chamado, mas não entrou".
- * @param {Array<{username: string, decidedAt: Date, invited: boolean}>} queue
- */
-function queueField(queue) {
-  const desc = '> Aprovados na votação que ainda não entraram na guilda, por ordem de chegada.\n';
-  if (!queue.length) {
-    return { name: '📥 Fila de entrada (0)', value: '> Ninguém aprovado esperando para entrar.' };
-  }
-
-  const linhas = [];
-  let len = desc.length;
-  for (const [i, q] of queue.entries()) {
-    const quando = q.decidedAt ? ` <t:${Math.floor(new Date(q.decidedAt).getTime() / 1000)}:R>` : '';
-    const marca = q.invited ? ' · já convidado' : '';
-    const linha = `\`${String(i + 1).padStart(2, ' ')}.\` \`${q.username}\` — aprovado${quando}${marca}`;
-    if (len + linha.length + RESTO_RESERVA > FIELD_LIMIT) break;
-    linhas.push(linha);
-    len += linha.length + 1;
-  }
-
-  const resto = queue.length - linhas.length;
-  return {
-    name: `📥 Fila de entrada (${queue.length})`,
-    value: `${desc}${linhas.join('\n')}${resto > 0 ? `\n-# … e mais ${resto}.` : ''}`,
-  };
-}
-
-/**
  * O Discord recusa o embed INTEIRO se a soma passar de 6000 caracteres — com uma
  * guilda cheia, os quatro campos de listagem mais as duas listas de inatividade
  * chegam perto. Quando aperta, encurtamos as LISTAGENS (informativas) e
@@ -223,6 +196,7 @@ function queueField(queue) {
 function fitEmbed(embed) {
   const size = () =>
     (embed.title?.length ?? 0) +
+    (embed.description?.length ?? 0) +
     (embed.footer?.text?.length ?? 0) +
     embed.fields.reduce((n, f) => n + f.name.length + f.value.length, 0);
 
@@ -237,19 +211,37 @@ function fitEmbed(embed) {
   return embed;
 }
 
+/**
+ * A única linha sobre recrutamento no relatório.
+ *
+ * Aparece só quando há vaga E gente esperando: fila sem vaga é espera
+ * legítima, vaga sem fila não tem o que fazer, e um aviso que aparece sempre
+ * deixa de ser lido. A lista em si mora no canal de recrutamento — repeti-la
+ * aqui criaria duas cópias que divergem no primeiro convite.
+ *
+ * @param {{slots: number, esperando: number, canal: string|null}|null} r
+ */
+function linhaRecrutamento(r) {
+  if (!r?.slots || !r?.esperando) return undefined;
+  const vaga = r.slots === 1 ? "**1 vaga** livre" : `**${r.slots} vagas** livres`;
+  const gente = r.esperando === 1 ? "**1 pessoa** aprovada esperando" : `**${r.esperando} pessoas** aprovadas esperando`;
+  const onde = r.canal ? ` — convide em <#${r.canal}>` : "";
+  return `📥 ${vaga} na guilda e ${gente}${onde}.`;
+}
+
 export function verificationEmbed(data) {
   return fitEmbed({
     title: 'Wynn Brasil [WnBR] — Verificação',
     color: 0x3498db,
+    description: linhaRecrutamento(data.recrutamento),
     fields: [
       field('🔰 Membros verificados', 'Na guilda, Recruiter e com registro.', data.verified),
       field('⬆️ No Discord', 'Na guilda e com registro — falta virar Recruiter.', data.missingRecruiter),
       field('⬇️ Na guilda', 'Recruiter sem registro — deveria ser Recruit.', data.shouldBeRecruit),
       field('🤙 Sem vínculo no Discord', 'Recruit sem registro — tá certo. Vale convidar para o Discord: com registro, vira Recruiter.', data.recruitNoLink),
-      queueField(data.queue ?? []),
       ...inactivityFields(data.inactivity ?? { kick: [], waiting: [] }),
     ],
-    footer: { text: 'Quem tem registro pode ser Recruiter; quem não tem deve ser Recruit. Ranks do jogo são manuais — o bot só avisa. Use /reconciliar para auditar cargos.' },
+    footer: { text: 'Use /reconciliar para auditar cargos.' },
     timestamp: new Date().toISOString(),
   });
 }
