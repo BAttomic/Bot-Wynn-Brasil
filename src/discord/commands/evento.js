@@ -19,6 +19,7 @@ import {
   formatValue,
   parsePrizes,
   renderPrizes,
+  formatShare,
   placeLabel,
   purgeMemberScores,
 } from '../../services/events.js';
@@ -50,7 +51,9 @@ async function criar(interaction) {
   const nome = interaction.options.getString('nome', true);
   const metrica = interaction.options.getString('metrica', true);
   const fimRaw = interaction.options.getString('fim', true);
-  const premio = interaction.options.getString('premio', true);
+  const premio = interaction.options.getString('premio') ?? '';
+  const premioTotal = interaction.options.getNumber('premio_total');
+  const moeda = (interaction.options.getString('moeda') ?? 'STX').trim();
   const descricao = interaction.options.getString('descricao') ?? '';
   const inicioRaw = interaction.options.getString('inicio');
   const pontos = interaction.options.getInteger('pontos') ?? 0;
@@ -58,12 +61,28 @@ async function criar(interaction) {
 
   if (!METRICS[metrica]) return interaction.editReply('Métrica inválida.');
 
-  // Uma recompensa por premiado, na ordem do pódio. Sem `podio` explícito, quem
-  // manda é a lista: `Idol, 2 Stx, 1 Stx` premia três.
+  // DOIS modos de recompensa, excludentes:
+  //
+  //   premio       — uma por posição, na ordem do pódio (`Idol, 2 Stx, 1 Stx`)
+  //   premio_total — um bolo que o bot racha entre o top na PROPORÇÃO do que
+  //                  cada um fizer (30 STX no top 10: quem fez mais, leva mais)
+  if (premio && premioTotal) {
+    return interaction.editReply(
+      'Escolha um modo só: `premio` (uma recompensa por posição) **ou** `premio_total` (bolo dividido proporcionalmente).',
+    );
+  }
+  if (!premio && !premioTotal) {
+    return interaction.editReply(
+      'Informe `premio` (uma recompensa por posição) ou `premio_total` (bolo dividido proporcionalmente entre o top).',
+    );
+  }
+
   const premios = parsePrizes(premio);
-  if (!premios.length) return interaction.editReply('Informe ao menos uma recompensa.');
-  const podio = interaction.options.getInteger('podio') ?? Math.min(10, premios.length);
-  if (premios.length > podio) {
+  const bolo = premioTotal ? { total: premioTotal, currency: moeda } : null;
+  // Sem `podio` explícito: no modo clássico manda a lista de recompensas; no
+  // bolo, o top 10 que a staff usa por padrão.
+  const podio = interaction.options.getInteger('podio') ?? (bolo ? 10 : Math.min(10, premios.length));
+  if (!bolo && premios.length > podio) {
     return interaction.editReply(
       `Você cadastrou **${premios.length}** recompensas mas só **${podio}** premiado(s). ` +
         'Aumente `podio` ou tire recompensas da lista.',
@@ -122,6 +141,7 @@ async function criar(interaction) {
     metricKey: metrica,
     endAt: fim,
     prize: premio,
+    prizePool: bolo,
     description: descricao,
     startAt: inicio,
     countFrom: snapshot?.takenAt ?? null,
@@ -148,14 +168,17 @@ async function criar(interaction) {
   // Menos recompensas que premiados é permitido (os de baixo levam só os pontos),
   // mas é quase sempre um descuido — avisa sem barrar.
   const faltando =
-    premios.length < event.podium
+    !bolo && premios.length < event.podium
       ? `\n⚠️ Top ${event.podium} premiado(s), mas só **${premios.length}** recompensa(s) — do ${placeLabel(premios.length + 1)} para baixo ninguém leva item.`
       : '';
 
   return interaction.editReply(
     `🏆 Evento **${event.name}** criado (\`${event.eventId}\`).\n` +
       `Métrica: **${METRICS[metrica].label}** · ${quandoAbre} · Termina <t:${unix(event.endAt)}:F> (<t:${unix(event.endAt)}:R>) · Top **${event.podium}** premiado(s).\n` +
-      `🎁 Recompensas:\n${renderPrizes(premio, event.podium)}${faltando}\n` +
+      (bolo
+        ? `🎁 **${formatShare(bolo.total)} ${bolo.currency}** divididos entre o top ${event.podium}, ` +
+          `na proporção do que cada um fizer.\n`
+        : `🎁 Recompensas:\n${renderPrizes(premio, event.podium)}${faltando}\n`) +
       `Todo mundo começa do **zero**: só conta o que for feito depois da abertura.\n` +
       (METRICS[metrica].live
         ? '-# Cada guild raid é creditada no instante em que termina.\n'
@@ -327,7 +350,7 @@ async function blacklist(interaction, sub) {
 
   const motivo = interaction.options.getString('motivo') ?? 'Barrado pela staff';
   await blockMember({ ...alvo, reason: motivo, by: interaction.user.id });
-  const { removidos, eventos } = await purgeMemberScores(alvo.uuid);
+  const { ocultados, eventos } = await purgeMemberScores(alvo.uuid);
 
   // Painel dos eventos afetados precisa refletir o pódio novo na hora.
   for (const eventId of eventos) {
@@ -343,10 +366,10 @@ async function blacklist(interaction, sub) {
   return interaction.editReply(
     `Barrado de eventos: **${alvo.username ?? alvo.uuid}**\nUUID: \`${alvo.uuid}\`\n` +
       `Discord: ${alvo.discordId ? `<@${alvo.discordId}>` : '— (só a conta do jogo)'}\nMotivo: *${motivo}*\n` +
-      (removidos
-        ? `Removido de **${eventos.length}** evento(s); painel atualizado.`
+      (ocultados
+        ? `Ocultado do ranking de **${eventos.length}** evento(s); painel atualizado.`
         : 'Não estava pontuando em nenhum evento no momento.') +
-      '\n-# Vale para todos os eventos, inclusive os futuros. O histórico de pontos não é apagado — `remove` desfaz.',
+      '\n-# Vale para todos os eventos, inclusive os futuros. A pontuação dele continua contando no total da guilda — só o nome sai do ranking. `remove` desfaz.',
   );
 }
 
@@ -377,8 +400,19 @@ export default {
           o
             .setName('premio')
             .setDescription('Uma por premiado, separadas por vírgula (ex.: Idol, 2 Stx, 1 Stx)')
-            .setRequired(true)
             .setMaxLength(400),
+        )
+        .addNumberOption((o) =>
+          o
+            .setName('premio_total')
+            .setDescription('Bolo dividido entre o top, na proporção do desempenho (ex.: 30). Alternativa a premio')
+            .setMinValue(0.1),
+        )
+        .addStringOption((o) =>
+          o
+            .setName('moeda')
+            .setDescription('Unidade do premio_total (padrão: STX)')
+            .setMaxLength(40),
         )
         .addStringOption((o) =>
           o

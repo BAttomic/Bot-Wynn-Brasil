@@ -3,7 +3,7 @@ import { getConfig } from '../config/guildConfig.js';
 import { awardPoints } from './points.js';
 import { shortNumber, TIMEZONE } from '../util/format.js';
 import { log } from '../util/log.js';
-import { blockedUuids, isEventBlocked } from './eventBlacklist.js';
+import { blockedUuids } from './eventBlacklist.js';
 
 // Eventos de competição por métrica.
 //
@@ -77,6 +77,38 @@ export function renderPrizes(prize, podium = 0) {
   }
   if (!prizes.length) return '—';
   return prizes.map((p, i) => `${placeLabel(i + 1)} ${p}`).join('\n');
+}
+
+/**
+ * MODO BOLO: em vez de uma recompensa fixa por posição, a staff define um
+ * total e ele é rachado entre os colocados NA PROPORÇÃO do que cada um fez.
+ * Top 10 com 30 STX e alguém com 13 de 45 raids leva 30 × 13/45 = 8,7.
+ *
+ * Só entra quem pontuou: com o pódio maior que o número de gente ativa, as
+ * posições vazias não viram fatia de zero — elas simplesmente não existem, e
+ * o bolo inteiro fica com quem jogou.
+ *
+ * @param {Array<{uuid: string, value: number}>} rows  já cortados no pódio
+ * @param {number} total  o bolo
+ * @returns {Map<string, number>} uuid → fatia
+ */
+export function poolShares(rows, total) {
+  const validos = rows.filter((r) => Number(r.value) > 0);
+  const soma = validos.reduce((acc, r) => acc + Number(r.value), 0);
+  if (!soma || !(total > 0)) return new Map();
+  return new Map(validos.map((r) => [r.uuid, (total * Number(r.value)) / soma]));
+}
+
+/**
+ * Uma casa decimal, sem `.0` pendurado: `8.2`, `6`.
+ *
+ * TRUNCA, não arredonda. Arredondando, 8,2978 viraria 8,3 e a soma das fatias
+ * poderia passar do bolo — a guilda prometeria mais do que separou. Truncando,
+ * a soma fica igual ou um pouco ABAIXO (30 vira 29,8 no exemplo do top 7), e a
+ * sobra fica no caixa em vez de virar dívida.
+ */
+export function formatShare(n) {
+  return String(Math.floor(Number(n) * 10) / 10);
 }
 
 /**
@@ -236,7 +268,9 @@ async function uniqueEventId(base) {
  * @param {string} args.name
  * @param {string} args.metricKey     chave de METRICS
  * @param {Date}   args.endAt         quando termina (data, não duração)
- * @param {string} args.prize         recompensas separadas por vírgula, uma por premiado
+ * @param {string} [args.prize]       recompensas separadas por vírgula, uma por premiado
+ * @param {{total: number, currency: string}} [args.prizePool]  bolo dividido na
+ *                                    proporção do desempenho, em vez de prêmio por posição
  * @param {string} [args.description] texto livre do evento, com `\n` para quebrar linha
  * @param {Date}   [args.startAt]     quando começa a valer (padrão: agora)
  * @param {Date}   [args.countFrom]   instante da apuração que fechou o passado
@@ -252,7 +286,8 @@ export async function createEvent({
   name,
   metricKey,
   endAt,
-  prize,
+  prize = '',
+  prizePool = null,
   description = '',
   startAt = null,
   countFrom = null,
@@ -268,7 +303,13 @@ export async function createEvent({
     eventId: await uniqueEventId(slugify(name)),
     name: name.trim(),
     metric: metricKey,
-    prize: prize.trim(),
+    prize: String(prize ?? '').trim(),
+    // Só grava se for bolo de verdade: `prizePool` ausente é o modo clássico,
+    // uma recompensa por posição.
+    prizePool:
+      prizePool && prizePool.total > 0
+        ? { total: Number(prizePool.total), currency: String(prizePool.currency || '').trim() }
+        : null,
     description: multiline(description),
     podium: Math.max(1, Math.min(10, podium)),
     points: Math.max(0, points),
@@ -352,8 +393,10 @@ export async function refreshScores(event) {
   // Evento encerrado congela na data de encerramento; ativo conta até agora.
   const until = event.status === 'active' ? new Date() : new Date(event.endAt);
 
-  // Lista negra global: quem está nela não entra na apuração de evento nenhum.
-  const bloqueados = await blockedUuids();
+  // Lista negra: conta, mas não aparece — a mesma regra do rerank, para métrica
+  // com gatilho e sem gatilho se comportarem igual. O lançamento CONTINUA na
+  // apuração (o total da guilda é fato consumado); o que sai é a posição.
+  const bloqueados = new Set(await blockedUuids());
 
   const rows = await collections
     .pointsEvents()
@@ -364,7 +407,6 @@ export async function refreshScores(event) {
           at: { $gt: countFrom(event), $lte: until },
           qty: { $gt: 0 },
           'meta.baseline': { $ne: true },
-          ...(bloqueados.length ? { uuid: { $nin: bloqueados } } : {}),
         },
       },
       { $sort: { at: 1 } },
@@ -380,26 +422,34 @@ export async function refreshScores(event) {
     ])
     .toArray();
 
-  const ranked = rows.map((r, i) => ({
+  const todos = rows.map((r) => ({
     uuid: r._id,
     username: r.username,
     value: r.value,
     reachedAt: r.reachedAt,
-    rank: i + 1,
   }));
+
+  // As posições são contadas SÓ entre quem aparece: com o bloqueado ocupando
+  // lugar, o ranking visível pularia números (1, 2, 4…).
+  const ranked = [];
+  for (const r of todos) {
+    if (!bloqueados.has(r.uuid)) ranked.push({ ...r, rank: ranked.length + 1 });
+  }
+  const rankPorUuid = new Map(ranked.map((r) => [r.uuid, r.rank]));
 
   const scores = collections.eventScores();
   const now = new Date();
-  if (ranked.length) {
+  if (todos.length) {
     await scores.bulkWrite(
-      ranked.map((r) => ({
+      todos.map((r) => ({
         updateOne: {
           filter: { eventId: event.eventId, uuid: r.uuid },
           update: {
             $set: {
               username: r.username,
               value: r.value,
-              rank: r.rank,
+              // Sem posição para quem está na lista negra.
+              rank: rankPorUuid.get(r.uuid) ?? null,
               reachedAt: r.reachedAt,
               updatedAt: now,
             },
@@ -410,8 +460,10 @@ export async function refreshScores(event) {
     );
   }
   // Quem saiu da apuração (lançamento estornado, membro sem eventos na janela)
-  // não pode ficar como lixo na tabela.
-  await scores.deleteMany({ eventId: event.eventId, uuid: { $nin: ranked.map((r) => r.uuid) } });
+  // não pode ficar como lixo na tabela. Compara com `todos`, e não com o que
+  // aparece: contra `ranked`, o bloqueado seria apagado a cada apuração — que
+  // é justamente o que paramos de fazer.
+  await scores.deleteMany({ eventId: event.eventId, uuid: { $nin: todos.map((r) => r.uuid) } });
 
   return ranked;
 }
@@ -429,13 +481,27 @@ async function rerank(eventId) {
   const scores = collections.eventScores();
   const rows = await scores.find({ eventId }).sort({ value: -1, reachedAt: 1, username: 1 }).toArray();
 
-  const ops = rows
+  // LISTA NEGRA: conta, mas não aparece. O crédito continua gravado (a raid
+  // aconteceu de verdade e entra no total da guilda — ver scoreTotal), só que o
+  // bloqueado não ocupa posição nem volta para quem monta ranking ou pódio.
+  // Filtrar AQUI cobre painel, /evento ranking e apuração de uma vez só.
+  const bloqueados = new Set(await blockedUuids());
+  const visiveis = rows.filter((r) => !bloqueados.has(r.uuid));
+
+  const ops = visiveis
     .map((r, i) => ({ r, rank: i + 1 }))
     .filter(({ r, rank }) => r.rank !== rank)
     .map(({ r, rank }) => ({ updateOne: { filter: { _id: r._id }, update: { $set: { rank } } } }));
+  // Quem foi bloqueado DEPOIS de pontuar fica com um rank velho gravado; sem
+  // limpar, ele reapareceria em qualquer lugar que leia o campo direto.
+  for (const r of rows) {
+    if (bloqueados.has(r.uuid) && r.rank != null) {
+      ops.push({ updateOne: { filter: { _id: r._id }, update: { $set: { rank: null } } } });
+    }
+  }
   if (ops.length) await scores.bulkWrite(ops);
 
-  return rows.map((r, i) => ({
+  return visiveis.map((r, i) => ({
     uuid: r.uuid,
     username: r.username,
     value: r.value,
@@ -462,13 +528,9 @@ async function rerank(eventId) {
  * @returns {Promise<number>} em quantos eventos a raid foi creditada
  */
 export async function creditGuildRaid({ uuid, username, at = new Date() }) {
-  // Métrica ao vivo não passa por refreshScores, então o filtro da lista negra
-  // precisa estar aqui também — senão o bloqueado voltaria a pontuar na raid.
-  if (await isEventBlocked(uuid)) {
-    log.info(`Guild raid de ${username} ignorada: jogador na lista negra de eventos.`);
-    return 0;
-  }
-
+  // A lista negra NÃO é filtrada aqui de propósito: a raid aconteceu, e o
+  // número da guilda tem de refletir isso. Quem esconde o bloqueado do ranking
+  // e do pódio é o rerank, na hora de exibir.
   const alvos = await collections
     .events()
     .find({
@@ -499,34 +561,35 @@ export async function creditGuildRaid({ uuid, username, at = new Date() }) {
 /**
  * Tira um jogador de todas as tabelas de evento e reordena o que sobrou.
  *
- * Usado quando alguém entra na lista negra: só filtrar a apuração dali em diante
- * deixaria o bloqueado no pódio dos eventos ao vivo (que não passam por
- * refreshScores) até o próximo recálculo.
+ * Usado quando alguém entra na lista negra: sem isto o bloqueado seguiria no
+ * pódio dos eventos ao vivo até o próximo recálculo.
  *
- * O livro-razão `pointsEvents` não é tocado — o histórico continua lá, o que
- * permite desfazer o bloqueio sem perder nada.
+ * NADA é apagado. A pontuação continua gravada em `eventScores` (a raid
+ * aconteceu, e conta no total da guilda) e o livro-razão `pointsEvents` também
+ * segue intacto — o rerank apenas tira o bloqueado das posições. É o que
+ * permite desfazer o bloqueio e ter o ranking de volta exatamente como era.
  *
  * @param {string} uuid
- * @returns {Promise<{removidos: number, eventos: string[]}>}
+ * @returns {Promise<{ocultados: number, eventos: string[]}>}
  */
 export async function purgeMemberScores(uuid) {
   const scores = collections.eventScores();
   const afetados = await scores.find({ uuid }, { projection: { eventId: 1 } }).toArray();
-  if (!afetados.length) return { removidos: 0, eventos: [] };
+  if (!afetados.length) return { ocultados: 0, eventos: [] };
 
   const eventos = [...new Set(afetados.map((r) => r.eventId))];
-  const res = await scores.deleteMany({ uuid });
   for (const eventId of eventos) await rerank(eventId);
 
-  return { removidos: res.deletedCount, eventos };
+  return { ocultados: afetados.length, eventos };
 }
 
 /** Lê a tabela secundária já apurada (sem tocar no livro-razão). */
-export function scoreboard(eventId, limit = 15) {
+export async function scoreboard(eventId, limit = 15) {
   // Mesma ordem da apuração, senão o painel mostraria um pódio e o anúncio outro.
+  const bloqueados = await blockedUuids();
   return collections
     .eventScores()
-    .find({ eventId })
+    .find({ eventId, ...(bloqueados.length ? { uuid: { $nin: bloqueados } } : {}) })
     .sort({ value: -1, reachedAt: 1, username: 1 })
     .limit(limit)
     .toArray();
@@ -537,8 +600,13 @@ export function memberScore(eventId, uuid) {
   return collections.eventScores().findOne({ eventId, uuid });
 }
 
-export function scoreCount(eventId) {
-  return collections.eventScores().countDocuments({ eventId });
+// Quantos jogadores APARECEM no ranking. Bloqueado não aparece, logo não entra
+// nesta conta — ao contrário de scoreTotal, que soma a métrica de todo mundo.
+export async function scoreCount(eventId) {
+  const bloqueados = await blockedUuids();
+  return collections
+    .eventScores()
+    .countDocuments({ eventId, ...(bloqueados.length ? { uuid: { $nin: bloqueados } } : {}) });
 }
 
 /**
@@ -546,8 +614,11 @@ export function scoreCount(eventId) {
  *
  * Não dá para somar as linhas do painel: `scoreboard` corta no top 10/15, e o
  * total tem que contar quem ficou de fora do recorte. Sai da tabela apurada, e
- * não do livro-razão, para o número bater exatamente com o que está na tela —
- * inclusive já sem quem está na lista negra.
+ * não do livro-razão, para o número bater com o que o painel apurou.
+ *
+ * Inclui quem está na lista negra, de propósito: a raid dele aconteceu e é
+ * atividade real da guilda. A lista negra tira a APARIÇÃO (nome no ranking,
+ * posição, prêmio), não o fato.
  *
  * @param {string} eventId
  * @returns {Promise<number>}
@@ -576,7 +647,7 @@ export function podiumPoints(points, rank) {
  * @param {Array<object>} rows
  * @param {object} [opts]
  * @param {{rank:number, value:number}} [opts.me]  posição de quem pediu
- * @param {number} [opts.total]                    participantes na tabela
+ * @param {number} [opts.total]                    jogadores que aparecem no ranking
  */
 export function renderEvent(event, rows, { me = null, total = null, sum = null } = {}) {
   const metric = METRICS[event.metric] ?? { label: event.metric, emoji: '🏆', unit: '' };
@@ -594,9 +665,14 @@ export function renderEvent(event, rows, { me = null, total = null, sum = null }
   // Somatório de TODO MUNDO, logo acima do primeiro lugar: o painel mostra só o
   // topo, então sem esta linha não dá para ver o esforço da guilda inteira —
   // nem perceber que o 1º lugar responde por metade do total.
+  //
+  // São DOIS números diferentes na tela, e a diferença tem de estar no texto:
+  // aqui vai a SOMA do que cada um fez (uma raid de 4 pessoas soma 4, porque
+  // cada uma ganhou o seu crédito), e no rodapé vai QUANTAS PESSOAS aparecem
+  // no ranking. Lidos como sinônimos, um dos dois parece estar errado.
   const somatorio =
     sum > 0
-      ? `${metric.emoji ? `${metric.emoji} ` : ''}**${formatValue(sum, metric)} ${metric.unit}** no total\n\n`
+      ? `${metric.emoji ? `${metric.emoji} ` : ''}**${formatValue(sum, metric)} ${metric.unit}** somando todos os jogadores\n\n`
       : '';
 
   // A descrição da staff vem antes da tabela, com as quebras que ela pediu.
@@ -608,10 +684,15 @@ export function renderEvent(event, rows, { me = null, total = null, sum = null }
   const fim = `<t:${unix(event.endAt)}:f>\n-# ${encerrado ? 'encerrado' : 'termina'} <t:${unix(event.endAt)}:R>`;
 
   const prizes = parsePrizes(event.prize).slice(0, event.podium);
+  // No modo bolo não há recompensa por posição para listar: o que a pessoa
+  // precisa saber é o total em jogo e que a fatia acompanha o esforço dela.
+  const bolo = event.prizePool?.total
+    ? `**${formatShare(event.prizePool.total)} ${event.prizePool.currency}** divididos entre o top ${event.podium}, na proporção do que cada um fizer.`
+    : null;
   const fields = [
     {
-      name: prizes.length > 1 ? '🎁 Recompensas' : '🎁 Recompensa',
-      value: renderPrizes(event.prize, event.podium),
+      name: !bolo && prizes.length > 1 ? '🎁 Recompensas' : '🎁 Recompensa',
+      value: bolo ?? renderPrizes(event.prize, event.podium),
       inline: false,
     },
     // DUAS colunas por linha. O Discord empacota 3 campos inline por linha, e o
@@ -650,7 +731,7 @@ export function renderEvent(event, rows, { me = null, total = null, sum = null }
     // (que é creditada na hora) faz o jogador achar que o placar travou.
     footer: {
       text:
-        (total !== null ? `${total} participante(s) — ` : '') +
+        (total !== null ? `${total} jogador(es) no ranking — ` : '') +
         (metric.live ? 'cada raid entra no placar em até 1 min' : 'guerras e XP entram na apuração de hora em hora'),
     },
     timestamp: new Date().toISOString(),
@@ -750,9 +831,14 @@ export async function endEvent(client, event, { cancelled = false } = {}) {
   const ranked = await refreshScores(frozen);
   const metric = METRICS[event.metric];
 
+  // Quem zerou não ocupa lugar no pódio — nem para receber fatia de zero, nem
+  // para aparecer na lista. Top 10 com 7 pessoas ativas anuncia 7 linhas.
+  const premiaveis = ranked.slice(0, event.podium).filter((r) => Number(r.value) > 0);
+  const fatias = event.prizePool?.total ? poolShares(premiaveis, event.prizePool.total) : null;
+
   // Vencedores levam o vínculo do Discord junto, para o anúncio poder marcar.
   const winners = [];
-  for (const r of ranked.slice(0, event.podium)) {
+  for (const r of premiaveis) {
     const member = await collections.members().findOne({ uuid: r.uuid }, { projection: { discordId: 1 } });
     winners.push({
       uuid: r.uuid,
@@ -761,6 +847,12 @@ export async function endEvent(client, event, { cancelled = false } = {}) {
       value: r.value,
       rank: r.rank,
       points: podiumPoints(event.points, r.rank),
+      // No modo bolo a recompensa é calculada e congelada aqui: o ranking muda
+      // depois do encerramento (lista negra, recontagem), e o que foi prometido
+      // no anúncio não pode mudar junto.
+      prize: fatias
+        ? `${formatShare(fatias.get(r.uuid) ?? 0)} ${event.prizePool.currency}`.trim()
+        : null,
     });
   }
 
@@ -795,7 +887,10 @@ async function announceWinners(client, event, metric) {
     ? event.winners.map((w) => {
         const quem = w.discordId ? `<@${w.discordId}> (**${w.username}**)` : `**${w.username}**`;
         const pts = w.points ? ` — \`+${w.points} pts\`` : '';
-        const premio = prizes[w.rank - 1] ? ` — 🎁 **${prizes[w.rank - 1]}**` : '';
+        // Modo bolo traz a fatia já calculada no vencedor; o clássico busca a
+        // recompensa da posição.
+        const recompensa = w.prize || prizes[w.rank - 1];
+        const premio = recompensa ? ` — 🎁 **${recompensa}**` : '';
         return `${placeLabel(w.rank)} ${quem} — ${formatValue(w.value, metric)} ${metric.unit}${premio}${pts}`;
       })
     : ['Ninguém pontuou — o evento terminou sem vencedores.'];

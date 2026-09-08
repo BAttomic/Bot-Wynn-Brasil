@@ -9,6 +9,8 @@ import { captureValue, recordCapture } from './territories.js';
 // escreve no livro-razão de guerra — só o snapshot escreve.
 import { recordWeeklyCompletion } from './points.js';
 import { creditGuildRaid } from './events.js';
+import { recordSoloRaid } from './aspects.js';
+import { blockedUuids } from './eventBlacklist.js';
 import { communityRow } from './leaderboardPanel.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { log } from '../util/log.js';
@@ -168,21 +170,46 @@ function warriorsInWindow(desde, afterMs = ATTRIB_AFTER_MAX_MS) {
 
 // currentGuildRaids.list traz a contagem por raid de cada membro. Quem subiu a
 // contagem da mesma raid, no mesmo poll e no mesmo mundo, estava no mesmo grupo.
+//
+// `list: null` NÃO é o mesmo que `{}`. Null é "a API não mandou o campo neste
+// poll"; `{}` é "mandou, e a pessoa não fez raid nenhuma". Tratar os dois como
+// zero era o que gerava raid fantasma — ver a marca d'água logo abaixo.
 function guildRaidCounts(guild) {
   const out = new Map();
   for (const rank of RANKS) {
     for (const [username, m] of Object.entries(guild.members[rank] || {})) {
+      const bruto = m.globalData?.currentGuildRaids?.list;
       out.set(m.uuid, {
         username,
         server: m.server || null,
-        list: m.globalData?.currentGuildRaids?.list || {},
+        list: bruto && typeof bruto === 'object' ? bruto : null,
       });
     }
   }
   return out;
 }
 
-export function detectGuildRaids(prev, curr) {
+// Maior contagem já vista, por membro e por raid. É contra ELA que se compara —
+// nunca contra o poll anterior.
+//
+// A API do Wynncraft às vezes devolve o campo zerado ou ausente e depois volta
+// ao normal. Comparando com o poll anterior, essa recuperação vira progresso
+// novo: o campo some (baseline vira 0), volta com 3, e o bot anuncia e credita
+// três raids que ninguém fez. É exatamente o bug que o contador de GUERRAS
+// teve, com o mesmo remédio — a história está no topo de services/progress.js.
+//
+// Contra a marca d'água o ruído fica impossível: o poll vazio não abaixa nada,
+// a volta para 3 encontra marca 3 e não credita, e só um 4 credita de verdade.
+const raidMarks = new Map();
+
+/**
+ * Grupos que terminaram uma guild raid entre dois polls.
+ *
+ * @param prev   snapshot anterior (só para saber o mundo de quem já saiu)
+ * @param curr   snapshot atual
+ * @param marcas marca d'água; injetável para teste, senão a do módulo
+ */
+export function detectGuildRaids(prev, curr, marcas = raidMarks) {
   if (!prev) return [];
   const before = guildRaidCounts(prev);
   const parties = new Map();
@@ -190,8 +217,25 @@ export function detectGuildRaids(prev, curr) {
   for (const [uuid, m] of guildRaidCounts(curr)) {
     const old = before.get(uuid);
     if (!old) continue;
+    // Sem dado agora não dá para afirmar nada — e, principalmente, não se
+    // rebaixa a marca por causa disso.
+    if (!m.list) continue;
+
+    const marca = marcas.get(uuid);
+    if (!marca) {
+      // Primeira vez que vemos dado bom desta pessoa: vira baseline, não credita.
+      // Sem isso, quem entra na guilda com 200 raids na conta geraria 200 avisos.
+      marcas.set(uuid, new Map(Object.entries(m.list).map(([r, c]) => [r, Number(c) || 0])));
+      continue;
+    }
+
     for (const [raid, count] of Object.entries(m.list)) {
-      if (Number(count) <= Number(old.list[raid] ?? 0)) continue;
+      const atual = Number(count);
+      if (!Number.isFinite(atual)) continue;
+      // Raid ausente na marca = pessoa nunca fez ESSA raid (a API omite as zeradas),
+      // e aí 0 é baseline legítimo — a pessoa já tem histórico bom conhecido.
+      if (atual <= (marca.get(raid) ?? 0)) continue;
+      marca.set(raid, atual);
 
       // O mundo separa dois grupos que terminaram a mesma raid no mesmo poll.
       // Sem mundo conhecido (deslogou logo depois), o jogador vira um grupo só
@@ -253,13 +297,21 @@ async function announceGuildRaids(client, cfg, guild, raids) {
   const channel = await fetchChannel(client, cfg.channels?.raids ?? cfg.channels?.activity);
   if (!channel) return;
 
+  // Quem está na lista negra de eventos não aparece aqui. A raid dele segue
+  // creditada e contando no total da guilda (ver creditGuildRaid) — o que a
+  // lista negra tira é a vitrine, não o fato.
+  const bloqueados = new Set(await blockedUuids());
+
   for (const { raid, server, members } of raids) {
-    const roster = members.map((m, i) => `\`${i + 1}.\` ${m.username}`).join('\n');
+    const visiveis = members.filter((m) => !bloqueados.has(m.uuid));
+    // Party inteira bloqueada: não sobra ninguém para anunciar.
+    if (!visiveis.length) continue;
+    const roster = visiveis.map((m, i) => `\`${i + 1}.\` ${m.username}`).join('\n');
     await channel.send({ embeds: [{
       title: raid,
       description: `**:crossed_swords: Guild Raid concluída**\n\n${roster}`,
       color: 0x9b59b6,
-      thumbnail: { url: `https://visage.surgeplay.com/bust/350/${members[0].username}` },
+      thumbnail: { url: `https://visage.surgeplay.com/bust/350/${visiveis[0].username}` },
       footer: { text: `${guild.name} [${guild.prefix}]${server ? ` — ${server}` : ''}` },
       timestamp: iso(),
     }] }).catch(() => {});
@@ -297,6 +349,11 @@ export async function runGuildWatch(client) {
         for (const mem of p.members) {
           await creditGuildRaid({ uuid: mem.uuid, username: mem.username, at });
         }
+        // Raid fechada SOZINHO não rende aspect para a guilda (a regra está em
+        // services/aspects.js). Só conta como solo com o mundo conhecido: sem
+        // mundo, o agrupamento acima já joga cada jogador num grupo separado, e
+        // um "solo" desses pode ser só um pedaço de uma party de verdade.
+        if (p.server && p.members.length === 1) await recordSoloRaid(p.members[0].uuid);
       }
       await announceGuildRaids(client, cfg, guild, raids);
     }

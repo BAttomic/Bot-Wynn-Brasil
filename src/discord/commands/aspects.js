@@ -130,7 +130,10 @@ export default {
 
       const a = all.find((x) => x.uuid === link.uuid);
       if (!a || (a.earned === 0 && a.delivered === 0)) {
-        return interaction.editReply(`**${link.username}** ainda não gerou aspects (a contagem começa do zero).`);
+        // Quem só fechou raid sozinho chega aqui com 0 gerado. Dizer apenas
+        // "não gerou" parece bug do bot, então a razão vai junto.
+        const porSolo = a?.solo ? ` As ${a.solo} raid(s) fechada(s) sozinho não rendem aspect.` : '';
+        return interaction.editReply(`**${link.username}** ainda não gerou aspects (a contagem começa do zero).${porSolo}`);
       }
       const gate = a.eligible ? '' : `\n-# ⏳ ${a.days ?? '?'} dia(s) na guilda — só recebe a partir de ${min} dias.`;
       const devendo =
@@ -140,9 +143,13 @@ export default {
       // A fração que sobra é informação legítima aqui (é o saldo real), mas o
       // número que importa para AGIR é quantas unidades inteiras dá para passar.
       const sobra = a.pending > 0 && a.pending % 1 ? ` (+${fmt(a.pending % 1)} acumulando)` : '';
+      // Sem isto, "fiz 10 raids e gerou 4" não fecha para quem confere na mão.
+      const solo = a.solo
+        ? `\n-# 🧍 ${a.solo} das ${a.raids} raid(s) foram fechadas sozinho e não rendem aspect.`
+        : '';
       return interaction.editReply(
         `✨ **${a.username}** — **${a.deliverable}** a entregar${sobra}\n` +
-          `> Já recebeu **${fmt(a.delivered)}** aspect(s) · ${rate}/raid.${gate}${devendo}`,
+          `> Já recebeu **${fmt(a.delivered)}** aspect(s) · ${rate}/raid.${gate}${devendo}${solo}`,
       );
     }
 
