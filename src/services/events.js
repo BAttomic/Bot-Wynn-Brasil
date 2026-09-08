@@ -303,6 +303,7 @@ export async function createEvent({
     eventId: await uniqueEventId(slugify(name)),
     name: name.trim(),
     metric: metricKey,
+    history: [{ at: now, action: 'criado', by: createdBy }],
     prize: String(prize ?? '').trim(),
     // Só grava se for bolo de verdade: `prizePool` ausente é o modo clássico,
     // uma recompensa por posição.
@@ -348,8 +349,94 @@ export function activeEvents(guildDiscordId = null) {
     .toArray();
 }
 
-export function listEvents(limit = 15) {
-  return collections.events().find({}).sort({ startAt: -1 }).limit(limit).toArray();
+/**
+ * Registra um passo na vida do evento, no próprio documento.
+ *
+ * A auditoria do servidor já recebe um aviso de cada ação, mas ela é um rio: para
+ * saber o que aconteceu com UM evento seria preciso garimpar meses de canal. Aqui
+ * o histórico anda junto do evento e cabe num embed.
+ *
+ * @param {string} eventId
+ * @param {'criado'|'pausado'|'retomado'|'encerrado'|'cancelado'} action
+ * @param {string|null} by  discordId de quem fez, ou null quando foi o próprio bot
+ */
+export async function logEventHistory(eventId, action, by = null) {
+  await collections
+    .events()
+    .updateOne({ eventId }, { $push: { history: { at: new Date(), action, by } } });
+}
+
+/**
+ * Congela o evento: para de creditar e para o relógio.
+ *
+ * Nada precisa ser filtrado a mais para a contagem parar — `activeEvents` e o
+ * gatilho da guild raid procuram `status: active`, então sair desse status já tira
+ * o evento do tick (não encerra sozinho), do crédito e da apuração.
+ */
+export async function pauseEvent(event, by = null) {
+  if (event.status !== 'active') return null;
+  const now = new Date();
+  await collections
+    .events()
+    .updateOne({ eventId: event.eventId }, { $set: { status: 'paused', pausedAt: now } });
+  await logEventHistory(event.eventId, 'pausado', by);
+  return { ...event, status: 'paused', pausedAt: now };
+}
+
+/**
+ * Volta a contar, empurrando o fim pelo tempo que ficou parado.
+ *
+ * Pausar duas horas termina duas horas mais tarde: a duração combinada com a
+ * guilda é a que vale, e uma pausa por problema do bot não pode encurtar o prazo
+ * de quem estava jogando. `pausedMs` acumula para o painel poder dizer quanto
+ * tempo o evento passou parado no total.
+ */
+export async function resumeEvent(event, by = null) {
+  if (event.status !== 'paused') return null;
+  const now = new Date();
+  const parado = Math.max(0, now.getTime() - new Date(event.pausedAt ?? now).getTime());
+  const endAt = new Date(new Date(event.endAt).getTime() + parado);
+
+  await collections.events().updateOne(
+    { eventId: event.eventId },
+    {
+      $set: { status: 'active', endAt },
+      $unset: { pausedAt: 1 },
+      $inc: { pausedMs: parado },
+    },
+  );
+  await logEventHistory(event.eventId, 'retomado', by);
+  return { ...event, status: 'active', endAt, pausedAt: null, pausedMs: (event.pausedMs ?? 0) + parado };
+}
+
+/**
+ * Quem pontuou mais recentemente. Sai da tabela apurada, então serve para as duas
+ * famílias de métrica: a de gatilho escreve ali na hora da raid, e a de apuração
+ * reescreve a cada ciclo.
+ *
+ * É "quem pontuou por último", e não um diário de cada crédito — a tabela guarda o
+ * acumulado por pessoa, não uma linha por lançamento.
+ */
+export async function recentCredits(eventId, limit = 8) {
+  const bloqueados = await blockedUuids();
+  return collections
+    .eventScores()
+    .find({ eventId, ...(bloqueados.length ? { uuid: { $nin: bloqueados } } : {}) })
+    .sort({ updatedAt: -1 })
+    .limit(limit)
+    .toArray();
+}
+/**
+ * Eventos mais recentes primeiro, opcionalmente de um status só.
+ * @param {{status?: string, limit?: number}} [opts]
+ */
+export function listEvents({ status = null, limit = 15 } = {}) {
+  return collections
+    .events()
+    .find(status ? { status } : {})
+    .sort({ startAt: -1 })
+    .limit(limit)
+    .toArray();
 }
 
 /** Evento ativo mais próximo do fim, ou o último encerrado se não houver ativo. */
@@ -653,7 +740,7 @@ export function podiumPoints(points, rank) {
 }
 
 /** "1 guild raid" / "4 guild raids" — plural só quando é plural mesmo. */
-function plural(n, unit) {
+export function plural(n, unit) {
   return Number(n) === 1 ? String(unit ?? '').replace(/s$/, '') : unit;
 }
 
@@ -667,7 +754,8 @@ function plural(n, unit) {
  */
 export function renderEvent(event, rows, { me = null, total = null, sum = null } = {}) {
   const metric = METRICS[event.metric] ?? { label: event.metric, emoji: '🏆', unit: '' };
-  const encerrado = event.status !== 'active';
+  const pausado = event.status === 'paused';
+  const encerrado = event.status !== 'active' && !pausado;
   const comecou = hasStarted(event);
 
   // A fatia de cada um, quando o prêmio é um bolo proporcional. Sai aqui, no
@@ -721,7 +809,11 @@ export function renderEvent(event, rows, { me = null, total = null, sum = null }
   // Início e fim aparecem SEMPRE, os dois, com data absoluta e relativa: a
   // absoluta responde "que dia é isso?" e a relativa, "falta quanto?".
   const inicio = `<t:${unix(event.startAt)}:f>\n-# <t:${unix(event.startAt)}:R>`;
-  const fim = `<t:${unix(event.endAt)}:f>\n-# ${encerrado ? 'encerrado' : 'termina'} <t:${unix(event.endAt)}:R>`;
+  // Pausado não anuncia prazo: o relógio está parado e o fim vai ser empurrado
+  // quando alguém retomar, então "termina em 2h" seria uma promessa falsa.
+  const fim = pausado
+    ? `<t:${unix(event.endAt)}:f>\n-# ⏸️ pausado — o prazo volta a correr quando a staff retomar`
+    : `<t:${unix(event.endAt)}:f>\n-# ${encerrado ? 'encerrado' : 'termina'} <t:${unix(event.endAt)}:R>`;
 
   const prizes = parsePrizes(event.prize).slice(0, event.podium);
   // No modo bolo não há recompensa por posição para listar: o que a pessoa
@@ -760,9 +852,9 @@ export function renderEvent(event, rows, { me = null, total = null, sum = null }
   }
 
   return {
-    title: `${encerrado ? '🏁' : comecou ? '🏆' : '📅'} ${event.name}`,
+    title: `${pausado ? '⏸️' : encerrado ? '🏁' : comecou ? '🏆' : '📅'} ${event.name}`,
     description: (descricao ? `${descricao}\n\n` : '') + somatorio + lines.join('\n'),
-    color: encerrado ? 0x95a5a6 : comecou ? 0xe67e22 : 0x3498db,
+    color: pausado ? 0xf39c12 : encerrado ? 0x95a5a6 : comecou ? 0xe67e22 : 0x3498db,
     fields,
     // O id não entra aqui: o painel é para os membros, e rodapé de embed nem
     // renderiza markdown (o `id` saía com as crases à mostra). Quem precisa do
@@ -911,6 +1003,7 @@ export async function endEvent(client, event, { cancelled = false } = {}) {
   await ensureEventPanel(client, { ...frozen, status: 'ended', winners });
   await announceWinners(client, { ...frozen, winners }, metric);
 
+  await logEventHistory(event.eventId, cancelled ? 'cancelado' : 'encerrado');
   log.info(`Evento ${event.eventId} encerrado com ${winners.length} vencedor(es).`);
   return { winners };
 }

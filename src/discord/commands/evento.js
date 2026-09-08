@@ -6,7 +6,6 @@ import {
   createEvent,
   getEvent,
   activeEvents,
-  listEvents,
   defaultEvent,
   refreshScores,
   scoreboard,
@@ -25,6 +24,11 @@ import {
 } from '../../services/events.js';
 import { takeSnapshots } from '../../services/progress.js';
 import { audit } from '../../services/audit.js';
+import {
+  ADMIN_PREFIX,
+  buildEventAdminPanel,
+  handleEventAdmin,
+} from '../../services/eventAdminPanel.js';
 import { wynn } from '../../wynn/api.js';
 import {
   blockMember,
@@ -215,20 +219,12 @@ async function ranking(interaction) {
   return interaction.editReply({ embeds: [renderEvent(event, rows, { me, total, sum })] });
 }
 
+// A lista virou um painel com filtro, detalhe e ação. É EFÊMERO por isso: os
+// botões encerram, pausam e barram gente, e um painel público com esses botões
+// seria um convite a clique alheio — a checagem de staff existe, mas o melhor
+// botão perigoso é o que a pessoa errada nem vê.
 async function listar(interaction) {
-  const events = await listEvents();
-  if (!events.length) return interaction.editReply('Nenhum evento registrado.');
-
-  const rotulo = { active: '🟢 ativo', ended: '🏁 encerrado', cancelled: '❌ cancelado' };
-  const lines = events.map((e) => {
-    const metric = METRICS[e.metric];
-    const vencedor = e.winners?.[0] ? ` — 🥇 ${e.winners[0].username}` : '';
-    return (
-      `• \`${e.eventId}\` **${e.name}** (${metric?.label ?? e.metric}) — ${rotulo[e.status] ?? e.status}` +
-      ` · ${e.status === 'active' ? 'termina' : 'terminou'} <t:${unix(e.endAt)}:R>${vencedor}`
-    );
-  });
-  return interaction.editReply(lines.join('\n').slice(0, 3900));
+  return interaction.editReply(await buildEventAdminPanel({}));
 }
 
 async function encerrar(interaction) {
@@ -485,12 +481,22 @@ export default {
     )
     .toJSON(),
 
+  // O painel de staff do /evento listar. O prefixo `ev:` é a dona da interação.
+  owns(interaction) {
+    return typeof interaction.customId === 'string' && interaction.customId.startsWith(ADMIN_PREFIX);
+  },
+
+  handleComponent(interaction) {
+    return handleEventAdmin(interaction, { isStaff: isStaff(interaction) });
+  },
+
   async execute(interaction) {
     const grupo = interaction.options.getSubcommandGroup(false);
     const sub = interaction.options.getSubcommand();
     // Só ranking e listar são públicos — e `listar` da blacklist não é o mesmo
     // `listar` do evento: lista negra é assunto de staff, sempre efêmero.
-    const publico = !grupo && (sub === 'ranking' || sub === 'listar');
+    // `listar` saiu do público: virou painel de staff (ver a nota em listar()).
+    const publico = !grupo && sub === 'ranking';
     await interaction.deferReply({ ephemeral: !publico });
 
     if (grupo === 'blacklist') {
