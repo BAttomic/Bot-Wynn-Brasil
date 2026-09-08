@@ -306,8 +306,13 @@ async function myRanks(stats) {
   const acc = {};
   for (const [key, field] of campos) {
     const meu = Number(stats?.[field] ?? 0);
-    acc[`acima_${key}`] = { $sum: { $cond: [{ $gt: [`${field}`, meu] }, 1, 0] } };
-    acc[`total_${key}`] = { $sum: { $cond: [{ $gt: [`${field}`, 0] }, 1, 0] } };
+    // O cifrão na frente é o que manda o Mongo LER O CAMPO. Sem ele vai o nome
+    // como string literal — e string ordena acima de número no BSON, então
+    // `"points" > 18940` dava verdadeiro para TODO documento. O efeito era todo
+    // mundo aparecendo em último lugar, em todas as categorias de uma vez.
+    const campo = `$${field}`;
+    acc[`acima_${key}`] = { $sum: { $cond: [{ $gt: [campo, meu] }, 1, 0] } };
+    acc[`total_${key}`] = { $sum: { $cond: [{ $gt: [campo, 0] }, 1, 0] } };
   }
   const [row] = await collections
     .guildStats()
