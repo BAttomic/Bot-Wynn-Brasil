@@ -290,6 +290,32 @@ export async function buildLeaderboardPanel(view, scope, page) {
 }
 
 /**
+ * Posição do jogador em CADA estatística, numa varredura só da coleção.
+ *
+ * Uma contagem por categoria seriam cinco idas ao banco a cada clique. Como
+ * todas leem a mesma coleção, um $group resolve: para cada campo saem dois
+ * números — quantos estão acima de mim, e quantos pontuaram naquilo.
+ *
+ * O segundo importa tanto quanto o primeiro. "#7" sozinho não diz nada; "#7 de
+ * 9" diz que quase todo mundo já fez, e "#7 de 60" diz o contrário.
+ *
+ * @param {object|null} stats  documento de guildStats do jogador
+ */
+async function myRanks(stats) {
+  const campos = [['points', 'points'], ...Object.entries(CATEGORIES).map(([k, c]) => [k, c.alltime])];
+  const acc = {};
+  for (const [key, field] of campos) {
+    const meu = Number(stats?.[field] ?? 0);
+    acc[`acima_${key}`] = { $sum: { $cond: [{ $gt: [`${field}`, meu] }, 1, 0] } };
+    acc[`total_${key}`] = { $sum: { $cond: [{ $gt: [`${field}`, 0] }, 1, 0] } };
+  }
+  const [row] = await collections
+    .guildStats()
+    .aggregate([{ $group: { _id: null, ...acc } }])
+    .toArray();
+  return row ?? {};
+}
+/**
  * Ficha pessoal: pontos, posição e a margem de inatividade que eles compram.
  * Responde só a quem clicou.
  * @param {import('discord.js').ButtonInteraction} interaction
@@ -303,8 +329,7 @@ export async function handleMyPoints(interaction) {
   const stats = await collections.guildStats().findOne({ uuid: linked.uuid });
   const points = stats?.points ?? 0;
 
-  // Posição = quantos têm mais pontos que você, +1.
-  const acima = await collections.guildStats().countDocuments({ points: { $gt: points } });
+  const ranks = await myRanks(stats);
 
   const { params } = await getConfig(interaction.guildId);
   const limite = allowanceDays(points, params);
@@ -315,10 +340,21 @@ export async function handleMyPoints(interaction) {
   const offline = daysOffline(player?.lastJoin);
   const online = !!player?.online;
 
+  // Uma linha por estatística, cada uma com a sua posição. Antes guerra, raid e
+  // semanal dividiam uma linha só e nenhuma tinha posição: dava para ver o
+  // número, mas não se ele era bom.
+  const posicao = (key, valor) =>
+    valor > 0
+      ? `\`#${(ranks[`acima_${key}`] ?? 0) + 1} de ${ranks[`total_${key}`] ?? 0}\``
+      : '—';
+  const linhaStat = (emoji, label, valor, key, curto = false) =>
+    `${emoji} **${label}** — \`${curto ? shortNumber(valor) : valor.toLocaleString('pt-BR')}\` · ${posicao(key, valor)}`;
+
   const linhas = [
-    `**Pontos:** \`${points}\` · **Posição:** \`#${acima + 1}\``,
-    `:crossed_swords: Guerras \`${stats?.guildWars ?? 0}\` · 🛡️ Guild Raids \`${stats?.guildRaids ?? 0}\` · 📅 Semanais \`${stats?.weeklyObjectives ?? 0}\``,
-    `📈 Guild XP contribuído: \`${shortNumber(stats?.contributed ?? 0)}\``,
+    linhaStat('🏆', 'Pontos', points, 'points'),
+    ...Object.entries(CATEGORIES).map(([key, c]) =>
+      linhaStat(c.emoji, c.label, Number(stats?.[c.alltime] ?? 0), key, c.short),
+    ),
     '',
     `**Margem de inatividade:** \`${limite} dias\` (${params.inactivityDays} base + ${perdao} de perdão)`,
   ];
