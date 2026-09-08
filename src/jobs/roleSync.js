@@ -5,6 +5,7 @@ import { audit } from '../services/audit.js';
 import { applyClassificationRoles, syncNickname } from '../services/registration.js';
 import { loadGuildIndex } from '../services/guildList.js';
 import { ensureAllyRole, syncAllyIdentity } from '../services/allyRoles.js';
+import { closeJoinedApplications } from '../services/applications.js';
 import {
   loadBanIndex,
   recordBan,
@@ -39,6 +40,14 @@ export async function runRoleSync(client) {
   const res = await fetchGuildMembers(prefix);
   if (!res) return;
   const rankByUuid = new Map(res.members.map((m) => [m.uuid, m.rank]));
+
+  // Quem está no roster cumpriu a fila de entrada: a candidatura fecha aqui.
+  //
+  // Vai o roster INTEIRO, e não só quem entrou neste ciclo, porque isso também
+  // resolve quem já estava dentro antes do estado `joined` existir — sem
+  // migração à parte. Depois da primeira passada não casa mais nada.
+  const fechadas = await closeJoinedApplications([...rankByUuid.keys()]);
+  if (fechadas) log.info(`Fila de entrada: ${fechadas} candidatura(s) fechada(s) por já estarem na guilda.`);
 
   // Nick ATUAL de quem aparece em algum roster, na grafia da API. Alimentado por
   // todo roster que este ciclo baixar — sai de graça, já que eles vêm de

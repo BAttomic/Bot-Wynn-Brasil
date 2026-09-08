@@ -3,6 +3,7 @@ import { fetchGuildMembers, isHigherRank } from './guildData.js';
 import { inactivityStatus } from './inactivityCheck.js';
 import { getConfig } from '../config/guildConfig.js';
 import { optional } from '../config/env.js';
+import { queueApplications } from './applications.js';
 
 // Cruza os membros da guilda (API) com os vínculos no banco (o "registro").
 //
@@ -38,22 +39,17 @@ export async function computeVerification() {
     else (isRecruiter ? shouldBeRecruit : recruitNoLink).push(nick(gm.username));
   }
 
-  // FILA DE ENTRADA: aprovados na votação que ainda não apareceram no jogo.
+  // FILA DE ENTRADA: aprovados na votação que ainda não entraram no jogo, em
+  // ordem de aprovação — que é a ordem em que a staff convida.
   //
-  // O critério de "já entrou" é o roster que a API acabou de devolver, e não o
-  // campo `inGuild` do registro: o flag depende do roleSync ter rodado, e um
-  // atraso dele deixaria alguém já dentro da guilda ocupando a fila.
+  // A consulta mora em services/applications.js porque o painel de CRUD da fila
+  // lê a mesma coisa, e duas versões de "fila" divergiriam no primeiro ajuste.
   //
-  // Ordem de chegada = ordem de aprovação (`decidedAt`), que é o que a staff
-  // usa para saber quem convidar primeiro.
+  // O filtro pelo roster fica aqui por cima, como rede: quem entra tem a
+  // candidatura fechada pelo roleSync, que roda a cada 10 min, e nessa janela a
+  // pessoa já está no jogo sem precisar continuar ocupando a fila.
   const naGuilda = new Set(res.members.map((m) => m.uuid));
-  const queue = (
-    await collections
-      .applications()
-      .find({ status: { $in: ['approved', 'invited'] }, decidedAt: { $ne: null } })
-      .sort({ decidedAt: 1 })
-      .toArray()
-  )
+  const queue = (await queueApplications())
     .filter((a) => !naGuilda.has(a.uuid))
     .map((a) => ({
       username: a.username,
@@ -249,7 +245,7 @@ export function verificationEmbed(data) {
       field('🔰 Membros verificados', 'Na guilda, Recruiter e com registro.', data.verified),
       field('⬆️ No Discord', 'Na guilda e com registro — falta virar Recruiter.', data.missingRecruiter),
       field('⬇️ Na guilda', 'Recruiter sem registro — deveria ser Recruit.', data.shouldBeRecruit),
-      field('🤙 Sem vínculo no Discord', 'Recruit sem registro — tá certo.', data.recruitNoLink),
+      field('🤙 Sem vínculo no Discord', 'Recruit sem registro — tá certo. Vale convidar para o Discord: com registro, vira Recruiter.', data.recruitNoLink),
       queueField(data.queue ?? []),
       ...inactivityFields(data.inactivity ?? { kick: [], waiting: [] }),
     ],

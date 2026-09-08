@@ -9,6 +9,132 @@ import { log } from '../util/log.js';
 // configurado. O caminho normal é por cargo do Discord.
 const FALLBACK_GUILD_RANKS = ['owner', 'chief'];
 
+// CICLO DE VIDA DE UMA CANDIDATURA
+//
+//   open → approved → invited → joined     caminho feliz
+//        ↘ rejected                        reprovada na votação
+//                    ↘ dropped             tirada da fila pela staff
+//
+// `approved` e `invited` são os DOIS estados em que a pessoa está na fila de
+// entrada: passou na votação e ainda não apareceu no jogo. Todo o resto é
+// terminal.
+//
+// `joined` existe porque sem ele a fila não fecha nunca. O critério antigo era
+// "aprovado e fora do roster agora", e isso trazia de volta quem entrou e depois
+// foi expulso por inatividade — a pessoa cumpriu a fila meses atrás e reaparecia
+// como se nunca tivesse entrado.
+export const QUEUE_STATUS = Object.freeze(['approved', 'invited']);
+
+const oid = (id) => (typeof id === 'string' ? new ObjectId(id) : id);
+
+/**
+ * A fila de entrada, em ordem de chegada (= ordem de aprovação).
+ * @returns {Promise<object[]>}
+ */
+export function queueApplications() {
+  return collections
+    .applications()
+    .find({ status: { $in: QUEUE_STATUS }, decidedAt: { $ne: null } })
+    .sort({ decidedAt: 1 })
+    .toArray();
+}
+
+/**
+ * Fecha a candidatura de quem JÁ ESTÁ na guilda.
+ *
+ * Chamado com o roster inteiro a cada ciclo do roleSync, e não só na transição
+ * de entrada: assim vale também para quem já estava dentro antes deste código
+ * existir, sem precisar de migração à parte. Depois da primeira passada não casa
+ * mais nada, então o custo some sozinho.
+ *
+ * @param {string[]} uuids  uuids que estão no roster agora
+ * @returns {Promise<number>} quantas candidaturas foram fechadas
+ */
+export async function closeJoinedApplications(uuids) {
+  if (!uuids?.length) return 0;
+  const res = await collections.applications().updateMany(
+    { uuid: { $in: [...uuids] }, status: { $in: QUEUE_STATUS } },
+    { $set: { status: 'joined', joinedAt: new Date() } },
+  );
+  return res.modifiedCount;
+}
+
+/**
+ * Marca que o convite foi enviado. `at` aceita data passada, para a staff
+ * registrar convite que já tinha mandado antes de o bot acompanhar isso.
+ */
+export async function markInvited(appId, { at = new Date(), by = null } = {}) {
+  const res = await collections.applications().findOneAndUpdate(
+    { _id: oid(appId) },
+    { $set: { status: 'invited', invitedAt: at, invitedBy: by } },
+    { returnDocument: 'after' },
+  );
+  return res ?? null;
+}
+
+/** Volta para "aprovado, sem convite" — desfaz um convite marcado por engano. */
+export async function unmarkInvited(appId) {
+  const res = await collections.applications().findOneAndUpdate(
+    { _id: oid(appId) },
+    { $set: { status: 'approved' }, $unset: { invitedAt: 1, invitedBy: 1 } },
+    { returnDocument: 'after' },
+  );
+  return res ?? null;
+}
+
+/**
+ * Tira da fila sem ter entrado: desistiu, sumiu, ou a staff resolveu de outro
+ * jeito. Fica gravado quem tirou — a fila é decisão de staff e some da vista de
+ * todo mundo depois disso.
+ */
+export async function dropFromQueue(appId, by = null) {
+  const res = await collections.applications().findOneAndUpdate(
+    { _id: oid(appId) },
+    { $set: { status: 'dropped', droppedAt: new Date(), droppedBy: by } },
+    { returnDocument: 'after' },
+  );
+  return res ?? null;
+}
+
+/** Marca manualmente que a pessoa entrou, sem esperar o roleSync perceber. */
+export async function markJoined(appId, by = null) {
+  const res = await collections.applications().findOneAndUpdate(
+    { _id: oid(appId) },
+    { $set: { status: 'joined', joinedAt: new Date(), joinedBy: by } },
+    { returnDocument: 'after' },
+  );
+  return res ?? null;
+}
+
+/**
+ * Põe alguém na fila sem candidatura no bot.
+ *
+ * Existe para o caso real de a aprovação ter acontecido fora daqui — combinada
+ * na call, aprovada antes de o bot existir. `decidedAt` define o lugar na fila,
+ * então aceitar uma data passada é o que permite encaixar a pessoa na posição
+ * certa em vez de jogá-la para o fim.
+ */
+export async function addToQueue({ uuid, username, discordId = null, decidedAt = new Date(), by = null }) {
+  const existente = await collections
+    .applications()
+    .findOne({ uuid, status: { $in: QUEUE_STATUS } });
+  if (existente) return { app: existente, created: false };
+
+  const doc = {
+    memberDiscordId: discordId,
+    uuid,
+    username,
+    status: 'approved',
+    createdAt: new Date(),
+    decidedAt,
+    decidedBy: by,
+    votes: [],
+    manual: true,
+  };
+  const { insertedId } = await collections.applications().insertOne(doc);
+  return { app: { ...doc, _id: insertedId }, created: true };
+}
+
 async function voterRoleIds(guildDiscordId) {
   const cfg = await getConfig(guildDiscordId);
   const raw = cfg.params?.voterRoles;
