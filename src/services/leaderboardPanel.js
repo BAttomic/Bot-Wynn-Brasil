@@ -151,17 +151,20 @@ function viewRow(view) {
 }
 
 /**
- * Navegação por setas: primeira, anterior, próxima, última.
+ * Navegação por setas, com o "Meus pontos" no meio: << < ⭐ > >>
  *
- * Some quando só há uma página — botão que não leva a lugar nenhum é ruído. As
- * pontas ficam desabilitadas no começo e no fim, em vez de dar a volta: clicar
- * em "anterior" na primeira página e cair na última confunde mais do que ajuda.
+ * A linha aparece SEMPRE, mesmo com uma página só — as setas apenas ficam
+ * desabilitadas. Mesma regra do botão de season: o lugar de cada coisa no
+ * painel não muda de uma hora para a outra, e o "Meus pontos" não pode sumir
+ * só porque o ranking encolheu para uma página.
+ *
+ * As pontas travam no começo e no fim em vez de dar a volta: clicar em
+ * "anterior" na primeira página e cair na última confunde mais do que ajuda.
  *
  * @param {number} page   página atual, base 0
  * @param {number} pages  quantas existem
  */
 function pageRow(page, pages) {
-  if (pages <= 1) return null;
   const noComeco = page <= 0;
   const noFim = page >= pages - 1;
   // O alvo vai clampado: botão desabilitado ainda precisa de um customId válido.
@@ -172,7 +175,7 @@ function pageRow(page, pages) {
   // para a 1ª. Quem lê o id ignora a tag.
   const seta = (tag, label, alvo, off) =>
     new ButtonBuilder()
-      .setCustomId(`${PAGE_PREFIX}${Math.min(Math.max(0, alvo), pages - 1)}:${tag}`)
+      .setCustomId(`${PAGE_PREFIX}${Math.min(Math.max(0, alvo), Math.max(0, pages - 1))}:${tag}`)
       .setLabel(label)
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(off);
@@ -180,14 +183,19 @@ function pageRow(page, pages) {
   return new ActionRowBuilder().addComponents(
     seta('f', '<<', 0, noComeco),
     seta('p', '<', page - 1, noComeco),
+    // No centro porque é o botão mais usado: na ponta da linha de escopo ele
+    // competia com a troca de season e passava despercebido.
+    new ButtonBuilder().setCustomId(ME_ID).setLabel('Meus pontos').setEmoji('⭐').setStyle(ButtonStyle.Success),
     seta('n', '>', page + 1, noFim),
     seta('l', '>>', pages - 1, noFim),
   );
 }
 
 /**
- * Escopo + atalho pessoal. Sem season ativa o botão aparece desativado, em vez
- * de sumir: o lugar dele no painel não muda de uma hora para a outra.
+ * Só o escopo. Sem season ativa o botão aparece desativado, em vez de sumir: o
+ * lugar dele no painel não muda de uma hora para a outra.
+ *
+ * O "Meus pontos" saiu daqui para o meio das setas (ver pageRow).
  * @param {string} scope
  * @param {{seasonId: string, offSeason?: boolean}|null} season
  */
@@ -203,11 +211,6 @@ function scopeRow(scope, season) {
   return new ActionRowBuilder().addComponents(
     scopeBtn(DEFAULT_SCOPE, 'Acumulado', '📊'),
     scopeBtn('season', season ? season.seasonId : 'Season', '🗓️', !season),
-    new ButtonBuilder()
-      .setCustomId(ME_ID)
-      .setLabel('Meus pontos')
-      .setEmoji('⭐')
-      .setStyle(ButtonStyle.Success),
   );
 }
 
@@ -277,10 +280,10 @@ export async function buildLeaderboardPanel(view, scope, page) {
 
   const embed = v === DEFAULT_VIEW ? renderPoints(doc, seasonId, pg) : renderCategory(v, doc, seasonId, pg);
 
-  const linhas = [viewRow(v), scopeRow(s, season)];
-  const paginas = pageRow(pg, pages);
-  if (paginas) linhas.push(paginas);
-  return brandWithLogo({ embeds: [embed], components: linhas });
+  return brandWithLogo({
+    embeds: [embed],
+    components: [viewRow(v), scopeRow(s, season), pageRow(pg, pages)],
+  });
 }
 
 /**
@@ -409,11 +412,89 @@ export async function ensureDownloadsPanel(client, guildDiscordId) {
   return ensurePanel(client, cfg.channels?.panel, DOWNLOADS_STATE_ID, downloadsPanelPayload(), 'downloads', [logoAttachment()]);
 }
 
-// Terceira mensagem fixa do canal de status, ABAIXO da de downloads. Mesma lógica
-// de ordem: só publica depois que a de downloads já existe.
+const SCORING_STATE_ID = 'scoringPanel';
+
+/**
+ * A mensagem que abre o bloco de contribuição: o que rende ponto, e para que o
+ * ponto serve.
+ *
+ * Todo número sai da config, nenhum é escrito à mão. Uma tabela decorada aqui
+ * viraria mentira no dia em que a staff mexesse num peso — e mentira num painel
+ * fixo é pior que ausência de informação, porque ninguém desconfia dela.
+ *
+ * @param {import('../config/guildConfig.js').GuildParams} params
+ */
+function scoringPanelPayload(params) {
+  const w = params?.pointsWeights ?? {};
+  const n = (v) => Number(v ?? 0).toLocaleString('pt-BR');
+  const semanalMax = Math.round(Number(w.weekly ?? 0) * (1 + (Number(params?.weeklyStreakBonusMax) || 0)));
+  const bonusSemana = Math.round((Number(params?.weeklyStreakBonusPerWeek) || 0) * 100);
+
+  return brandWithLogo({
+    embeds: [
+      {
+        title: '📖 Como ganhar pontos',
+        color: 0xf1c40f,
+        description:
+          'Tudo que você faz pela guilda vira ponto, e o ranking abaixo é a soma disso.' +
+          ' A contagem é automática: não precisa avisar ninguém.',
+        fields: [
+          {
+            name: `${CATEGORIES.guildraid.emoji} ${CATEGORIES.guildraid.label} — ${n(w.guildRaid)} pts`,
+            value:
+              `> ${n(w.guildRaid)} pontos para **cada** membro nosso no grupo, no instante em que a raid fecha.` +
+              `\n> Party de 2 ou mais ainda rende **${n(params?.aspectsPerGuildRaid)}** aspect por cabeça — sozinho não rende.`,
+          },
+          {
+            name: `${CATEGORIES.war.emoji} ${CATEGORIES.war.label} — ${n(w.war)} pts`,
+            value: `> ${n(w.war)} pontos por guerra, multiplicados pelo valor do território (teto de x${params?.territoryMultiplierCap}).`,
+          },
+          {
+            name: `${CATEGORIES.xp.emoji} ${CATEGORIES.xp.label} — ${n(w.contribPerMillion)} pt`,
+            value: `> ${n(w.contribPerMillion)} ponto a cada ${n(1e6)} de Guild XP doado ao cofre.`,
+          },
+          {
+            name: `${CATEGORIES.weekly.emoji} ${CATEGORIES.weekly.label} — ${n(w.weekly)} pts`,
+            value:
+              `> ${n(w.weekly)} pontos por objetivo concluído, **+${bonusSemana}%** por semana seguida` +
+              ` — até ${n(semanalMax)} pts numa sequência longa.`,
+          },
+          {
+            name: '🎁 Para que servem',
+            value:
+              `> **Margem de inatividade:** ${n(params?.inactivityDays)} dias base, mais 1 dia a cada` +
+              ` ${n(params?.inactivityForgivenessPerPoints)} pontos (teto de ${n(params?.inactivityForgivenessMaxDays)}).` +
+              ` Quem contribui tem mais folga para sumir sem perder o slot.` +
+              `\n> **Recompensas:** com ${n(params?.rewardMinGuildDays)} dias de guilda você entra na fila de Tomes` +
+              ` e recebe os aspects que as suas guild raids geraram.`,
+          },
+        ],
+      },
+    ],
+  });
+}
+
+// Primeira das duas mensagens do bloco de contribuição, logo acima do ranking.
+// Espera a de downloads nascer, pela mesma razão que as outras: a ordem no canal
+// é a ordem em que elas são publicadas.
+export async function ensureScoringPanel(client, guildDiscordId) {
+  const already = await panelMessageId(SCORING_STATE_ID);
+  if (!already && !(await panelMessageId(DOWNLOADS_STATE_ID))) return null;
+  const cfg = await getConfig(guildDiscordId);
+  return ensurePanel(
+    client,
+    cfg.channels?.panel,
+    SCORING_STATE_ID,
+    scoringPanelPayload(cfg.params),
+    'como pontuar',
+    [logoAttachment()],
+  );
+}
+// Fecha o bloco de contribuição, ABAIXO da mensagem de "como pontuar". Mesma
+// lógica de ordem: só publica depois que a anterior já existe.
 export async function ensureLeaderboardPanel(client, guildDiscordId) {
   const already = await panelMessageId(STATE_ID);
-  if (!already && !(await panelMessageId(DOWNLOADS_STATE_ID))) return null; // espera downloads nascer
+  if (!already && !(await panelMessageId(SCORING_STATE_ID))) return null; // espera o 'como pontuar' nascer
   const cfg = await getConfig(guildDiscordId);
   const payload = brandWithLogo(await buildLeaderboardPanel());
   return ensurePanel(client, cfg.channels?.panel, STATE_ID, payload, 'leaderboards', [logoAttachment()]);
