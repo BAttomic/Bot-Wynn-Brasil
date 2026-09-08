@@ -8,7 +8,7 @@ import { captureValue, recordCapture } from './territories.js';
 // Território não pontua mais ninguém individualmente, então este arquivo não
 // escreve no livro-razão de guerra — só o snapshot escreve.
 import { recordWeeklyCompletion } from './points.js';
-import { creditGuildRaid } from './events.js';
+import { creditGuildRaidParty } from './events.js';
 import { recordSoloRaid } from './aspects.js';
 import { blockedUuids } from './eventBlacklist.js';
 import { communityRow, downloadsRow, downloadsField } from './leaderboardPanel.js';
@@ -298,7 +298,7 @@ async function announceGuildRaids(client, cfg, guild, raids) {
   if (!channel) return;
 
   // Quem está na lista negra de eventos não aparece aqui. A raid dele segue
-  // creditada e contando no total da guilda (ver creditGuildRaid) — o que a
+  // creditada e contando no total da guilda (ver creditGuildRaidParty) — o que a
   // lista negra tira é a vitrine, não o fato.
   const bloqueados = new Set(await blockedUuids());
 
@@ -346,9 +346,7 @@ export async function runGuildWatch(client) {
       // evento anda — no instante da raid, não na apuração do dia seguinte.
       const at = new Date();
       for (const p of raids) {
-        for (const mem of p.members) {
-          await creditGuildRaid({ uuid: mem.uuid, username: mem.username, at });
-        }
+        await creditGuildRaidParty({ members: p.members, at });
         // Raid fechada SOZINHO não rende aspect para a guilda (a regra está em
         // services/aspects.js). Só conta como solo com o mundo conhecido: sem
         // mundo, o agrupamento acima já joga cada jogador num grupo separado, e

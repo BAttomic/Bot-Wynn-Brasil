@@ -386,7 +386,7 @@ export async function refreshScores(event) {
   const metric = METRICS[event.metric];
   if (!metric) return [];
   // Métrica com gatilho não se reconstrói do livro-razão: a tabela JÁ é o
-  // registro, escrita no instante de cada raid (ver creditGuildRaid). Aqui só
+  // registro, escrita no instante de cada raid (ver creditGuildRaidParty). Aqui só
   // as posições são refeitas.
   if (metric.live) return rerank(event.eventId);
 
@@ -524,10 +524,12 @@ async function rerank(eventId) {
  * Raid feita com o bot fora do ar não entra no evento (os pontos, esses, a
  * contagem diária recupera depois).
  *
- * @param {{uuid: string, username: string, at?: Date}} raid
+ * @param {{members: Array<{uuid: string, username: string}>, at?: Date}} raid  o grupo inteiro
  * @returns {Promise<number>} em quantos eventos a raid foi creditada
  */
-export async function creditGuildRaid({ uuid, username, at = new Date() }) {
+export async function creditGuildRaidParty({ members, at = new Date() }) {
+  if (!members?.length) return 0;
+
   // A lista negra NÃO é filtrada aqui de propósito: a raid aconteceu, e o
   // número da guilda tem de refletir isso. Quem esconde o bloqueado do ranking
   // e do pódio é o rerank, na hora de exibir.
@@ -543,18 +545,27 @@ export async function creditGuildRaid({ uuid, username, at = new Date() }) {
   if (!alvos.length) return 0;
 
   for (const event of alvos) {
-    await collections.eventScores().updateOne(
-      { eventId: event.eventId, uuid },
-      {
-        $inc: { value: 1 },
-        $set: { username, reachedAt: at, updatedAt: at },
-        $setOnInsert: { firstAt: at },
-      },
-      { upsert: true },
-    );
+    // A RAID conta UMA vez; o CRÉDITO, uma por pessoa. Quatro membros numa raid
+    // são quatro créditos no ranking (a disputa é individual) e uma raid só no
+    // total da guilda — que é o número de raids feitas, não de créditos dados.
+    await collections.events().updateOne({ eventId: event.eventId }, { $inc: { raids: 1 } });
+
+    for (const { uuid, username } of members) {
+      await collections.eventScores().updateOne(
+        { eventId: event.eventId, uuid },
+        {
+          $inc: { value: 1 },
+          $set: { username, reachedAt: at, updatedAt: at },
+          $setOnInsert: { firstAt: at },
+        },
+        { upsert: true },
+      );
+    }
+    // Um rerank por evento, e não por pessoa: a ordem só precisa fechar depois
+    // que o grupo inteiro entrou.
     await rerank(event.eventId);
   }
-  log.info(`Guild raid de ${username} creditada em ${alvos.length} evento(s).`);
+  log.info(`Guild raid de ${members.length} membro(s) creditada em ${alvos.length} evento(s).`);
   return alvos.length;
 }
 
@@ -641,6 +652,11 @@ export function podiumPoints(points, rank) {
   return Math.round(points / 2 ** (rank - 1));
 }
 
+/** "1 guild raid" / "4 guild raids" — plural só quando é plural mesmo. */
+function plural(n, unit) {
+  return Number(n) === 1 ? String(unit ?? '').replace(/s$/, '') : unit;
+}
+
 /**
  * Embed do ranking. Serve tanto para o painel fixo quanto para /evento ranking.
  * @param {object} event
@@ -654,11 +670,26 @@ export function renderEvent(event, rows, { me = null, total = null, sum = null }
   const encerrado = event.status !== 'active';
   const comecou = hasStarted(event);
 
+  // A fatia de cada um, quando o prêmio é um bolo proporcional. Sai aqui, no
+  // ranking ao vivo, e não só na apuração: saber que a sua posição hoje vale
+  // 8.2 STX é o que faz alguém entrar em mais uma raid antes de o evento fechar.
+  const fatias = event.prizePool?.total
+    ? poolShares(
+        rows.slice(0, event.podium).filter((r) => Number(r.value) > 0),
+        event.prizePool.total,
+      )
+    : null;
+
   const lines = rows.length
     ? rows.map((r, i) => {
         const pos = MEDALS[i] || `\`${String(i + 1).padStart(2, ' ')}\``;
-        const premiado = i < event.podium ? ' 🎁' : '';
-        return `${pos} **${r.username}** — ${formatValue(r.value, metric)} ${metric.unit}${premiado}`;
+        const fatia = fatias?.get(r.uuid);
+        const premiado = fatia
+          ? ` 🎁 **${formatShare(fatia)} ${event.prizePool.currency}**`
+          : i < event.podium
+            ? ' 🎁'
+            : '';
+        return `${pos} **${r.username}** — ${formatValue(r.value, metric)} ${plural(r.value, metric.unit)}${premiado}`;
       })
     : [comecou ? 'Ninguém pontuou ainda.' : '_A contagem começa quando o evento abrir._'];
 
@@ -666,14 +697,20 @@ export function renderEvent(event, rows, { me = null, total = null, sum = null }
   // topo, então sem esta linha não dá para ver o esforço da guilda inteira —
   // nem perceber que o 1º lugar responde por metade do total.
   //
-  // São DOIS números diferentes na tela, e a diferença tem de estar no texto:
-  // aqui vai a SOMA do que cada um fez (uma raid de 4 pessoas soma 4, porque
-  // cada uma ganhou o seu crédito), e no rodapé vai QUANTAS PESSOAS aparecem
-  // no ranking. Lidos como sinônimos, um dos dois parece estar errado.
+  // Para guild raid o número da guilda é quantas RAIDS foram feitas, não a soma
+  // dos créditos: uma raid de 4 membros é UMA raid, ainda que renda 4 créditos
+  // no ranking individual. `event.raids` é contado uma vez por grupo detectado
+  // (ver creditGuildRaidParty).
+  //
+  // Evento antigo não tem o campo e cai na soma, que era o que ele mostrava
+  // desde sempre — melhor um número velho conhecido do que um zero novo.
+  const emoji = metric.emoji ? `${metric.emoji} ` : '';
   const somatorio =
-    sum > 0
-      ? `${metric.emoji ? `${metric.emoji} ` : ''}**${formatValue(sum, metric)} ${metric.unit}** somando todos os jogadores\n\n`
-      : '';
+    metric.live && event.raids != null
+      ? `${emoji}**${event.raids} ${plural(event.raids, metric.unit)}** ${Number(event.raids) === 1 ? 'concluída' : 'concluídas'} pela guilda\n\n`
+      : sum > 0
+        ? `${emoji}**${formatValue(sum, metric)} ${metric.unit}** somando todos os jogadores\n\n`
+        : '';
 
   // A descrição da staff vem antes da tabela, com as quebras que ela pediu.
   const descricao = multiline(event.description);
