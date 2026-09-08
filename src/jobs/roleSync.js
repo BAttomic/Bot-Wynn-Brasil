@@ -6,6 +6,7 @@ import { applyClassificationRoles, syncNickname } from '../services/registration
 import { loadGuildIndex } from '../services/guildList.js';
 import { ensureAllyRole, syncAllyIdentity } from '../services/allyRoles.js';
 import { closeJoinedApplications } from '../services/applications.js';
+import { sendGuildWelcome } from '../services/recruitWelcome.js';
 import {
   loadBanIndex,
   recordBan,
@@ -158,6 +159,10 @@ export async function runRoleSync(client) {
       update.joinedGuildAt = new Date();
       update.guildConfirmed = true;
       audit(client, guildDiscordId, `✅ <@${m.discordId}> (**${m.username}**) entrou na guilda como ${rank}.`);
+      // Só na TRANSIÇÃO. Se ficasse junto do fechamento em massa da fila, a
+      // primeira passada depois do deploy mencionaria a guilda inteira de uma
+      // vez — 80 pings de boas-vindas para gente que entrou meses atrás.
+      await sendGuildWelcome(client, cfg, { discordId: m.discordId, username: m.username });
       // Voltou abaixo do que já foi: avisa a staff, que promove no jogo.
       if (isHigherRank(m.peakRank, rank)) {
         audit(
