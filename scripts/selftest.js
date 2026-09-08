@@ -5,6 +5,7 @@
 // Bate na API real do Wynncraft e usa um banco Mongo DESCARTÁVEL (criado e
 // apagado ao final). Não toca no banco de produção nem no servidor do Discord.
 
+import { readdirSync } from 'node:fs';
 import { loadEnv } from '../src/config/env.js';
 
 let pass = 0;
@@ -51,6 +52,23 @@ async function main() {
   }
   check('nenhuma opção passa de 25 choices', estouros, []);
   check('todos os comandos foram construídos', COMMANDS.length > 0, true);
+
+  // Comando novo esquecido na lista do commandLoader não dá erro nenhum: o
+  // arquivo importa sozinho, nada estoura no boot, e o sintoma só aparece em
+  // produção — o botão dele cai em "Este botão não responde mais", porque o
+  // `owns()` nunca chega a ser consultado. Foi assim que o /fila nasceu órfão.
+  const arquivos = readdirSync(new URL('../src/discord/commands/', import.meta.url)).filter((f) => f.endsWith('.js'));
+  const registrados = new Set(COMMANDS.map((c) => c.data.name));
+  const foraDaLista = [];
+  for (const f of arquivos) {
+    const nome = (await import(`../src/discord/commands/${f}`)).default?.data?.name;
+    if (nome && !registrados.has(nome)) foraDaLista.push(`${f} (/${nome})`);
+  }
+  check('todo comando de commands/ está no commandLoader', foraDaLista, []);
+
+  // Sem `owns`, o comando até é registrado, mas os botões dele continuam órfãos.
+  const semOwns = COMMANDS.filter((c) => typeof c.handleComponent === 'function' && typeof c.owns !== 'function');
+  check('todo comando com handleComponent tem owns', semOwns.map((c) => c.data.name), []);
 
   // ---------------------------------------------------------------- API
   section('1. API do Wynncraft responde');
