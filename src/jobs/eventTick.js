@@ -7,6 +7,7 @@ import {
   refreshScores,
   ensureEventPanel,
   endEvent,
+  seedRaidCount,
 } from '../services/events.js';
 import { takeSnapshots } from '../services/progress.js';
 import { log } from '../util/log.js';
@@ -32,7 +33,10 @@ export async function runEventTick(client) {
   let encerrados = 0;
   let abertos = 0;
 
-  for (const event of events) {
+  for (let event of events) {
+    // Evento que nasceu antes do contador de raids ganha o piso aqui, uma vez só.
+    event = await seedRaidCount(event);
+
     if (!hasStarted(event, now)) {
       // Ainda não abriu: o painel só mostra a contagem regressiva.
       await ensureEventPanel(client, event);

@@ -417,6 +417,38 @@ export async function resumeEvent(event, by = null) {
  * É "quem pontuou por último", e não um diário de cada crédito — a tabela guarda o
  * acumulado por pessoa, não uma linha por lançamento.
  */
+/**
+ * Semeia `raids` num evento que já estava aberto antes do campo existir.
+ *
+ * O número exato não é recuperável do passado: a tabela guarda o acumulado por
+ * pessoa, e 4 créditos tanto podem ser UMA raid de quatro quanto QUATRO raids de
+ * um. Mas existe um piso garantido — ninguém pode ter mais raids do que a guilda
+ * fez —, e o maior placar individual é exatamente esse piso.
+ *
+ * Erra só quando dois grupos diferentes raidaram sem ninguém em comum, e erra
+ * para baixo. É melhor que as duas alternativas: somar créditos (uma raid de 4
+ * vira 4) ou esconder a linha (que foi o que eu fiz antes, e some com uma
+ * informação que a staff quer ver).
+ *
+ * Roda uma vez por evento. Do primeiro grupo detectado em diante a contagem é
+ * exata, porque aí ela vem de creditGuildRaidParty.
+ */
+export async function seedRaidCount(event) {
+  if (!METRICS[event.metric]?.live || event.raids != null) return event;
+
+  const [maior] = await collections
+    .eventScores()
+    .find({ eventId: event.eventId })
+    .sort({ value: -1 })
+    .limit(1)
+    .toArray();
+  const raids = Number(maior?.value ?? 0);
+
+  await collections.events().updateOne({ eventId: event.eventId }, { $set: { raids } });
+  if (raids) log.info(`Evento ${event.eventId}: contagem de raids semeada em ${raids} (piso pelo maior placar).`);
+  return { ...event, raids };
+}
+
 export async function recentCredits(eventId, limit = 8) {
   const bloqueados = await blockedUuids();
   return collections
