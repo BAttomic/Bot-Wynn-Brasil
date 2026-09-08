@@ -2,9 +2,21 @@ import { wynn } from '../wynn/api.js';
 
 export const RANKS = ['owner', 'chief', 'strategist', 'captain', 'recruiter', 'recruit'];
 
+/**
+ * Nomes de rank que já foram usados e ainda podem existir como CARGO no
+ * Discord.
+ *
+ * Renomear o rótulo abaixo não renomeia o cargo lá. Quem varre os cargos do
+ * servidor por nome (services/reconciliation.js) deixaria de reconhecer o cargo
+ * antigo e pararia de avisar — em silêncio, que é o pior jeito de parar.
+ * Carregar o nome velho aqui custa nada e não obriga a renomear o servidor no
+ * mesmo minuto do deploy.
+ */
+export const RANK_ALIASES = Object.freeze(['Sub-líder']);
+
 export const RANK_LABEL = {
   owner: 'Líder',
-  chief: 'Sub-líder',
+  chief: 'Chefe',
   strategist: 'Estrategista',
   captain: 'Capitão',
   recruiter: 'Recrutador',

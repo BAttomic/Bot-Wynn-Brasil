@@ -187,7 +187,7 @@ const KIND_LABEL = {
 // Garante que o membro tenha EXATAMENTE um dos três cargos de classificação.
 // Um banido também perde o cargo de comunidade: o acesso dele é só a black-list.
 //
-// Os cargos de RANK (Capitão, Estrategista, Sub-líder, Líder) NUNCA entram aqui.
+// Os cargos de RANK (Capitão, Estrategista, Chefe, Líder) NUNCA entram aqui.
 // Eles saem do nick que a pessoa digitou, que ninguém verificou — dar Capitão a
 // quem só escreveu o nick de um Capitão seria entregar a guilda. Rank é sempre
 // aplicado à mão pela staff; o bot no máximo avisa (ver peakRank em roleSync).

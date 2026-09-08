@@ -18,7 +18,7 @@ import { log } from '../util/log.js';
  * Sincroniza a classificação de cada vínculo (membro / neutro / banido), o
  * apelido e o cargo mais alto já alcançado.
  *
- * Os cargos de RANK (Líder, Sub-líder, …) NÃO são automáticos: são gestão manual
+ * Os cargos de RANK (Líder, Chefe, …) NÃO são automáticos: são gestão manual
  * da staff. O rank só é gravado no banco, para /verificar e para o peakRank.
  *
  * Rodar isto de novo é o que pega quem entrou na guilda da black-list DEPOIS de

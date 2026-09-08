@@ -35,7 +35,7 @@ export const CHANNEL_KEYS = Object.freeze([
 /**
  * Chaves de cargo aceitas por `/config role`. O bot só aplica estes.
  *
- * Os ranks da guilda (Líder, Sub-líder, Estrategista, Capitão, Recrutador,
+ * Os ranks da guilda (Líder, Chefe, Estrategista, Capitão, Recrutador,
  * Recruta) NÃO estão aqui de propósito: eles derivam de um nick que ninguém
  * verificou, e são gestão manual da staff.
  * @type {readonly string[]}

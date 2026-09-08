@@ -4,7 +4,7 @@ import { wynn, isAmbiguousPlayer } from '../../wynn/api.js';
 
 const RANK_LABEL = {
   owner: 'Líder',
-  chief: 'Sub-líder',
+  chief: 'Chefe',
   strategist: 'Estrategista',
   captain: 'Capitão',
   recruiter: 'Recrutador',

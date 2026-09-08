@@ -1,6 +1,6 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from 'discord.js';
 import { collections } from '../db/mongo.js';
-import { fetchGuildMembers, RANKS, RANK_LABEL } from './guildData.js';
+import { fetchGuildMembers, RANKS, RANK_LABEL, RANK_ALIASES } from './guildData.js';
 import {
   applyClassificationRoles,
   syncNickname,
@@ -63,7 +63,12 @@ function norm(s) {
 }
 
 /** Nomes de cargo que denotam um RANK da guilda (todo rank exige estar na guilda). */
-const RANK_NAMES = new Set([...RANKS.map(norm), ...Object.values(RANK_LABEL).map(norm)]);
+const RANK_NAMES = new Set([
+  ...RANKS.map(norm),
+  ...Object.values(RANK_LABEL).map(norm),
+  // Nome antigo do cargo, que pode não ter sido renomeado no servidor.
+  ...RANK_ALIASES.map(norm),
+]);
 
 /** IDs dos cargos do servidor cujo nome bate com um rank da guilda. */
 function rankRoleIds(guild) {
