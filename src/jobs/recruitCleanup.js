@@ -28,9 +28,39 @@ async function apagar(client, channelId, messageId) {
   return true;
 }
 
+/**
+ * As boas-vindas de quem entrou na guilda, 24h depois da entrada.
+ *
+ * Elas mencionam a pessoa, então ocupam o canal de recrutamento — que já divide
+ * espaço com candidatura e votação. O aviso serve no dia em que alguém entra,
+ * não na semana seguinte, e sem isto sobraria uma mensagem por membro novo,
+ * para sempre.
+ *
+ * Os ids ficam no próprio vínculo (services/recruitWelcome.js os devolve, e o
+ * roleSync grava junto do `joinedGuildAt`).
+ */
+async function limparBoasVindas(client, cutoff) {
+  const membros = collections.members();
+  const pendentes = await membros
+    .find({ welcomeMessageId: { $exists: true, $ne: null }, joinedGuildAt: { $lte: cutoff } })
+    .toArray();
+
+  let removidas = 0;
+  for (const m of pendentes) {
+    if (await apagar(client, m.welcomeChannelId, m.welcomeMessageId)) removidas += 1;
+    // Desmarca mesmo se a mensagem já não existia, senão o job reprocessa a
+    // mesma pessoa a cada ciclo.
+    await membros.updateOne({ uuid: m.uuid }, { $unset: { welcomeMessageId: '', welcomeChannelId: '' } });
+  }
+  return removidas;
+}
+
 export async function runRecruitCleanup(client) {
   const cutoff = new Date(Date.now() - MAX_AGE_MS);
   const apps = collections.applications();
+
+  const boasVindas = await limparBoasVindas(client, cutoff);
+  if (boasVindas) log.info(`Recrutamento: ${boasVindas} mensagem(ns) de boas-vindas apagada(s) após 24h.`);
   const pending = await apps
     .find({
       // Sem veredito ainda (candidatura aberta) não entra: quem cuida do prazo

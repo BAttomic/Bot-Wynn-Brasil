@@ -1,8 +1,7 @@
-import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
+import { SlashCommandBuilder } from 'discord.js';
 import { ObjectId } from 'mongodb';
 import { collections } from '../../db/mongo.js';
 import { getConfig } from '../../config/guildConfig.js';
-import { WELCOME_PREFIX, handleWelcomeDismiss } from '../../services/recruitWelcome.js';
 import {
   eligibleVoterCount,
   isEligibleVoter,
@@ -174,20 +173,10 @@ export default {
 
   // Botões: apply:vote:*, apply:invited:*, e os do painel de recrutamento.
   owns(interaction) {
-    return (
-      interaction.isButton?.() &&
-      (interaction.customId.startsWith('apply:') || interaction.customId.startsWith(WELCOME_PREFIX))
-    );
+    return interaction.isButton?.() && interaction.customId.startsWith('apply:');
   },
 
   async handleComponent(interaction) {
-    // Boas-vindas de quem entrou na guilda: o dono do botão é quem foi
-    // mencionado, e a checagem mora no próprio handler.
-    if (interaction.customId.startsWith(WELCOME_PREFIX)) {
-      const isStaff = !!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
-      return handleWelcomeDismiss(interaction, { isStaff });
-    }
-
     const [, action, appId, choice] = interaction.customId.split(':');
     if (action === 'vote') return handleVote(interaction, appId, choice);
     if (action === 'invited') return handleInvited(interaction, appId);
