@@ -2,6 +2,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { getConfig } from '../config/guildConfig.js';
 import { ensurePanel } from './panels.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
+import { QUEUE_PREFIX, queueField } from './recruitQueuePanel.js';
 
 /**
  * @param {Array<{id: string, label: string, emoji: string, style?: import('discord.js').ButtonStyle}>} buttons
@@ -142,7 +143,7 @@ Toda atividade abaixo vira ponto, e ponto vira margem de inatividade e prioridad
   };
 }
 
-function recruitPayload() {
+async function recruitPayload() {
   return {
     ...SILENT,
     embeds: [
@@ -167,12 +168,23 @@ function recruitPayload() {
 Assim que entrar na guilda, o bot te dá o cargo de membro sozinho — em até 10 minutos, sem precisar avisar ninguém.
 
 Dúvidas? Mencione um <@&${STAFF_ROLE}>. Estamos prontos para ajudar.`,
+        // A fila de quem já passou na votação e espera o convite. Fica aqui, e
+        // não numa mensagem própria, porque é a continuação natural do texto
+        // acima: o passo 3 é "aceite o convite", e isto mostra a fila dele.
+        //
+        // Quem se candidata também vê, e é bom que veja: dá para saber que a
+        // aprovação saiu e quantos estão na frente, sem perguntar a ninguém.
+        fields: [await queueField()],
       },
     ],
     components: [
       row([
         { id: 'apply:submit', label: 'Enviar candidatura', emoji: '📨', style: ButtonStyle.Success },
         { id: 'apply:status', label: 'Ver minha candidatura', emoji: '🔍' },
+        // Só staff consegue usar (o handler recusa o resto), mas o botão fica à
+        // vista: esconder exigiria montar o painel por pessoa, e ele é uma
+        // mensagem fixa e única do canal.
+        { id: `${QUEUE_PREFIX}abrir`, label: 'Gerenciar fila', emoji: '📥' },
       ]),
     ],
   };
@@ -305,7 +317,7 @@ function appealPayload() {
  * key = chave de canal em CHANNEL_KEYS; stateId = documento em watcherState.
  * `build` recebe os parâmetros vigentes, para que nenhum número do texto
  * divirja do que o bot realmente aplica.
- * @type {ReadonlyArray<{key: string, stateId: string, label: string, build: (params: object) => object}>}
+ * @type {ReadonlyArray<{key: string, stateId: string, label: string, build: (params: object) => object|Promise<object>}>}
  */
 export const PANELS = Object.freeze([
   { key: 'rules', stateId: 'rulesPanel', label: 'regras', build: rulesPayload },
@@ -318,7 +330,7 @@ export const PANELS = Object.freeze([
 export async function ensureStaticPanels(client, guildDiscordId) {
   const cfg = await getConfig(guildDiscordId);
   for (const p of PANELS) {
-    const payload = brandWithLogo(p.build(cfg.params));
+    const payload = brandWithLogo(await p.build(cfg.params));
     await ensurePanel(client, cfg.channels?.[p.key], p.stateId, payload, p.label, [logoAttachment()]);
   }
 }

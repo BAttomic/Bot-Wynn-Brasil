@@ -18,6 +18,7 @@ import { log } from '../util/log.js';
 
 // Painel de CRUD da fila de entrada, efêmero e só para staff.
 //
+//   fila:abrir        botão do painel fixo de recrutamento; abre isto em efêmero
 //   fila:sel          escolhe quem editar
 //   fila:inv:<id>     modal do convite (aceita data passada)
 //   fila:invsave:<id> grava o convite
@@ -186,6 +187,42 @@ export async function buildQueuePanel({ selecionado = null, aviso = null } = {})
   return { embeds: [embed], components, ephemeral: true };
 }
 
+/**
+ * A fila como um BLOCO do painel fixo de recrutamento, no canal dos
+ * recrutadores.
+ *
+ * Fica junto do painel para a staff ver a fila sem rodar comando, mas o que vai
+ * ali é só leitura: os controles moram no painel efêmero, atrás do botão. Select
+ * e botão de apagar numa mensagem compartilhada seriam duas coisas ruins ao
+ * mesmo tempo — a seleção de uma pessoa apareceria para as outras, e a lixeira
+ * ficaria à mão de quem só passou para se candidatar.
+ *
+ * @returns {Promise<{name: string, value: string}>}
+ */
+export async function queueField() {
+  const fila = await filaAtual();
+  if (!fila.length) {
+    return { name: '📥 Fila de entrada (0)', value: '-# Ninguém aprovado esperando para entrar.' };
+  }
+
+  const MOSTRA = 8;
+  const linhas = fila.slice(0, MOSTRA).map((a, i) => {
+    const marca = a.status === 'invited' ? '✉️ convidado' : '⏳ sem convite';
+    return `\`${String(i + 1).padStart(2, ' ')}.\` **${a.username}** · ${marca}`;
+  });
+  const resto = fila.length - linhas.length;
+  if (resto > 0) linhas.push(`-# … e mais ${resto}.`);
+
+  const semConvite = fila.filter((a) => a.status !== 'invited').length;
+  return {
+    name: `📥 Fila de entrada (${fila.length})`,
+    value: `-# Aprovados esperando convite, por ordem de aprovação · ${semConvite} sem convite.\n${linhas.join('\n')}`.slice(
+      0,
+      1024,
+    ),
+  };
+}
+
 /** Campo de data reaproveitado pelos dois modais. */
 function campoQuando(label) {
   return new ActionRowBuilder().addComponents(
@@ -227,8 +264,14 @@ export async function handleQueuePanel(interaction, { isStaff }) {
   const [, acao, alvoId] = id.split(':');
 
   if (!isStaff) {
-    const resposta = { content: 'Apenas staff pode mexer na fila de entrada.', ephemeral: true };
-    return interaction.isModalSubmit?.() ? interaction.reply(resposta) : interaction.reply(resposta);
+    return interaction.reply({ content: 'Apenas staff pode mexer na fila de entrada.', ephemeral: true });
+  }
+
+  // Vem do BOTÃO do painel fixo, que é uma mensagem pública do canal. Aqui a
+  // resposta é uma mensagem nova e efêmera — nunca deferUpdate + editReply, que
+  // reescreveria o painel de recrutamento inteiro com o CRUD à vista de todos.
+  if (acao === 'abrir') {
+    return interaction.reply(await buildQueuePanel({}));
   }
 
   // Modais são respostas por si: não podem vir depois de um defer.
