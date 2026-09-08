@@ -1,13 +1,18 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { getConfig } from '../config/guildConfig.js';
 import { log } from '../util/log.js';
 
-// Boas-vindas de quem ACABOU de entrar na guilda, postada no canal de
-// recrutamento — o mesmo lugar onde a pessoa se candidatou, então é onde ela
-// ainda está olhando.
+// Boas-vindas de quem ACABOU de entrar na guilda, no canal de recrutamento — o
+// mesmo lugar onde a pessoa se candidatou, então é onde ela ainda está olhando.
 //
-// A mensagem menciona a pessoa de propósito: sem ping ela não é avisada, e um
-// texto de roteiro de canais que ninguém lê não serve para nada. O preço do ping
-// é ocupar o canal, e por isso vem o botão de dispensar.
+// São DUAS mensagens, e a divisão é por limitação do Discord: mensagem efêmera
+// ("Somente você pode ver isso · Dispensar mensagem") só existe como RESPOSTA a
+// uma interação. O bot não tem como mandar uma sozinho, e aqui quem descobre a
+// entrada é um job, sem clique nenhum por trás.
+//
+// Então o canal recebe só o ping — curto, o mínimo para a pessoa ser notificada
+// — e o roteiro dos canais vai no efêmero do clique. Quem descarta é o próprio
+// Discord, com o botão nativo, e o ping do canal some no mesmo clique.
 export const WELCOME_PREFIX = 'bemvindo:';
 
 /**
@@ -36,14 +41,14 @@ function roteiro(canais) {
     .join('\n');
 }
 
-/** Só quem foi mencionado (ou a staff) tira a mensagem do canal. */
-function botaoDispensar(discordId) {
+/** O dono vai no customId, e não na menção: menção é texto e pode ser editada. */
+function botaoAbrir(discordId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`${WELCOME_PREFIX}ok:${discordId}`)
-      .setLabel('Já li, pode apagar')
-      .setEmoji('👍')
-      .setStyle(ButtonStyle.Secondary),
+      .setCustomId(`${WELCOME_PREFIX}ver:${discordId}`)
+      .setLabel('Ver meus próximos passos')
+      .setEmoji('👋')
+      .setStyle(ButtonStyle.Success),
   );
 }
 
@@ -65,21 +70,14 @@ export async function sendGuildWelcome(client, cfg, membro) {
   const canal = await client.channels.fetch(canalId).catch(() => null);
   if (!canal) return null;
 
-  const lista = roteiro(cfg.channels);
+  // O que fica no canal é só o convite ao clique. O roteiro inteiro aqui seria
+  // um paredão de texto no meio das candidaturas de outras pessoas.
   const msg = await canal
     .send({
-      content: `<@${membro.discordId}>`,
-      embeds: [
-        {
-          title: `🎉 Bem-vindo à Wynn Brasil, ${membro.username}!`,
-          color: 0x2ecc71,
-          description:
-            `Você já está na guilda — o cargo de membro entra sozinho.\n\n` +
-            `**Passe nesses canais:**\n${lista}\n\n` +
-            `-# Esta mensagem é só sua. Clique no botão abaixo quando terminar de ler.`,
-        },
-      ],
-      components: [botaoDispensar(membro.discordId)],
+      content:
+        `<@${membro.discordId}> entrou na guilda! 🎉 Clique abaixo para ver seus próximos passos — ` +
+        `a resposta aparece **só para você**.`,
+      components: [botaoAbrir(membro.discordId)],
       allowedMentions: { users: [membro.discordId] },
     })
     .catch((e) => {
@@ -91,20 +89,39 @@ export async function sendGuildWelcome(client, cfg, membro) {
 }
 
 /**
- * Apaga a mensagem a pedido de quem a recebeu.
+ * Entrega o roteiro como mensagem EFÊMERA e tira o ping do canal.
  *
- * O dono sai do próprio customId, e não de quem a mensagem menciona: a menção é
- * texto e pode ser editada, o customId não. Staff também apaga, senão uma
- * mensagem de alguém que saiu do servidor ficaria presa no canal.
+ * O efêmero é o "Somente você pode ver isso" nativo: quem descarta é a própria
+ * pessoa, pelo botão do Discord, sem o bot precisar de um botão só para isso.
+ *
+ * O dono sai do customId, e não de quem a mensagem menciona: menção é texto e
+ * pode ser editada. Staff também abre — não por precisar do roteiro, mas porque
+ * é assim que um ping de alguém que saiu do servidor sai do canal.
  */
 export async function handleWelcomeDismiss(interaction, { isStaff = false } = {}) {
   const dono = interaction.customId.split(':')[2];
   if (interaction.user.id !== dono && !isStaff) {
     return interaction.reply({ content: 'Essas boas-vindas não são suas. 🙂', ephemeral: true });
   }
-  // O ack vem ANTES de apagar. Depois de a mensagem sumir não há mais o que
-  // responder, e o Discord marca o clique como "Interação falhou" se ninguém
-  // respondeu em 3 segundos.
-  await interaction.deferUpdate().catch(() => {});
+
+  const { channels } = (await getConfig(interaction.guildId)) ?? {};
+  const lista = roteiro(channels ?? {});
+
+  // Responder vem ANTES de apagar: o Discord dá 3 segundos para o clique ser
+  // atendido, e apagar a mensagem não conta como resposta.
+  await interaction.reply({
+    embeds: [
+      {
+        title: '🎉 Bem-vindo à Wynn Brasil!',
+        color: 0x2ecc71,
+        description:
+          `Você já está na guilda — o cargo de membro entra sozinho.\n\n` +
+          `**Passe nesses canais:**\n${lista}`,
+      },
+    ],
+    ephemeral: true,
+  });
+
+  // O ping cumpriu o papel de avisar; deixá-lo no canal só acumularia.
   return interaction.message.delete().catch(() => {});
 }
