@@ -9,6 +9,7 @@ import { wynn } from '../wynn/api.js';
 import { shortNumber } from '../util/format.js';
 import { PECAS, anexo } from '../discord/commands/uniforme.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
+import { log } from '../util/log.js';
 
 /** Select antigo do painel. Mantido só para não quebrar mensagens ainda não reeditadas. */
 export const SELECT_ID = 'lb:view';
@@ -282,7 +283,9 @@ export async function buildLeaderboardPanel(view, scope, page) {
 
   return brandWithLogo({
     embeds: [embed],
-    components: [viewRow(v), scopeRow(s, season), pageRow(pg, pages)],
+    // Páginas antes do escopo: navegar na lista é o gesto do dia a dia, e trocar
+    // de season é raro. O que se usa mais fica colado na lista.
+    components: [pageRow(pg, pages), scopeRow(s, season)],
   });
 }
 
@@ -351,41 +354,16 @@ const DOWNLOADS_STATE_ID = 'downloadsPanel';
  * o modpack — mais o atalho do grupo de WhatsApp. Os botões abrem uma resposta
  * privada (só quem clicou vê) com o arquivo ou o link.
  */
-function downloadsPanelPayload() {
-  return brandWithLogo({
-    embeds: [
-      {
-        title: '📥 Downloads da Wynn Brasil',
-        color: 0x2ecc71,
-        description:
-          'Tudo que você precisa para entrar no clima da guilda:\n\n' +
-          '🎽 **Skin da Seleção** — camada transparente para sobrepor na sua skin.\n' +
-          '🧣 **Capa da Guilda** — a capa oficial da Wynn Brasil.\n' +
-          '📦 **Modpack** — os mods recomendados, sempre na versão mais recente ' +
-          '(instale pelo `.mrpack` e o launcher atualiza sozinho).\n\n' +
-          '-# Clique num botão abaixo — a resposta aparece só para você.',
-      },
-    ],
-    components: [
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(SKIN_ID)
-          .setLabel('Skin da Seleção')
-          .setEmoji('🎽')
-          .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-          .setCustomId(CAPE_ID)
-          .setLabel('Capa da Guilda')
-          .setEmoji('🧣')
-          .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-          .setCustomId(MODPACK_ID)
-          .setLabel('Modpack')
-          .setEmoji('📦')
-          .setStyle(ButtonStyle.Success),
-      ),
-    ],
-  });
+/**
+ * Skin, capa e modpack. Já teve mensagem própria; hoje é uma linha de botões
+ * dentro do painel ao vivo, que é onde o pessoal já olha de qualquer forma.
+ */
+export function downloadsRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(SKIN_ID).setLabel('Skin da Seleção').setEmoji('🎽').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(CAPE_ID).setLabel('Capa da Guilda').setEmoji('🧣').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(MODPACK_ID).setLabel('Modpack').setEmoji('📦').setStyle(ButtonStyle.Success),
+  );
 }
 
 /** Linha com o convite do grupo de WhatsApp — fica no painel de info (ao vivo). */
@@ -405,11 +383,26 @@ export function communityRow() {
  * de criação: só publicamos depois que o painel de info (`panel`) já existe, para
  * ela nascer ABAIXO dele. Edições no lugar seguem sempre.
  */
-export async function ensureDownloadsPanel(client, guildDiscordId) {
-  const already = await panelMessageId(DOWNLOADS_STATE_ID);
-  if (!already && !(await panelMessageId('panel'))) return null; // espera o info nascer
-  const cfg = await getConfig(guildDiscordId);
-  return ensurePanel(client, cfg.channels?.panel, DOWNLOADS_STATE_ID, downloadsPanelPayload(), 'downloads', [logoAttachment()]);
+/**
+ * A mensagem de downloads virou uma linha de botões dentro do painel ao vivo
+ * (ver downloadsRow). Esta função apaga a antiga UMA vez e esquece o estado.
+ *
+ * Sem ela a mensagem ficaria no canal para sempre: os botões continuariam
+ * funcionando — o handler responde pelo customId, não pela mensagem —, então
+ * nem quebrado pareceria, só duplicado.
+ */
+export async function retireDownloadsPanel(client) {
+  const state = collections.watcherState();
+  const saved = await state.findOne({ _id: DOWNLOADS_STATE_ID });
+  if (!saved?.messageId) return null;
+
+  const channel = await client.channels.fetch(saved.channelId).catch(() => null);
+  const msg = channel ? await channel.messages.fetch(saved.messageId).catch(() => null) : null;
+  if (msg) await msg.delete().catch(() => {});
+  // O estado sai mesmo se a mensagem já não existia, senão isto roda a cada ciclo.
+  await state.deleteOne({ _id: DOWNLOADS_STATE_ID });
+  log.info('Painel de downloads aposentado: os botões agora vivem no painel de informações.');
+  return true;
 }
 
 const SCORING_STATE_ID = 'scoringPanel';
@@ -422,9 +415,13 @@ const SCORING_STATE_ID = 'scoringPanel';
  * viraria mentira no dia em que a staff mexesse num peso — e mentira num painel
  * fixo é pior que ausência de informação, porque ninguém desconfia dela.
  *
+ * Os botões de ranking moram aqui, e não com a lista: cada um corresponde a um
+ * bloco desta mensagem, então a explicação e o atalho ficam lado a lado.
+ *
  * @param {import('../config/guildConfig.js').GuildParams} params
+ * @param {string} [view]  ranking em exibição, para destacar o botão certo
  */
-function scoringPanelPayload(params) {
+function scoringPanelPayload(params, view = DEFAULT_VIEW) {
   const w = params?.pointsWeights ?? {};
   const n = (v) => Number(v ?? 0).toLocaleString('pt-BR');
   const semanalMax = Math.round(Number(w.weekly ?? 0) * (1 + (Number(params?.weeklyStreakBonusMax) || 0)));
@@ -471,6 +468,7 @@ function scoringPanelPayload(params) {
         ],
       },
     ],
+    components: [viewRow(validView(view))],
   });
 }
 
@@ -479,13 +477,14 @@ function scoringPanelPayload(params) {
 // é a ordem em que elas são publicadas.
 export async function ensureScoringPanel(client, guildDiscordId) {
   const already = await panelMessageId(SCORING_STATE_ID);
-  if (!already && !(await panelMessageId(DOWNLOADS_STATE_ID))) return null;
+  if (!already && !(await panelMessageId('panel'))) return null; // espera o info nascer
   const cfg = await getConfig(guildDiscordId);
+  const { view } = await currentState();
   return ensurePanel(
     client,
     cfg.channels?.panel,
     SCORING_STATE_ID,
-    scoringPanelPayload(cfg.params),
+    scoringPanelPayload(cfg.params, view),
     'como pontuar',
     [logoAttachment()],
   );
@@ -550,5 +549,11 @@ export async function handleLeaderboardControl(interaction) {
     page: Math.max(0, Number(state.page) || 0),
   };
   await saveState(next);
-  await interaction.editReply(await buildLeaderboardPanel(next.view, next.scope, next.page));
+  // Os controles moram em DUAS mensagens: o tipo de ponto na de "como pontuar",
+  // página e escopo na do ranking. Um clique em qualquer uma reflete nas duas —
+  // numa muda o botão destacado, na outra muda a lista. Por isso as duas são
+  // reeditadas no lugar, em vez de responder à interação: o botão clicado pode
+  // estar na mensagem que NÃO é a que precisa mudar de conteúdo.
+  await ensureScoringPanel(interaction.client, interaction.guildId).catch(() => null);
+  await ensureLeaderboardPanel(interaction.client, interaction.guildId).catch(() => null);
 }

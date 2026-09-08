@@ -19,7 +19,7 @@ import { runGuildWatch, flushTerritoryDigest } from './services/watcher.js';
 import { ensurePanels, attachRegistrationGuard } from './services/registration.js';
 import { ensureStaticPanels } from './services/staticPanels.js';
 import { ensurePingRolePanels, attachPingRoleHandler } from './services/pingRoles.js';
-import { ensureDownloadsPanel, ensureScoringPanel, ensureLeaderboardPanel } from './services/leaderboardPanel.js';
+import { retireDownloadsPanel, ensureScoringPanel, ensureLeaderboardPanel } from './services/leaderboardPanel.js';
 import { ensureTomePanel, ensureDeliveryLogPanel } from './services/tomes.js';
 import { ensureAspectBaselines } from './services/aspects.js';
 import { warnIfEmpty } from './services/guildList.js';
@@ -114,10 +114,13 @@ async function main() {
         // Ordem no canal de tomes: fila ao vivo primeiro, histórico logo abaixo.
         ['tomes', () => ensureTomePanel(client, guildId)],
         ['log de entregas', () => ensureDeliveryLogPanel(client, guildId)],
-        // Ordem no canal de status: info (ao vivo) → downloads → como pontuar →
-        // leaderboard. As duas últimas são o bloco de contribuição: a regra em
-        // cima, o ranking embaixo.
-        ['downloads', () => ensureDownloadsPanel(client, guildId)],
+        // Ordem no canal de status: info (ao vivo, com os downloads dentro) →
+        // como pontuar → leaderboard. As duas últimas são o bloco de
+        // contribuição: a regra em cima, o ranking embaixo.
+        //
+        // A aposentadoria roda junto e é no-op depois da primeira vez: sem ela a
+        // mensagem de downloads antiga ficaria órfã no canal.
+        ['downloads antigos', () => retireDownloadsPanel(client)],
         ['como pontuar', () => ensureScoringPanel(client, guildId)],
         ['leaderboard', () => ensureLeaderboardPanel(client, guildId)],
       ];

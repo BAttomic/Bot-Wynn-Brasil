@@ -11,7 +11,7 @@ import { recordWeeklyCompletion } from './points.js';
 import { creditGuildRaid } from './events.js';
 import { recordSoloRaid } from './aspects.js';
 import { blockedUuids } from './eventBlacklist.js';
-import { communityRow } from './leaderboardPanel.js';
+import { communityRow, downloadsRow } from './leaderboardPanel.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { log } from '../util/log.js';
 
@@ -418,8 +418,10 @@ ${list}
         footer: { text: 'WnBR — Informações', iconURL: client.user.displayAvatarURL() },
       },
     ],
-    // Skin, capa e modpack vivem no painel de downloads; aqui fica só o WhatsApp.
-    components: [communityRow()],
+    // Skin, capa e modpack moravam numa mensagem separada logo abaixo desta.
+    // Juntar economiza uma mensagem no canal e põe o download ao lado da lista
+    // de quem está online, que é o que traz a pessoa aqui.
+    components: [downloadsRow(), communityRow()],
   });
 }
 
