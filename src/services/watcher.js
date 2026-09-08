@@ -11,14 +11,14 @@ import { recordWeeklyCompletion } from './points.js';
 import { creditGuildRaid } from './events.js';
 import { recordSoloRaid } from './aspects.js';
 import { blockedUuids } from './eventBlacklist.js';
-import { communityRow, downloadsRow } from './leaderboardPanel.js';
+import { communityRow, downloadsRow, downloadsField } from './leaderboardPanel.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { log } from '../util/log.js';
 
 const RANKS = ['owner', 'chief', 'strategist', 'captain', 'recruiter', 'recruit'];
 const ROLE_LABEL = {
   owner: '[Líder]',
-  chief: '[Sub-líder]',
+  chief: '[Chefe]',
   strategist: '[Estrategista]',
   captain: '[Capitão]',
   recruiter: '[Recrutador]',
@@ -415,6 +415,10 @@ ${xpBarEmoji(guild.xpPercent)}
 ${list}
 
 -# Atualizado <t:${Math.floor(Date.now() / 1000)}:R>`,
+        // Os downloads viram um bloco separado em vez de entrar na descrição: a
+        // lista de quem está online cresce, e o texto ficaria empurrado para
+        // baixo dela, longe dos botões a que se refere.
+        fields: [downloadsField()],
         footer: { text: 'WnBR — Informações', iconURL: client.user.displayAvatarURL() },
       },
     ],

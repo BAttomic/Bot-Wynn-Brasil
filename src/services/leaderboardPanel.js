@@ -355,6 +355,25 @@ const DOWNLOADS_STATE_ID = 'downloadsPanel';
  * privada (só quem clicou vê) com o arquivo ou o link.
  */
 /**
+ * O texto dos downloads, como um bloco do embed do painel ao vivo.
+ *
+ * Fica ao lado de downloadsRow de propósito: quem mexer no texto vê os botões
+ * na linha seguinte, e vice-versa. Separados, um explicaria o que o outro não
+ * oferece mais.
+ */
+export function downloadsField() {
+  return {
+    name: '📥 Downloads',
+    value:
+      'Tudo que você precisa para entrar no clima da guilda:\n' +
+      '🎽 **Skin da Seleção** — camada transparente para sobrepor na sua skin.\n' +
+      '🧣 **Capa da Guilda** — a capa oficial da Wynn Brasil.\n' +
+      '📦 **Modpack** — os mods recomendados, sempre na versão mais recente ' +
+      '(instale pelo `.mrpack` e o launcher atualiza sozinho).\n' +
+      '-# Clique num botão abaixo — a resposta aparece só para você.',
+  };
+}
+/**
  * Skin, capa e modpack. Já teve mensagem própria; hoje é uma linha de botões
  * dentro do painel ao vivo, que é onde o pessoal já olha de qualquer forma.
  */
