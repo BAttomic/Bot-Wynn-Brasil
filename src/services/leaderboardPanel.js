@@ -609,6 +609,17 @@ export async function handleLeaderboardControl(interaction) {
   // numa muda o botão destacado, na outra muda a lista. Por isso as duas são
   // reeditadas no lugar, em vez de responder à interação: o botão clicado pode
   // estar na mensagem que NÃO é a que precisa mudar de conteúdo.
-  await ensureScoringPanel(interaction.client, interaction.guildId).catch(() => null);
-  await ensureLeaderboardPanel(interaction.client, interaction.guildId).catch(() => null);
+  //
+  // O erro é LOGADO, não engolido — mesma razão do ensurePanel em
+  // services/panels.js: painel que para de atualizar calado é indistinguível de
+  // bot fora do ar. Mas também não propaga: o estado já foi salvo, e uma falha de
+  // rede na hora de redesenhar não pode virar "Interação falhou" para quem
+  // clicou — no ciclo de 5 minutos os dois painéis se corrigem sozinhos.
+  for (const [nome, ensure] of [
+    ['como pontuar', ensureScoringPanel],
+    ['leaderboard', ensureLeaderboardPanel],
+  ]) {
+    const erro = await ensure(interaction.client, interaction.guildId).then(() => null, (e) => e);
+    if (erro) log.error(`Falha ao reeditar o painel de ${nome} depois do clique:`, erro);
+  }
 }
