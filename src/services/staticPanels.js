@@ -2,7 +2,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { getConfig } from '../config/guildConfig.js';
 import { ensurePanel } from './panels.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
-import { QUEUE_PREFIX, queueField } from './recruitQueuePanel.js';
+import { queueStaticPanel } from './recruitQueuePanel.js';
 
 /**
  * @param {Array<{id: string, label: string, emoji: string, style?: import('discord.js').ButtonStyle}>} buttons
@@ -143,7 +143,7 @@ Toda atividade abaixo vira ponto, e ponto vira margem de inatividade e prioridad
   };
 }
 
-async function recruitPayload() {
+function recruitPayload() {
   return {
     ...SILENT,
     embeds: [
@@ -151,40 +151,27 @@ async function recruitPayload() {
         title: '🛡️ Como Entrar na Guilda Wynn Brasil',
         color: COLOR.recruit,
         description:
-`Você já está verificado: seu nick foi confirmado na API oficial quando você se registrou. Agora é só se candidatar.
+`Somos uma guilda de **língua portuguesa** — brasileiros, portugueses, angolanos, moçambicanos. Se você fala português, o lugar é aqui.
 
-**1️⃣ Sem requisitos obrigatórios**
-> Nossa guilda é aberta para toda a comunidade, focada na língua portuguesa. Portugueses, angolanos e latinos em geral também são bem-vindos!
+**Não há requisitos.** Nível, tempo de jogo, build, horário: nada disso entra na conta. Quem quer jogar junto é bem-vindo.
 
-**2️⃣ Clique em Enviar candidatura**
+Você já está verificado — seu nick foi confirmado na API oficial quando você se registrou. Faltam dois passos.
+
+**1️⃣ Clique em Enviar candidatura**
 > Ela aparece **neste canal**, com uma votação aberta. O placar é público, mas **o voto é anônimo**: ninguém vê quem votou o quê.
 
-**3️⃣ Aceite o convite**
-> Aprovado? Um recrutador te chama no jogo. Aceite digitando \`/guild join WnBR\` **dentro do Wynncraft**.
+**2️⃣ Aceite o convite no jogo**
+> Aprovado? Um recrutador te chama. Aceite digitando \`/guild join WnBR\` **dentro do Wynncraft**.
 
-**4️⃣ Escolha seus cargos**
-> Passe em <#${PINGS_CHANNEL}> e reaja nas mensagens para marcar seus interesses. Isso ajuda na sua integração.
-
-Assim que entrar na guilda, o bot te dá o cargo de membro sozinho — em até 10 minutos, sem precisar avisar ninguém.
+Assim que entrar, o bot te dá o cargo de membro sozinho — em até 10 minutos, sem precisar avisar ninguém — e te manda aqui a lista dos canais que valem a visita.
 
 Dúvidas? Mencione um <@&${STAFF_ROLE}>. Estamos prontos para ajudar.`,
-        // A fila de quem já passou na votação e espera o convite. Fica aqui, e
-        // não numa mensagem própria, porque é a continuação natural do texto
-        // acima: o passo 3 é "aceite o convite", e isto mostra a fila dele.
-        //
-        // Quem se candidata também vê, e é bom que veja: dá para saber que a
-        // aprovação saiu e quantos estão na frente, sem perguntar a ninguém.
-        fields: [await queueField()],
       },
     ],
     components: [
       row([
         { id: 'apply:submit', label: 'Enviar candidatura', emoji: '📨', style: ButtonStyle.Success },
         { id: 'apply:status', label: 'Ver minha candidatura', emoji: '🔍' },
-        // Só staff consegue usar (o handler recusa o resto), mas o botão fica à
-        // vista: esconder exigiria montar o painel por pessoa, e ele é uma
-        // mensagem fixa e única do canal.
-        { id: `${QUEUE_PREFIX}abrir`, label: 'Gerenciar fila', emoji: '📥' },
       ]),
     ],
   };
@@ -322,6 +309,9 @@ function appealPayload() {
 export const PANELS = Object.freeze([
   { key: 'rules', stateId: 'rulesPanel', label: 'regras', build: rulesPayload },
   { key: 'recruiters', stateId: 'recruitPanel', label: 'recrutamento', build: recruitPayload },
+  // Segunda mensagem do MESMO canal, logo abaixo. A ordem do array é a ordem
+  // em que os painéis nascem, e portanto a ordem deles no canal.
+  { key: 'recruiters', stateId: 'recruitQueuePanel', label: 'fila de entrada', build: queueStaticPanel },
   { key: 'warApplication', stateId: 'warApplicationPanel', label: 'aplicação war', build: warApplicationPayload },
   { key: 'loans', stateId: 'loanPanel', label: 'empréstimos', build: loanPayload },
   { key: 'appeals', stateId: 'appealPanel', label: 'apelações', build: appealPayload },

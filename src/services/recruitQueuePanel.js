@@ -188,38 +188,54 @@ export async function buildQueuePanel({ selecionado = null, aviso = null } = {})
 }
 
 /**
- * A fila como um BLOCO do painel fixo de recrutamento, no canal dos
- * recrutadores.
+ * A fila como MENSAGEM FIXA própria, logo abaixo do painel de recrutamento.
  *
- * Fica junto do painel para a staff ver a fila sem rodar comando, mas o que vai
- * ali é só leitura: os controles moram no painel efêmero, atrás do botão. Select
- * e botão de apagar numa mensagem compartilhada seriam duas coisas ruins ao
- * mesmo tempo — a seleção de uma pessoa apareceria para as outras, e a lixeira
- * ficaria à mão de quem só passou para se candidatar.
+ * É um painel separado, e não um bloco do outro, porque os dois mudam em ritmos
+ * diferentes: o texto de como entrar é estável, e a fila anda a cada convite. E
+ * separada ela pode ser lida de longe — quem só quer saber "quantos estão na
+ * frente de mim" não precisa reler o passo a passo inteiro.
  *
- * @returns {Promise<{name: string, value: string}>}
+ * O que vai aqui é só leitura. Os controles moram no painel efêmero, atrás do
+ * botão: select e lixeira numa mensagem compartilhada seriam duas coisas ruins
+ * ao mesmo tempo — a seleção de uma pessoa apareceria para as outras, e o botão
+ * de apagar ficaria à mão de quem passou ali só para se candidatar.
  */
-export async function queueField() {
+export async function queueStaticPanel() {
   const fila = await filaAtual();
-  if (!fila.length) {
-    return { name: '📥 Fila de entrada (0)', value: '-# Ninguém aprovado esperando para entrar.' };
-  }
+  const MOSTRA = 10;
 
-  const MOSTRA = 8;
   const linhas = fila.slice(0, MOSTRA).map((a, i) => {
-    const marca = a.status === 'invited' ? '✉️ convidado' : '⏳ sem convite';
+    const marca = a.status === 'invited' ? '✉️ convite enviado' : '⏳ aguardando convite';
     return `\`${String(i + 1).padStart(2, ' ')}.\` **${a.username}** · ${marca}`;
   });
   const resto = fila.length - linhas.length;
   if (resto > 0) linhas.push(`-# … e mais ${resto}.`);
 
   const semConvite = fila.filter((a) => a.status !== 'invited').length;
+
   return {
-    name: `📥 Fila de entrada (${fila.length})`,
-    value: `-# Aprovados esperando convite, por ordem de aprovação · ${semConvite} sem convite.\n${linhas.join('\n')}`.slice(
-      0,
-      1024,
-    ),
+    allowedMentions: { parse: [] },
+    embeds: [
+      {
+        title: `📥 Fila de entrada (${fila.length})`,
+        color: 0x2ecc71,
+        description: fila.length
+          ? `Aprovados na votação, esperando o convite no jogo — por ordem de aprovação.\n\n${linhas.join('\n')}`
+          : 'Ninguém esperando no momento. Quem for aprovado aparece aqui.',
+        footer: fila.length
+          ? { text: `${semConvite} ainda sem convite · quem entra na guilda sai daqui sozinho` }
+          : undefined,
+      },
+    ],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${QUEUE_PREFIX}abrir`)
+          .setLabel('Gerenciar fila')
+          .setEmoji('📥')
+          .setStyle(ButtonStyle.Secondary),
+      ),
+    ],
   };
 }
 
