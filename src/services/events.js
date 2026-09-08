@@ -698,19 +698,22 @@ export function renderEvent(event, rows, { me = null, total = null, sum = null }
   // nem perceber que o 1º lugar responde por metade do total.
   //
   // Para guild raid o número da guilda é quantas RAIDS foram feitas, não a soma
-  // dos créditos: uma raid de 4 membros é UMA raid, ainda que renda 4 créditos
-  // no ranking individual. `event.raids` é contado uma vez por grupo detectado
-  // (ver creditGuildRaidParty).
+  // dos créditos: uma raid de 4 membros é UMA raid, ainda que renda 4 créditos no
+  // ranking individual. `event.raids` é contado uma vez por grupo detectado (ver
+  // creditGuildRaidParty).
   //
-  // Evento antigo não tem o campo e cai na soma, que era o que ele mostrava
-  // desde sempre — melhor um número velho conhecido do que um zero novo.
+  // Evento aberto antes deste campo existir fica sem a linha até a próxima raid,
+  // e é de propósito: a soma dos créditos NÃO responde "quantas raids", e exibir
+  // 4 onde houve 1 é pior do que não exibir nada — o número errado não se
+  // apresenta como estimativa, ele mente com a mesma cara do número certo.
   const emoji = metric.emoji ? `${metric.emoji} ` : '';
-  const somatorio =
-    metric.live && event.raids != null
-      ? `${emoji}**${event.raids} ${plural(event.raids, metric.unit)}** ${Number(event.raids) === 1 ? 'concluída' : 'concluídas'} pela guilda\n\n`
-      : sum > 0
-        ? `${emoji}**${formatValue(sum, metric)} ${metric.unit}** somando todos os jogadores\n\n`
-        : '';
+  const somatorio = metric.live
+    ? (Number(event.raids) > 0
+        ? `${emoji}**${event.raids} ${plural(event.raids, metric.unit)}** ${Number(event.raids) === 1 ? 'concluída' : 'concluídas'} pela guilda\n\n`
+        : '')
+    : sum > 0
+      ? `${emoji}**${formatValue(sum, metric)} ${metric.unit}** somando todos os jogadores\n\n`
+      : '';
 
   // A descrição da staff vem antes da tabela, com as quebras que ela pediu.
   const descricao = multiline(event.description);
