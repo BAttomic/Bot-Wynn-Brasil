@@ -23,6 +23,11 @@ const FALLBACK_GUILD_RANKS = ['owner', 'chief'];
 // "aprovado e fora do roster agora", e isso trazia de volta quem entrou e depois
 // foi expulso por inatividade — a pessoa cumpriu a fila meses atrás e reaparecia
 // como se nunca tivesse entrado.
+//
+// Só o roleSync escreve `joined`, e de propósito: entrar na guilda é fato
+// observável no roster, não declaração. Um botão de "já entrou" no painel seria
+// uma segunda fonte de verdade para a mesma pergunta — e a pior das duas, porque
+// depende de alguém lembrar de clicar.
 export const QUEUE_STATUS = Object.freeze(['approved', 'invited']);
 
 const oid = (id) => (typeof id === 'string' ? new ObjectId(id) : id);
@@ -91,16 +96,6 @@ export async function dropFromQueue(appId, by = null) {
   const res = await collections.applications().findOneAndUpdate(
     { _id: oid(appId) },
     { $set: { status: 'dropped', droppedAt: new Date(), droppedBy: by } },
-    { returnDocument: 'after' },
-  );
-  return res ?? null;
-}
-
-/** Marca manualmente que a pessoa entrou, sem esperar o roleSync perceber. */
-export async function markJoined(appId, by = null) {
-  const res = await collections.applications().findOneAndUpdate(
-    { _id: oid(appId) },
-    { $set: { status: 'joined', joinedAt: new Date(), joinedBy: by } },
     { returnDocument: 'after' },
   );
   return res ?? null;

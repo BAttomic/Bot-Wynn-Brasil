@@ -8,15 +8,10 @@ import {
   TextInputStyle,
 } from 'discord.js';
 import { collections } from '../db/mongo.js';
-import {
-  queueApplications,
-  markInvited,
-  unmarkInvited,
-  markJoined,
-  dropFromQueue,
-  addToQueue,
-} from './applications.js';
+import { queueApplications, markInvited, unmarkInvited, dropFromQueue, addToQueue } from './applications.js';
 import { parseStart } from './events.js';
+import { fetchGuildMembers } from './guildData.js';
+import { optional } from '../config/env.js';
 import { wynn } from '../wynn/api.js';
 import { audit } from './audit.js';
 import { log } from '../util/log.js';
@@ -27,11 +22,16 @@ import { log } from '../util/log.js';
 //   fila:inv:<id>     modal do convite (aceita data passada)
 //   fila:invsave:<id> grava o convite
 //   fila:desinv:<id>  desfaz o convite marcado por engano
-//   fila:entrou:<id>  fecha: a pessoa entrou
 //   fila:sai:<id>     tira da fila sem ter entrado
 //   fila:add          modal para pôr alguém na fila
 //   fila:addsave      grava
 //   fila:volta        volta para a lista sem ninguém selecionado
+//
+// NÃO existe "já entrou": entrar na guilda é fato observável no roster, e o
+// roleSync fecha a candidatura sozinho ao ver a pessoa lá. Um botão para isso
+// seria uma segunda fonte de verdade para a mesma pergunta — e a pior das duas,
+// porque depende de alguém lembrar de clicar. O que sobra para a staff é o que a
+// guilda NÃO consegue observar: o convite que saiu, e quem desistiu.
 export const QUEUE_PREFIX = 'fila:';
 
 const unix = (d) => Math.floor(new Date(d).getTime() / 1000);
@@ -69,15 +69,25 @@ export function parseQuando(texto) {
   return { at: anoAtras };
 }
 
-/** A fila, já sem quem está na guilda agora. */
+/**
+ * A fila, já sem quem está na guilda.
+ *
+ * Sair da fila é AUTOMÁTICO e não tem botão: quem aparece no roster teve a
+ * candidatura fechada pelo roleSync. Aqui o roster é consultado de novo, ao
+ * vivo, porque o job roda a cada 10 min e ninguém precisa ver na fila alguém que
+ * entrou faz cinco. Se a API estiver fora, cai no `inGuild` do banco — atrasado,
+ * mas melhor que listar a guilda inteira como se estivesse esperando convite.
+ */
 async function filaAtual() {
   const apps = await queueApplications();
-  // O roster é a verdade mais fresca sobre quem entrou; o roleSync fecha a
-  // candidatura em até 10 min, e até lá a pessoa não deve aparecer aqui.
-  const uuids = (await collections.members().find({ inGuild: true }, { projection: { uuid: 1 } }).toArray()).map(
-    (m) => m.uuid,
+  const prefix = optional('WYNN_GUILD_PREFIX');
+  const res = prefix ? await fetchGuildMembers(prefix).catch(() => null) : null;
+
+  const dentro = new Set(
+    res
+      ? res.members.map((m) => m.uuid)
+      : (await collections.members().find({ inGuild: true }, { projection: { uuid: 1 } }).toArray()).map((m) => m.uuid),
   );
-  const dentro = new Set(uuids);
   return apps.filter((a) => !dentro.has(a.uuid));
 }
 
@@ -122,11 +132,8 @@ function acoesRow(app) {
       .setLabel(convidado ? 'Desfazer convite' : 'Marcar convite enviado')
       .setEmoji(convidado ? '↩️' : '✉️')
       .setStyle(convidado ? ButtonStyle.Secondary : ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId(`${QUEUE_PREFIX}entrou:${id}`)
-      .setLabel('Já entrou')
-      .setEmoji('✅')
-      .setStyle(ButtonStyle.Success),
+    // "Tirar da fila" é para quem NÃO vai entrar: desistiu, sumiu, mudou de
+    // ideia. Quem entra sai daqui sozinho.
     new ButtonBuilder()
       .setCustomId(`${QUEUE_PREFIX}sai:${id}`)
       .setLabel('Tirar da fila')
@@ -154,7 +161,7 @@ export async function buildQueuePanel({ selecionado = null, aviso = null } = {})
     color: 0x2ecc71,
     footer: {
       text: fila.length
-        ? `${fila.length} na fila · ${semConvite} sem convite enviado · ordem de aprovação`
+        ? `${fila.length} na fila · ${semConvite} sem convite · ordem de aprovação · quem entra sai daqui sozinho`
         : 'Quem entra na guilda sai daqui sozinho.',
     },
   };
@@ -301,7 +308,6 @@ export async function handleQueuePanel(interaction, { isStaff }) {
 
   const acoes = {
     desinv: [unmarkInvited, '↩️', 'convite desfeito', false],
-    entrou: [markJoined, '✅', 'marcado como já entrou', true],
     sai: [dropFromQueue, '🗑️', 'tirado da fila', true],
   };
   const escolhida = acoes[acao];
