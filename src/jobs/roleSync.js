@@ -162,12 +162,7 @@ export async function runRoleSync(client) {
       // Só na TRANSIÇÃO. Se ficasse junto do fechamento em massa da fila, a
       // primeira passada depois do deploy mencionaria a guilda inteira de uma
       // vez — 80 pings de boas-vindas para gente que entrou meses atrás.
-      // Os ids ficam no vínculo, junto do joinedGuildAt que acabou de ser
-      // gravado: é o par que o recruitCleanup usa para apagar 24h depois.
-      Object.assign(
-        update,
-        (await sendGuildWelcome(client, cfg, { discordId: m.discordId, username: m.username })) ?? {},
-      );
+      await sendGuildWelcome(client, cfg, { discordId: m.discordId, username: m.username });
       // Voltou abaixo do que já foi: avisa a staff, que promove no jogo.
       if (isHigherRank(m.peakRank, rank)) {
         audit(

@@ -1,16 +1,19 @@
 import { log } from '../util/log.js';
 
-// Boas-vindas de quem ACABOU de entrar na guilda, no canal de recrutamento — o
-// mesmo lugar onde a pessoa se candidatou, então é onde ela ainda está olhando.
+// Boas-vindas de quem ACABOU de entrar na guilda: o roteiro dos canais, no
+// PRIVADO da pessoa.
 //
-// Uma mensagem só, com a menção e o roteiro dos canais. Sem botão: o que a
-// pessoa precisa está na tela, e um clique a mais para ler oito linhas é atrito
-// sem troca.
+// A DM resolve de uma vez o que o canal não resolvia. É mesmo só dela, não ocupa
+// espaço de ninguém, e fica guardada para reler — o roteiro de um servidor é
+// exatamente o tipo de coisa que se procura de novo uma semana depois.
 //
-// O preço de mencionar é ocupar o canal, e quem paga é o recrutamento — que já
-// tem candidatura e votação disputando espaço. Por isso a mensagem some sozinha
-// depois de 24h (ver jobs/recruitCleanup.js): o aviso serve no dia em que a
-// pessoa entra, não na semana seguinte.
+// Efêmero seria o formato ideal ("Só você pode ver esta mensagem"), mas o
+// Discord só o entrega como RESPOSTA a uma interação, e quem descobre a entrada
+// aqui é um job, sem clique por trás. Um botão só para gerar essa interação
+// cobraria da pessoa um clique para ler o que já estaria pronto.
+//
+// Com DM fechada — comum — cai no canal de recrutamento, mencionando. É a única
+// boa-vinda que a pessoa recebe; ficar em silêncio seria pior que ocupar espaço.
 
 /**
  * Um canal por linha, só os que existem na configuração.
@@ -32,7 +35,9 @@ function roteiro(canais) {
     ['loans', '💰', 'empréstimos do baú da guilda'],
     ['forum', '💬', 'fórum da comunidade — dúvidas, builds, conversa'],
     ['market', '🪙', 'compra e venda entre membros'],
-    ['appeals', '🕊️', 'se algo der errado, é aqui que se resolve'],
+    // Apelação fica de fora de propósito: é o canal de quem foi punido, e falar
+    // disso na primeira mensagem que a pessoa recebe começa a relação pelo pior
+    // lado. Quem precisar dele vai ser levado até lá por quem aplicou a punição.
   ];
   return guia
     .filter(([key]) => canais?.[key])
@@ -50,30 +55,43 @@ function roteiro(canais) {
  * @param {import('discord.js').Client} client
  * @param {object} cfg                     config da guilda
  * @param {{discordId: string, username: string}} membro
- * @returns {Promise<{welcomeMessageId: string, welcomeChannelId: string}|null>}
- *          ids para o job de limpeza achar a mensagem depois
+ * @returns {Promise<boolean>} se a pessoa foi avisada, por DM ou pelo canal
  */
 export async function sendGuildWelcome(client, cfg, membro) {
+  if (!membro?.discordId) return null;
+
+  const corpo = (aviso) => ({
+    embeds: [
+      {
+        title: `🎉 Bem-vindo à Wynn Brasil, ${membro.username}!`,
+        color: 0x2ecc71,
+        description:
+          `Você já está na guilda — o cargo de membro entra sozinho.\n\n` +
+          `**Passe nesses canais:**\n${roteiro(cfg.channels)}` +
+          (aviso ? `\n\n${aviso}` : ''),
+      },
+    ],
+  });
+
+  // PRIMEIRO no privado. É o único lugar onde a mensagem é mesmo só da pessoa,
+  // ela pode reler quando quiser, e o canal de recrutamento não paga o preço.
+  const user = await client.users.fetch(membro.discordId).catch(() => null);
+  if (user) {
+    const dm = await user.send(corpo()).catch(() => null);
+    if (dm) return true;
+  }
+
+  // DM fechada é comum, e ficar em silêncio seria perder a única boa-vinda que a
+  // pessoa recebe. Então cai no canal, mencionando.
   const canalId = cfg.channels?.recruiters;
-  if (!canalId || !membro?.discordId) return null;
-
+  if (!canalId) return false;
   const canal = await client.channels.fetch(canalId).catch(() => null);
-  if (!canal) return null;
+  if (!canal) return false;
 
-  const lista = roteiro(cfg.channels);
   const msg = await canal
     .send({
       content: `<@${membro.discordId}>`,
-      embeds: [
-        {
-          title: `🎉 Bem-vindo à Wynn Brasil, ${membro.username}!`,
-          color: 0x2ecc71,
-          description:
-            `Você já está na guilda — o cargo de membro entra sozinho.\n\n` +
-            `**Passe nesses canais:**\n${lista}\n\n` +
-            `-# Esta mensagem some sozinha em 24h.`,
-        },
-      ],
+      ...corpo('-# Não consegui te chamar no privado, então deixei aqui.'),
       // Notifica só a pessoa. Sem isto, um `@everyone` que entrasse no texto um
       // dia — por edição ou por nick — pingaria o servidor inteiro.
       allowedMentions: { users: [membro.discordId] },
@@ -83,5 +101,5 @@ export async function sendGuildWelcome(client, cfg, membro) {
       return null;
     });
 
-  return msg ? { welcomeMessageId: msg.id, welcomeChannelId: canal.id } : null;
+  return !!msg;
 }
