@@ -30,6 +30,8 @@ function roteiro(canais) {
     ['warApplication', '⚔️', 'como pedir o cargo de guerra'],
     ['events', '🏆', 'eventos de competição e sorteios'],
     ['loans', '💰', 'empréstimos do baú da guilda'],
+    ['forum', '💬', 'fórum da comunidade — dúvidas, builds, conversa'],
+    ['market', '🪙', 'compra e venda entre membros'],
     ['appeals', '🕊️', 'se algo der errado, é aqui que se resolve'],
   ];
   return guia

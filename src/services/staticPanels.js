@@ -97,22 +97,33 @@ function rulesPayload(params) {
 -# Divirta-se e boas aventuras em Wynncraft!`,
       },
       {
-        title: '🛡️ Avisos e Regras da Guilda Wynn Brasil',
+        title: '🛡️ Avisos da Guilda Wynn Brasil',
         color: COLOR.guild,
         description:
-`Nossa guilda segue uma dinâmica simples e inclusiva. Aqui estão os pontos principais para mantermos organização e harmonia:
+`Como a guilda funciona por dentro: o que rende ponto, o que o ponto compra, e o que libera vaga. Nada aqui é proibição — as regras de convivência estão no aviso acima.
 
 ## 1. Pontos de Contribuição
-Tudo que você faz pela guilda vira ponto. Os pontos definem a **fila de Tomes** e a sua **margem de inatividade**.
+Tudo que você faz pela guilda vira ponto, e ponto vira duas coisas: **prioridade na fila de Tomes** e **margem de inatividade**. A contagem é automática — ninguém precisa avisar nada.
 
-> \`1.000.000\` de Guild XP → **${w.contribPerMillion} ponto**
-> \`1\` Guild Raid → **${w.guildRaid} pontos**, para cada membro do grupo
-> \`1\` Guerra → **${w.war} pontos**, contados pelo seu próprio contador de guerra no jogo
-> \`1\` Objetivo Semanal → **${w.weekly} pontos**, +${streakPct}% por semana seguida (até o dobro)
+> **Objetivo Semanal** — \`${w.weekly} pontos\`, +${streakPct}% por semana seguida (até o dobro). É o que mais rende por tempo gasto.
+> **Guild Raid** — \`${w.guildRaid} pontos\` para **cada** membro nosso no grupo. Ainda rende aspects (abaixo).
+> **Guerra** — \`${w.war} pontos\`, lidos do **seu** contador de guerra no jogo.
+> **Guild XP** (\`/guild xp 100\`) — \`${w.contribPerMillion} ponto\` a cada \`1.000.000\`. Sobe o nível da guilda, o que libera mais slots de membro e de baú.
+> **Farm em grupo** — não pontua, mas rende amizade, dicas e progresso mais rápido.
 
-No canal de status da guilda, o botão **Meus pontos** mostra os seus, sua posição e quantos dias de tolerância eles te dão.
+Território conquistado é conquista da guilda inteira e entra no histórico, mas não pontua ninguém em separado: o jogo não informa quem tomou o quê, e chutar isso já creditou guerra a quem não guerreou.
 
-## 2. Inatividade e Expulsão
+No canal de status, o botão **Meus pontos** mostra os seus, sua posição em cada categoria e quantos dias de tolerância eles te dão.
+
+## 2. Tomes e Aspects
+São as duas recompensas que a guilda distribui, e as duas saem por fila automática. Não precisa pedir nem cobrar.
+
+> **Tomes** — a fila é por **pontos**: quem mais contribuiu recebe primeiro. Requisitos do próprio jogo: alguma classe no nível **${params.tomeMinClassLevel}** e **${params.rewardMinGuildDays} dias** de guilda.
+> **Aspects** — saem das **guild raids**: cada membro nosso no grupo rende \`${fmt(params.aspectsPerGuildRaid)}\` aspect. Raid fechada **sozinho não rende** — é preciso ter pelo menos dois da guilda na party. Também exige **${params.rewardMinGuildDays} dias** de guilda.
+
+Aspect é item inteiro, então meio aspect não some: fica no seu saldo e vira unidade quando a próxima raid fecha o par. Use \`/aspects\` para ver o seu, e acompanhe a fila no canal de tomes.
+
+## 3. Inatividade e Expulsão
 > Membros que ficarem **${base} dias offline** podem ser removidos.
 > **Quem contribui ganha margem:** a cada **${fmt(per)} pontos**, você ganha **+1 dia** de perdão, até **+${maxDays} dias**.
 > Exemplo: ${fmt(exemploPts)} pontos = ${base} + ${exemploDias} = **${exemploTotal} dias** de tolerância.
@@ -124,18 +135,9 @@ No canal de status da guilda, o botão **Meus pontos** mostra os seus, sua posi�
 
 **Expulsão por inatividade não é banimento.** Você pode voltar quando quiser, refazendo o processo em <#${RECRUIT_CHANNEL}>.
 
-## 3. Guild Bank
+## 4. Guild Bank
 > O Guild Bank é público e aberto para todos. Pegue o que precisar.
 > **Scrolls** e **Ferramentas** devem ser devolvidos após o uso. Pegou? Devolva!
-
-## 4. Participação em Atividades da Guilda
-Toda atividade abaixo vira ponto, e ponto vira margem de inatividade e prioridade na fila de Tomes.
-
-> **Objetivos Semanais** — a forma mais barata de pontuar. Um objetivo por semana dá \`${w.weekly}\` pontos, e manter a sequência aumenta o valor em ${streakPct}% a cada semana. É o que mais rende por tempo gasto.
-> **Guild XP** (\`/guild xp 100\`) — cada \`1.000.000\` vira \`${w.contribPerMillion}\` ponto. Sobe o nível da guilda, o que libera mais membros e slots de baú.
-> **Guild Raids** — \`${w.guildRaid}\` pontos para **cada um** dos participantes. Geram buffs e recompensas coletivas.
-> **Guerras** — \`${w.war}\` pontos por guerra, lidos do **seu** contador de guerra no jogo. Território conquistado é conquista da guilda inteira e entra no histórico, mas não pontua ninguém em separado: o jogo não informa quem tomou o quê, e chutar isso já creditou guerra a quem não guerreou.
-> **Farm em Grupo** — não pontua, mas rende amizade, dicas e progresso mais rápido.
 
 **Dúvidas ou sugestões?** Procure um membro da <@&${STAFF_ROLE}>. Estamos aqui para ajudar!`,
       },

@@ -30,6 +30,11 @@ export const CHANNEL_KEYS = Object.freeze([
   'errors', // exceções do bot
   'booth', // avisos de reset de booth (24h) para os donos
   'events', // painel dos eventos de competição e sorteios (cai no canal do comando)
+  // Sem painel nem job: existem só para as boas-vindas conseguirem citá-los. O
+  // roteiro monta os links a partir daqui, e canal não configurado é omitido —
+  // então deixar de configurar não quebra nada, só some da lista.
+  'forum', // fórum da comunidade
+  'market', // compra e venda entre membros
 ]);
 
 /**
