@@ -1,5 +1,11 @@
 import { collections } from '../db/mongo.js';
-import { fetchGuildMembers, isHigherRank, RANK_LABEL } from '../services/guildData.js';
+import {
+  fetchGuildMembers,
+  isHigherRank,
+  rankRoleIds,
+  RANK_LABEL,
+  LEADERSHIP_RANKS,
+} from '../services/guildData.js';
 import { getConfig } from '../config/guildConfig.js';
 import { audit } from '../services/audit.js';
 import { applyClassificationRoles, syncNickname } from '../services/registration.js';
@@ -17,11 +23,70 @@ import { optional } from '../config/env.js';
 import { log } from '../util/log.js';
 
 /**
+ * Cargo de OCIOSO: quem tem cargo de liderança no Discord (Capitão para cima) e
+ * não está mais na guilda.
+ *
+ * O cargo de rank é manual — a staff dá e ninguém tira quando a pessoa sai. O
+ * resultado é uma lista de liderança que não corresponde a ninguém: gente com
+ * poder de Capitão no servidor e sem guilda há meses. Este cargo torna isso
+ * visível sem mexer no que a staff aplicou à mão.
+ *
+ * É SIMÉTRICO de propósito. Sai sozinho quando a pessoa volta para a guilda, e
+ * também quando a staff tira o cargo de rank dela — senão viraria uma marca
+ * permanente que só some na mão, que é exatamente o problema que ele resolve.
+ *
+ * @param {import('discord.js').Client} client
+ * @param {import('discord.js').Guild} guild
+ * @param {object} cfg
+ * @param {Set<string>} naGuilda  discordIds confirmados no roster
+ */
+async function syncIdleRole(client, guild, cfg, naGuilda) {
+  const idleId = cfg.roles?.idle;
+  if (!idleId) return;
+
+  const rankIds = rankRoleIds(guild, LEADERSHIP_RANKS);
+  if (!rankIds.size) {
+    log.warn('Cargo de Ocioso configurado, mas nenhum cargo de liderança encontrado pelo nome.');
+    return;
+  }
+
+  let deu = 0;
+  let tirou = 0;
+  for (const member of guild.members.cache.values()) {
+    if (member.user.bot) continue;
+
+    const temRank = [...rankIds].some((id) => member.roles.cache.has(id));
+    const deveTer = temRank && !naGuilda.has(member.id);
+    const tem = member.roles.cache.has(idleId);
+
+    if (deveTer && !tem) {
+      await member.roles.add(idleId).catch(() => {});
+      deu += 1;
+    } else if (!deveTer && tem) {
+      await member.roles.remove(idleId).catch(() => {});
+      tirou += 1;
+    }
+  }
+
+  // Um aviso por ciclo, com os números: na primeira passada isto pode pegar
+  // dezenas de pessoas, e uma linha por membro afogaria a auditoria.
+  if (deu || tirou) {
+    log.info(`Cargo de Ocioso: +${deu}, -${tirou}.`);
+    await audit(
+      client,
+      guild.id,
+      `💤 Cargo de Ocioso: **${deu}** aplicado(s), **${tirou}** removido(s) — liderança fora da guilda.`,
+    );
+  }
+}
+
+/**
  * Sincroniza a classificação de cada vínculo (membro / neutro / banido), o
  * apelido e o cargo mais alto já alcançado.
  *
  * Os cargos de RANK (Líder, Chefe, …) NÃO são automáticos: são gestão manual
- * da staff. O rank só é gravado no banco, para /verificar e para o peakRank.
+ * da staff. O rank só é gravado no banco, para /verificar e para o peakRank —
+ * e, desde o cargo de Ocioso, para marcar quem tem rank sem estar na guilda.
  *
  * Rodar isto de novo é o que pega quem entrou na guilda da black-list DEPOIS de
  * já ter se registrado.
@@ -103,6 +168,9 @@ export async function runRoleSync(client) {
   await guild.members.fetch().catch(() => {});
 
   const linked = await collections.members().find({}).toArray();
+  // Quem o roster confirma na guilda AGORA, por Discord. Alimenta o cargo de
+  // Ocioso lá embaixo, e sai de graça deste laço que já roda de qualquer jeito.
+  const naGuilda = new Set();
   for (const m of linked) {
     const rank = rankByUuid.get(m.uuid) || null;
     const inGuild = !!rank;
@@ -179,6 +247,8 @@ export async function runRoleSync(client) {
     // Nenhum aviso no Discord — ver notifyRecruiters em services/registration.js.
     await collections.members().updateOne({ uuid: m.uuid }, { $set: update });
 
+    if (inGuild && m.discordId) naGuilda.add(m.discordId);
+
     const member = guild.members.cache.get(m.discordId);
     if (!member) continue;
 
@@ -189,6 +259,8 @@ export async function runRoleSync(client) {
     const tag = blTagByPlayer.get(m.uuid) ?? ally?.tag ?? null;
     await syncNickname(member, nomeAtual, tag);
   }
+  await syncIdleRole(client, guild, cfg, naGuilda);
+
   log.info(
     `Role sync concluído (${linked.length} vínculos, ${res.members.length} membros na guilda, ` +
       `${blacklistedUuids.size} na black-list de ${tracked.blacklist.length} guilda(s), ` +

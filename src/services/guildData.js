@@ -14,6 +14,9 @@ export const RANKS = ['owner', 'chief', 'strategist', 'captain', 'recruiter', 'r
  */
 export const RANK_ALIASES = Object.freeze(['Sub-líder']);
 
+/** O mesmo, por rank, para `rankRoleNames` poder filtrar por um subconjunto. */
+const RANK_ALIASES_BY_RANK = Object.freeze({ chief: ['Sub-líder'] });
+
 export const RANK_LABEL = {
   owner: 'Líder',
   chief: 'Chefe',
@@ -22,6 +25,55 @@ export const RANK_LABEL = {
   recruiter: 'Recrutador',
   recruit: 'Recruta',
 };
+
+/**
+ * Ranks de LIDERANÇA: Capitão para cima.
+ *
+ * Recrutador e Recruta ficam de fora porque são cargos de entrada — quem os tem
+ * e sai da guilda é rotatividade normal. Perder um Capitão para cima sem ninguém
+ * notar é outra coisa: são os cargos que dão poder no servidor.
+ */
+export const LEADERSHIP_RANKS = Object.freeze(['owner', 'chief', 'strategist', 'captain']);
+
+/** Normaliza para casar nome de cargo sem tropeçar em acento ou caixa. */
+export function normRank(s) {
+  return String(s ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+/**
+ * Nomes que um CARGO do Discord pode ter para denotar um rank: a chave da API, o
+ * rótulo em português e os nomes antigos.
+ *
+ * Vive aqui, e não em quem consulta, porque são dois consumidores — a
+ * reconciliação e o cargo de Ocioso — e duas listas de nomes divergiriam no
+ * próximo rename.
+ *
+ * @param {readonly string[]} [ranks]  quais ranks considerar
+ * @returns {Set<string>} nomes já normalizados
+ */
+export function rankRoleNames(ranks = RANKS) {
+  const nomes = new Set();
+  for (const r of ranks) {
+    nomes.add(normRank(r));
+    if (RANK_LABEL[r]) nomes.add(normRank(RANK_LABEL[r]));
+    for (const a of RANK_ALIASES_BY_RANK[r] ?? []) nomes.add(normRank(a));
+  }
+  return nomes;
+}
+
+/** IDs dos cargos do servidor cujo nome bate com um dos ranks pedidos. */
+export function rankRoleIds(guild, ranks = RANKS) {
+  const nomes = rankRoleNames(ranks);
+  const ids = new Set();
+  for (const role of guild.roles.cache.values()) {
+    if (nomes.has(normRank(role.name))) ids.add(role.id);
+  }
+  return ids;
+}
 
 // recruit = 1 … owner = 6. Desconhecido/ausente = 0, para comparar sem casos especiais.
 export function rankWeight(rank) {

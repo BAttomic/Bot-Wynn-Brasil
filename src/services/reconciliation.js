@@ -1,6 +1,6 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from 'discord.js';
 import { collections } from '../db/mongo.js';
-import { fetchGuildMembers, RANKS, RANK_LABEL, RANK_ALIASES } from './guildData.js';
+import { fetchGuildMembers, RANKS, rankRoleIds } from './guildData.js';
 import {
   applyClassificationRoles,
   syncNickname,
@@ -62,22 +62,9 @@ function norm(s) {
     .trim();
 }
 
-/** Nomes de cargo que denotam um RANK da guilda (todo rank exige estar na guilda). */
-const RANK_NAMES = new Set([
-  ...RANKS.map(norm),
-  ...Object.values(RANK_LABEL).map(norm),
-  // Nome antigo do cargo, que pode não ter sido renomeado no servidor.
-  ...RANK_ALIASES.map(norm),
-]);
-
-/** IDs dos cargos do servidor cujo nome bate com um rank da guilda. */
-function rankRoleIds(guild) {
-  const ids = new Set();
-  for (const role of guild.roles.cache.values()) {
-    if (RANK_NAMES.has(norm(role.name))) ids.add(role.id);
-  }
-  return ids;
-}
+// O casamento de nome de cargo com rank mora em services/guildData.js, junto dos
+// rótulos e dos nomes antigos. São dois consumidores — este painel e o cargo de
+// Ocioso no roleSync — e duas listas divergiriam no próximo rename.
 
 /**
  * Deduz o `kind` correto de um membro do Discord a partir do apelido e do

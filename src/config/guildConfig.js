@@ -51,6 +51,9 @@ export const ROLE_KEYS = Object.freeze([
   'banned', // pertence à guilda da black-list, ou foi banido pela staff
   'war', // pingado na convocação de guerra
   'mainWar', // pode disparar /war
+  // Quem tem cargo de LIDERANÇA no Discord (Capitão para cima) mas não está mais
+  // na guilda. Aplicado e retirado pelo roleSync; ver jobs/roleSync.js.
+  'idle',
 ]);
 
 /**
