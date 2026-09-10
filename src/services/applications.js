@@ -32,6 +32,17 @@ export const QUEUE_STATUS = Object.freeze(['approved', 'invited']);
 
 const oid = (id) => (typeof id === 'string' ? new ObjectId(id) : id);
 
+/** Apaga uma mensagem, se ela ainda existir. Nunca propaga erro. */
+async function apagarMensagem(client, channelId, messageId) {
+  if (!channelId || !messageId) return false;
+  const canal = await client?.channels?.fetch(channelId).catch(() => null);
+  if (!canal) return false;
+  const msg = await canal.messages.fetch(messageId).catch(() => null);
+  if (!msg) return false;
+  await msg.delete().catch(() => {});
+  return true;
+}
+
 /**
  * A fila de entrada, em ordem de chegada (= ordem de aprovação).
  * @returns {Promise<object[]>}
@@ -55,13 +66,45 @@ export function queueApplications() {
  * @param {string[]} uuids  uuids que estão no roster agora
  * @returns {Promise<number>} quantas candidaturas foram fechadas
  */
-export async function closeJoinedApplications(uuids) {
+export async function closeJoinedApplications(client, uuids) {
   if (!uuids?.length) return 0;
-  const res = await collections.applications().updateMany(
-    { uuid: { $in: [...uuids] }, status: { $in: QUEUE_STATUS } },
+  const apps = collections.applications();
+
+  // `open` entra na busca junto com a fila. É comum a staff convidar no jogo
+  // antes de a votação fechar: a pessoa entra, e a candidatura dela continuaria
+  // aberta até o prazo de 24h — quando o applicationExpiry anunciaria o veredito
+  // de alguém que já está na guilda há horas.
+  const alvos = await apps
+    .find({ uuid: { $in: [...uuids] }, status: { $in: [...QUEUE_STATUS, 'open'] } })
+    .toArray();
+  if (!alvos.length) return 0;
+
+  // Quem estava em votação é separado ANTES do update: depois dele todo mundo
+  // está `joined`, e olhar o status aqui embaixo dependeria de os documentos
+  // lidos não terem sido tocados junto.
+  const abertas = alvos.filter((a) => a.status === 'open');
+
+  await apps.updateMany(
+    { _id: { $in: alvos.map((a) => a._id) } },
     { $set: { status: 'joined', joinedAt: new Date() } },
   );
-  return res.modifiedCount;
+
+  for (const app of abertas) {
+    // A votação perdeu o objeto — a decisão que ela ia tomar já foi tomada, no
+    // jogo. Some com a mensagem em vez de deixar botões que não decidem nada.
+    await apagarMensagem(client, app.channelId, app.messageId);
+    // O id sai mesmo se a mensagem já não existia: sem `decidedAt`, o
+    // recruitCleanup não pegaria esta candidatura depois.
+    await apps.updateOne({ _id: app._id }, { $unset: { messageId: '' } });
+
+    await audit(
+      client,
+      app.guildDiscordId,
+      `🚪 **${app.username}** entrou na guilda antes de a votação fechar — candidatura encerrada e a votação recolhida.`,
+    );
+  }
+
+  return alvos.length;
 }
 
 /**

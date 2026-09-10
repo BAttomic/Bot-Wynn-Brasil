@@ -112,7 +112,7 @@ export async function runRoleSync(client) {
   // Vai o roster INTEIRO, e não só quem entrou neste ciclo, porque isso também
   // resolve quem já estava dentro antes do estado `joined` existir — sem
   // migração à parte. Depois da primeira passada não casa mais nada.
-  const fechadas = await closeJoinedApplications([...rankByUuid.keys()]);
+  const fechadas = await closeJoinedApplications(client, [...rankByUuid.keys()]);
   if (fechadas) log.info(`Fila de entrada: ${fechadas} candidatura(s) fechada(s) por já estarem na guilda.`);
 
   // Nick ATUAL de quem aparece em algum roster, na grafia da API. Alimentado por
