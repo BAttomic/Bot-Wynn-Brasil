@@ -39,10 +39,14 @@ import { log } from '../util/log.js';
  * @param {import('discord.js').Guild} guild
  * @param {object} cfg
  * @param {Set<string>} naGuilda  discordIds confirmados no roster
+ * @param {boolean} cacheCompleto  se a lista de membros do Discord veio inteira
  */
-async function syncIdleRole(client, guild, cfg, naGuilda) {
+async function syncIdleRole(client, guild, cfg, naGuilda, cacheCompleto) {
   const idleId = cfg.roles?.idle;
   if (!idleId) return;
+  // Cache incompleto = decisão incompleta. Com meia lista de membros, o laço
+  // abaixo tiraria o cargo de quem simplesmente não foi carregado.
+  if (!cacheCompleto) return;
 
   const rankIds = rankRoleIds(guild, LEADERSHIP_RANKS);
   if (!rankIds.size) {
@@ -165,7 +169,14 @@ export async function runRoleSync(client) {
 
   const banIndex = await loadBanIndex();
 
-  await guild.members.fetch().catch(() => {});
+  // Guardamos se o fetch FUNCIONOU. Sem ele o cache fica incompleto, e aí não
+  // dá para concluir que alguém "não está no Discord" — todo mundo pareceria
+  // fora, e a auditoria do ciclo inteiro sairia com o rótulo errado.
+  const cacheCompleto = await guild.members.fetch().then(
+    () => true,
+    () => false,
+  );
+  if (!cacheCompleto) log.warn('Lista de membros do Discord indisponível neste ciclo; cargos e apelidos ficam para o próximo.');
 
   const linked = await collections.members().find({}).toArray();
   // Quem o roster confirma na guilda AGORA, por Discord. Alimenta o cargo de
@@ -205,6 +216,16 @@ export async function runRoleSync(client) {
     // estava guardado. O nome novo passa a valer para o banco E para o apelido.
     const nomeAtual = nameByUuid.get(m.uuid) ?? m.username;
 
+    // `<@id>` de quem saiu do DISCORD o cliente renderiza como
+    // "@usuário-desconhecido": um rótulo que não identifica ninguém e ocupa o
+    // lugar do nick, que era a informação útil da linha. Quem não está mais no
+    // servidor é citado pelo nick — e a auditoria passa a dizer isso, que é um
+    // fato que a staff quer saber ao ver alguém saindo da guilda.
+    const noServidor = !cacheCompleto || (!!m.discordId && guild.members.cache.has(m.discordId));
+    const quem = noServidor
+      ? `<@${m.discordId}> (**${nomeAtual}**)`
+      : `**${nomeAtual}** (fora do Discord)`;
+
     const update = {
       inGuild,
       guildRank: rank,
@@ -213,7 +234,13 @@ export async function runRoleSync(client) {
     };
     if (nomeAtual !== m.username) {
       update.username = nomeAtual;
-      audit(client, guildDiscordId, `🪪 <@${m.discordId}> trocou de nick no jogo: **${m.username}** → **${nomeAtual}**.`);
+      // Aqui o nick antigo e o novo já aparecem no texto, então repetir o atual
+      // como sujeito seria redundante: fora do servidor, a frase começa no verbo.
+      audit(
+        client,
+        guildDiscordId,
+        `🪪 ${noServidor ? `<@${m.discordId}> ` : ''}trocou de nick no jogo: **${m.username}** → **${nomeAtual}**.`,
+      );
     }
 
     // Cargo mais alto que a pessoa já teve. Sobrevive a kick por inatividade,
@@ -226,7 +253,7 @@ export async function runRoleSync(client) {
     if (inGuild && !m.inGuild) {
       update.joinedGuildAt = new Date();
       update.guildConfirmed = true;
-      audit(client, guildDiscordId, `✅ <@${m.discordId}> (**${m.username}**) entrou na guilda como ${rank}.`);
+      audit(client, guildDiscordId, `✅ ${quem} entrou na guilda como ${rank}.`);
       // Só na TRANSIÇÃO. Se ficasse junto do fechamento em massa da fila, a
       // primeira passada depois do deploy mencionaria a guilda inteira de uma
       // vez — 80 pings de boas-vindas para gente que entrou meses atrás.
@@ -236,12 +263,12 @@ export async function runRoleSync(client) {
         audit(
           client,
           guildDiscordId,
-          `⬆️ <@${m.discordId}> (**${m.username}**) já foi **${RANK_LABEL[m.peakRank] ?? m.peakRank}** e voltou como **${RANK_LABEL[rank] ?? rank}**. Considere restaurar o cargo.`,
+          `⬆️ ${quem} já foi **${RANK_LABEL[m.peakRank] ?? m.peakRank}** e voltou como **${RANK_LABEL[rank] ?? rank}**. Considere restaurar o cargo.`,
         );
       }
     } else if (!inGuild && m.inGuild) {
       update.leftGuildAt = new Date();
-      audit(client, guildDiscordId, `👋 <@${m.discordId}> (**${m.username}**) saiu da guilda.`);
+      audit(client, guildDiscordId, `👋 ${quem} saiu da guilda.`);
     }
     // Passar a banido é registrado só no banco (campo `classification`).
     // Nenhum aviso no Discord — ver notifyRecruiters em services/registration.js.
@@ -259,7 +286,7 @@ export async function runRoleSync(client) {
     const tag = blTagByPlayer.get(m.uuid) ?? ally?.tag ?? null;
     await syncNickname(member, nomeAtual, tag);
   }
-  await syncIdleRole(client, guild, cfg, naGuilda);
+  await syncIdleRole(client, guild, cfg, naGuilda, cacheCompleto);
 
   log.info(
     `Role sync concluído (${linked.length} vínculos, ${res.members.length} membros na guilda, ` +
