@@ -111,9 +111,10 @@ async function correctTomes(interaction) {
     ajustar !== null ? await adjustTomesDelivered(link.uuid, ajustar) : await setTomesDelivered(link.uuid, corrigir);
   const st = await tomeStatus(link.uuid);
 
-  // Ficou com excedente: sai da fila, que é onde a entrada também passa a ser
-  // barrada (ver joinQueue). A conta em si não muda — o excedente fica guardado.
-  const saiu = st.excess > 0 ? (await collections.tomeQueue().deleteOne({ uuid: link.uuid })).deletedCount > 0 : false;
+  // Toda correção tira da fila, como uma entrega: a posição dela foi pedida com
+  // a conta antiga. Quem ainda tiver direito entra de novo; quem ficou com
+  // excedente é barrado na entrada (ver joinQueue).
+  const saiu = (await collections.tomeQueue().deleteOne({ uuid: link.uuid })).deletedCount > 0;
 
   await audit(
     interaction.client,
@@ -126,9 +127,8 @@ async function correctTomes(interaction) {
   return interaction.editReply(
     `✏️ **${link.username}** — Tomes entregues: ${res.antes} → **${res.agora}**\n` +
       tomeSummary({ username: link.username, ...st }) +
-      (st.excess > 0
-        ? `\n-# 🚫 Bloqueado de entrar na fila até cumprir mais ${st.excess} semanal(is).${saiu ? ' Foi tirado da fila.' : ''}`
-        : ''),
+      (saiu ? '\n-# 🚪 Foi tirado da fila.' : '') +
+      (st.excess > 0 ? `\n-# 🚫 Bloqueado de entrar na fila até cumprir mais ${st.excess} semanal(is).` : ''),
   );
 }
 
