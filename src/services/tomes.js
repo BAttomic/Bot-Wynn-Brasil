@@ -108,6 +108,68 @@ export async function deliverTome(uuid) {
   };
 }
 
+/**
+ * Soma (ou tira) Tomes do total já entregue, sem precisar saber o acumulado.
+ *
+ * É o mesmo `ajustar` do /aspects: "entreguei 5 a mais e não registrei" vira
+ * `+5`, "registrei 2 que não saíram" vira `-2`. Não mexe na fila — quem ficar
+ * sem crédito continua nela, só que em espera.
+ *
+ * Passar do direito é permitido de propósito: `tomeCredits` só zera o que se
+ * MOSTRA, o excedente fica guardado em `tomesDelivered`, e as próximas missões
+ * semanais quitam a diferença antes de voltar a dar direito a Tome.
+ *
+ * O total nunca fica negativo: entregue é "quanto saiu do baú".
+ *
+ * @param {string} uuid
+ * @param {number} delta  inteiro; positivo soma, negativo estorna
+ * @returns {Promise<{antes:number, agora:number}|null>} null se delta inválido
+ */
+export async function adjustTomesDelivered(uuid, delta) {
+  if (!Number.isInteger(delta) || delta === 0) return null;
+  // Pipeline para ler e escrever numa operação só: duas correções simultâneas
+  // não podem se sobrescrever.
+  const antes = await collections.guildStats().findOneAndUpdate(
+    { uuid },
+    [{ $set: { tomesDelivered: { $max: [0, { $add: [{ $ifNull: ['$tomesDelivered', 0] }, delta] }] } } }],
+    { upsert: true, returnDocument: 'before', projection: { tomesDelivered: 1 } },
+  );
+  const valorAntes = antes?.tomesDelivered ?? 0;
+  return { antes: valorAntes, agora: Math.max(0, valorAntes + delta) };
+}
+
+/**
+ * Reescreve o total já entregue, para quando se sabe o número certo.
+ * @param {string} uuid
+ * @param {number} total  inteiro >= 0
+ * @returns {Promise<{antes:number, agora:number}|null>} null se total inválido
+ */
+export async function setTomesDelivered(uuid, total) {
+  if (!Number.isInteger(total) || total < 0) return null;
+  const antes = await collections
+    .guildStats()
+    .findOneAndUpdate(
+      { uuid },
+      { $set: { tomesDelivered: total } },
+      { upsert: true, returnDocument: 'before', projection: { tomesDelivered: 1 } },
+    );
+  return { antes: antes?.tomesDelivered ?? 0, agora: total };
+}
+
+/**
+ * O retrato de Tomes de UMA pessoa: direito de vida, quanto já saiu, quanto
+ * ainda pode pedir e quanto recebeu além do direito.
+ * @returns {Promise<{delivered:number, entitled:number, credits:number, excess:number}>}
+ */
+export async function tomeStatus(uuid) {
+  const stat = await collections
+    .guildStats()
+    .findOne({ uuid }, { projection: { weeklyObjectives: 1, tomesDelivered: 1 } });
+  const delivered = stat?.tomesDelivered ?? 0;
+  const entitled = stat?.weeklyObjectives ?? 0;
+  return { delivered, entitled, credits: tomeCredits(stat), excess: Math.max(0, delivered - entitled) };
+}
+
 function fmtAsp(n) {
   return n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 }

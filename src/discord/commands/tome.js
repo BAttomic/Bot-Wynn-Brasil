@@ -15,9 +15,13 @@ import {
   ensureTomePanel,
   ensureDeliveryLogPanel,
   recordDelivery,
+  adjustTomesDelivered,
+  setTomesDelivered,
+  tomeStatus,
 } from '../../services/tomes.js';
 import { pendingAspects, deliverAspects, aspectStatus } from '../../services/aspects.js';
 import { maxClassLevel, tomeMinLevel } from '../../services/eligibility.js';
+import { audit } from '../../services/audit.js';
 import { autoDismiss, DISMISS } from '../../util/ephemeral.js';
 
 const fmtAsp = (n) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
@@ -61,9 +65,64 @@ async function replyAndDismiss(interaction, payload, seconds = DISMISS.delivery)
  */
 function tomeSummary({ username, delivered, entitled, credits }) {
   const total = `**${username}** — **${delivered}** de **${entitled}** Tome(s) a que tem direito`;
-  return credits > 0
-    ? `> ${total} · faltam **${credits}**, e a fila vale por 1 — é só entrar de novo, sem espera.`
-    : `> ${total} · nada a receber agora; cada missão semanal cumprida dá direito a mais 1.`;
+  if (credits > 0) return `> ${total} · faltam **${credits}**, e a fila vale por 1 — é só entrar de novo, sem espera.`;
+  // Recebeu além do direito: sem isto, "8 de 3" parece bug em vez de excedente.
+  if (delivered > entitled) {
+    return `> ${total} · ⚠️ recebeu **${delivered - entitled}** a mais — as próximas missões semanais quitam isso antes de dar direito a Tome de novo.`;
+  }
+  return `> ${total} · nada a receber agora; cada missão semanal cumprida dá direito a mais 1.`;
+}
+
+/**
+ * `/tome corrigir`: o mesmo conserto do /aspects, para Tomes entregues fora do
+ * bot ou registrados errado.
+ *
+ * `ajustar` soma ou tira sem precisar saber o acumulado (+5 = entreguei 5 e não
+ * registrei); `entregues` reescreve o total quando se sabe o número certo. Sem
+ * nenhum dos dois, só mostra como a pessoa está — é o que se precisa ver antes
+ * de usar `entregues`.
+ */
+async function correctTomes(interaction) {
+  if (!(await isTomeManager(interaction))) {
+    return interaction.editReply('Apenas **Chief ou superior** pode corrigir Tomes.');
+  }
+  const user = interaction.options.getUser('user', true);
+  const ajustar = interaction.options.getInteger('ajustar');
+  const corrigir = interaction.options.getInteger('entregues');
+
+  const link = await collections.members().findOne({ discordId: user.id });
+  if (!link) return interaction.editReply(`<@${user.id}> não está vinculado a nenhuma conta.`);
+
+  if (ajustar !== null && corrigir !== null) {
+    return interaction.editReply('Use **uma** das duas: `ajustar` (quanto somar ou tirar) ou `entregues` (o total certo).');
+  }
+  if (ajustar === null && corrigir === null) {
+    const st = await tomeStatus(link.uuid);
+    return interaction.editReply(
+      `${tomeSummary({ username: link.username, ...st })}\n` +
+        '-# Para corrigir: `ajustar:5` soma 5 entregues fora do bot · `ajustar:-2` tira 2 · `entregues:8` reescreve o total para 8.',
+    );
+  }
+  if (ajustar === 0) {
+    return interaction.editReply('Ajustar zero não faz nada. Use um número com sinal, ex.: `5` para somar 5 ou `-2` para tirar 2.');
+  }
+
+  const res =
+    ajustar !== null ? await adjustTomesDelivered(link.uuid, ajustar) : await setTomesDelivered(link.uuid, corrigir);
+  const st = await tomeStatus(link.uuid);
+
+  await audit(
+    interaction.client,
+    interaction.guildId,
+    `✏️ <@${interaction.user.id}> corrigiu os Tomes entregues de **${link.username}**: ` +
+      `${res.antes} → **${res.agora}** (direito ${st.entitled}).`,
+  );
+  await ensureTomePanel(interaction.client, interaction.guildId).catch(() => null);
+
+  return interaction.editReply(
+    `✏️ **${link.username}** — Tomes entregues: ${res.antes} → **${res.agora}**\n` +
+      tomeSummary({ username: link.username, ...st }),
+  );
 }
 
 /**
@@ -482,6 +541,25 @@ export default {
         .setDescription('(Staff) Concede um Tome e remove da fila')
         .addUserOption((o) => o.setName('user').setDescription('Quem recebeu (padrão: topo da fila)').setRequired(false)),
     )
+    .addSubcommand((s) =>
+      s
+        .setName('corrigir')
+        .setDescription('(Staff) Corrige os Tomes já entregues a um jogador')
+        .addUserOption((o) => o.setName('user').setDescription('Jogador a corrigir').setRequired(true))
+        .addIntegerOption((o) =>
+          o
+            .setName('ajustar')
+            .setDescription('Tomes a MAIS (+5) ou a MENOS (-2) no já entregue')
+            .setRequired(false),
+        )
+        .addIntegerOption((o) =>
+          o
+            .setName('entregues')
+            .setDescription('Novo TOTAL de Tomes já entregues a esse jogador')
+            .setMinValue(0)
+            .setRequired(false),
+        ),
+    )
     .toJSON(),
 
   owns(interaction) {
@@ -532,6 +610,7 @@ export default {
       return res;
     }
     if (sub === 'queue') return showQueue(interaction);
+    if (sub === 'corrigir') return correctTomes(interaction);
 
     // grant (staff)
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
