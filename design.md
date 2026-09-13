@@ -212,6 +212,8 @@ registradas pelo watcher, a partir do dia em que o bot passou a acompanhar).
 Tomes entregues fora do bot (`-2` tira) e `entregues:8` reescreve o total. Passar
 do direito é permitido: o excedente fica em `tomesDelivered`, o crédito mostra 0,
 e as próximas semanais quitam a diferença antes de voltar a dar direito.
+**Com excedente a pessoa fica barrada da fila** — nem entra em espera, e a
+correção a tira se estiver nela — até as semanais igualarem o entregue.
 
 ## 11. Módulo: Empréstimos (ledger de confiança)
 

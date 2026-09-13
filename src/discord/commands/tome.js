@@ -68,7 +68,7 @@ function tomeSummary({ username, delivered, entitled, credits }) {
   if (credits > 0) return `> ${total} · faltam **${credits}**, e a fila vale por 1 — é só entrar de novo, sem espera.`;
   // Recebeu além do direito: sem isto, "8 de 3" parece bug em vez de excedente.
   if (delivered > entitled) {
-    return `> ${total} · ⚠️ recebeu **${delivered - entitled}** a mais — as próximas missões semanais quitam isso antes de dar direito a Tome de novo.`;
+    return `> ${total} · ⚠️ recebeu **${delivered - entitled}** a mais — não entra na fila até as próximas missões semanais quitarem isso.`;
   }
   return `> ${total} · nada a receber agora; cada missão semanal cumprida dá direito a mais 1.`;
 }
@@ -111,6 +111,10 @@ async function correctTomes(interaction) {
     ajustar !== null ? await adjustTomesDelivered(link.uuid, ajustar) : await setTomesDelivered(link.uuid, corrigir);
   const st = await tomeStatus(link.uuid);
 
+  // Ficou com excedente: sai da fila, que é onde a entrada também passa a ser
+  // barrada (ver joinQueue). A conta em si não muda — o excedente fica guardado.
+  const saiu = st.excess > 0 ? (await collections.tomeQueue().deleteOne({ uuid: link.uuid })).deletedCount > 0 : false;
+
   await audit(
     interaction.client,
     interaction.guildId,
@@ -121,7 +125,10 @@ async function correctTomes(interaction) {
 
   return interaction.editReply(
     `✏️ **${link.username}** — Tomes entregues: ${res.antes} → **${res.agora}**\n` +
-      tomeSummary({ username: link.username, ...st }),
+      tomeSummary({ username: link.username, ...st }) +
+      (st.excess > 0
+        ? `\n-# 🚫 Bloqueado de entrar na fila até cumprir mais ${st.excess} semanal(is).${saiu ? ' Foi tirado da fila.' : ''}`
+        : ''),
   );
 }
 
@@ -424,6 +431,18 @@ async function promptDelivery(interaction) {
 async function joinQueue(interaction) {
   const member = await collections.members().findOne({ discordId: interaction.user.id });
   if (!member) return interaction.editReply('Você precisa se registrar antes (canal de registro).');
+
+  // Quem recebeu MAIS Tomes do que tem direito não entra, nem em espera. Sem
+  // crédito normal a pessoa pode entrar e aguardar a próxima semanal; com
+  // excedente ela ainda deve semanais, e esperar na fila só a faria parecer
+  // perto de receber. Checado antes da API: é barato e definitivo.
+  const st = await tomeStatus(member.uuid);
+  if (st.excess > 0) {
+    return interaction.editReply(
+      `Você já recebeu **${st.delivered}** Tome(s), **${st.excess}** a mais do que as **${st.entitled}** missões semanais dão direito.\n` +
+        `-# Só dá para entrar na fila de novo depois de cumprir mais **${st.excess}** missão(ões) semanal(is).`,
+    );
+  }
 
   // Nível de classe é requisito de ENTRADA. Os dias de guilda, não: como nos
   // aspects, dá para entrar na fila antes e ela só passa a valer ao completar.

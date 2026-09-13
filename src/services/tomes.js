@@ -47,6 +47,13 @@ export async function rankedQueue(guildId) {
     .toArray();
   const byUuid = new Map(stats.map((s) => [s.uuid, s]));
   return queue
+    // Quem recebeu além do direito está barrado da fila (ver joinQueue). A
+    // correção já o tira, mas quem estava na fila antes disso não pode seguir
+    // aparecendo nela.
+    .filter((q) => {
+      const s = byUuid.get(q.uuid);
+      return (s?.tomesDelivered ?? 0) <= (s?.weeklyObjectives ?? 0);
+    })
     .map((q) => {
       const s = byUuid.get(q.uuid);
       const days = daysSince(s?.joinedGuildAt);
