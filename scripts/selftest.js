@@ -280,7 +280,7 @@ async function main() {
     });
     const velha = await getConfig(process.env.DISCORD_GUILD_ID);
     check('peso antigo do banco é preservado', velha.params.pointsWeights.raid, 5);
-    check('guildRaid volta do padrão (era undefined)', velha.params.pointsWeights.guildRaid, 10);
+    check('guildRaid volta do padrão (era undefined)', velha.params.pointsWeights.guildRaid, 25);
     check('weekly volta do padrão (era undefined)', velha.params.pointsWeights.weekly, 30);
     check('territoryBase volta do padrão (era undefined)', velha.params.pointsWeights.territoryBase, 10);
     check('params de topo novos também entram', velha.params.inactivityForgivenessPerPoints, 1000);

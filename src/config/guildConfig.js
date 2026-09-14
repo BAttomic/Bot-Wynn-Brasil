@@ -96,8 +96,8 @@ export const PARAM_KEYS = Object.freeze([
  * reescreve todo o histórico (ver services/points.js).
  *
  * Tabela oficial:
- *   1.000.000 de Guild XP  →  1 ponto
- *   1 guild raid           →  10 pontos, para cada membro do grupo
+ *   2.000.000 de Guild XP  →  1 ponto   (contribPerMillion 0,5)
+ *   1 guild raid           →  25 pontos, para cada membro do grupo
  *   1 guerra               →  10 pontos × multiplicador de conexões/externals
  *   1 objetivo semanal     →  30 pontos × (1 + 10% por semana seguida, teto +100%)
  *
@@ -147,9 +147,10 @@ const DEFAULT_PARAMS = Object.freeze({
   pointsWeights: Object.freeze({
     war: 10,
     raid: 0, // raid comum não entra na tabela de pontuação
-    guildRaid: 10,
+    guildRaid: 25,
     weekly: 30,
-    contribPerMillion: 1,
+    // 1 ponto a cada 2.000.000 de Guild XP.
+    contribPerMillion: 0.5,
     // Igual ao peso da guerra de propósito: o evento de território paga só o
     // EXCEDENTE do multiplicador, e a soma fecha em `war × multiplicador`.
     territoryBase: 10,
@@ -305,4 +306,40 @@ export function setRole(guildDiscordId, key, roleId) {
 /** @param {string} guildDiscordId @param {string} key @param {unknown} value */
 export function setParam(guildDiscordId, key, value) {
   return setField(guildDiscordId, 'params', key, value);
+}
+
+/**
+ * Revisões de peso que precisam valer também para quem já tem config salva.
+ *
+ * Trocar o padrão não basta: o documento de config nasce com uma CÓPIA dos
+ * padrões (ver getConfig), então o peso antigo está gravado no banco e venceria
+ * o novo no merge. Cada revisão grava só as chaves que mudou — as outras ficam
+ * como a staff deixou — e roda UMA vez por guilda: o id vai para `migrations`,
+ * e um /config posterior não é desfeito no próximo boot.
+ */
+const WEIGHT_REVISIONS = Object.freeze([
+  { id: '2026-09-guildraid25-xp2m', weights: { guildRaid: 25, contribPerMillion: 0.5 } },
+]);
+
+/**
+ * Aplica as revisões de peso pendentes.
+ * @param {string} guildDiscordId
+ * @returns {Promise<string[]>} ids aplicados agora — não vazio = reapurar os pontos
+ */
+export async function applyWeightRevisions(guildDiscordId) {
+  const aplicadas = [];
+  for (const rev of WEIGHT_REVISIONS) {
+    const $set = Object.fromEntries(
+      Object.entries(rev.weights).map(([k, v]) => [`params.pointsWeights.${k}`, v]),
+    );
+    // O filtro por `migrations` torna a escrita idempotente mesmo com dois boots
+    // simultâneos. Sem documento de config, não há peso antigo gravado: os
+    // padrões já são os novos.
+    const res = await collections
+      .config()
+      .updateOne({ guildDiscordId, migrations: { $ne: rev.id } }, { $set, $addToSet: { migrations: rev.id } });
+    if (res.modifiedCount) aplicadas.push(rev.id);
+  }
+  if (aplicadas.length) cache.delete(guildDiscordId);
+  return aplicadas;
 }

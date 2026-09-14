@@ -132,6 +132,19 @@ export function eventPoints(event, params = {}) {
   }
 }
 
+/**
+ * A taxa do Guild XP em forma legível: "1 ponto a cada 2.000.000", e não
+ * "0,5 ponto a cada 1.000.000". Abaixo de 1 ponto por milhão, inverte a conta
+ * para o ponto ficar inteiro.
+ * @param {number} contribPerMillion
+ * @returns {{pts: number, xp: number}}
+ */
+export function xpRate(contribPerMillion) {
+  const c = Number(contribPerMillion) || 0;
+  if (c > 0 && c < 1) return { pts: 1, xp: Math.round(1_000_000 / c) };
+  return { pts: c, xp: 1_000_000 };
+}
+
 async function currentParams() {
   const gid = optional('DISCORD_GUILD_ID');
   if (!gid) return {};

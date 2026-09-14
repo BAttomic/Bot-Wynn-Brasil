@@ -28,7 +28,8 @@ import { runTomeCleanup } from './jobs/tomeCleanup.js';
 import { runRecruitCleanup } from './jobs/recruitCleanup.js';
 import { ensureActiveSeason } from './services/seasons.js';
 import { initErrorReport, reportError } from './services/errorReport.js';
-import { getConfig } from './config/guildConfig.js';
+import { getConfig, applyWeightRevisions } from './config/guildConfig.js';
+import { recomputePoints, rebuildLeaderboards } from './services/points.js';
 import { startHealthServer } from './health.js';
 import { log } from './util/log.js';
 
@@ -70,6 +71,14 @@ async function main() {
   // Fixa a baseline dos aspects no valor atual de guild raids: todo mundo passa
   // a contar do ZERO a partir de agora. Idempotente (só mexe em quem falta).
   await ensureAspectBaselines();
+  // Peso novo reescreve o passado: o livro-razão guarda quantidades, e os pontos
+  // saem dos pesos atuais. Reapura na hora para o ranking não esperar a apuração.
+  const revisoes = await applyWeightRevisions(guildId);
+  if (revisoes.length) {
+    await recomputePoints();
+    await rebuildLeaderboards();
+    log.info(`Pesos revisados (${revisoes.join(', ')}): histórico de pontos reapurado.`);
+  }
   // Black-list vazia não quebra nada, mas também não bane ninguém — e como o
   // auto-ban é silencioso, o log é o único lugar onde isso aparece.
   await warnIfEmpty();

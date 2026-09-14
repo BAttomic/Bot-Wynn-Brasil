@@ -1,6 +1,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { getConfig } from '../config/guildConfig.js';
 import { ensurePanel } from './panels.js';
+import { xpRate } from './points.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { queueStaticPanel } from './recruitQueuePanel.js';
 
@@ -41,6 +42,7 @@ const SILENT = { allowedMentions: { parse: [] } };
 /** @param {import('../config/guildConfig.js').GuildParams} params */
 function rulesPayload(params) {
   const w = params.pointsWeights;
+  const xp = xpRate(w.contribPerMillion);
   const base = params.inactivityDays;
   const per = params.inactivityForgivenessPerPoints;
   const maxDays = params.inactivityForgivenessMaxDays;
@@ -108,7 +110,7 @@ Tudo que você faz pela guilda vira ponto, e ponto vira duas coisas: **prioridad
 > **Objetivo Semanal** — \`${w.weekly} pontos\`, +${streakPct}% por semana seguida (até o dobro). É o que mais rende por tempo gasto.
 > **Guild Raid** — \`${w.guildRaid} pontos\` para **cada** membro nosso no grupo. Ainda rende aspects (abaixo).
 > **Guerra** — \`${w.war} pontos\`, lidos do **seu** contador de guerra no jogo.
-> **Guild XP** (\`/guild xp 100\`) — \`${w.contribPerMillion} ponto\` a cada \`1.000.000\`. Sobe o nível da guilda, o que libera mais slots de membro e de baú.
+> **Guild XP** (\`/guild xp 100\`) — \`${fmt(xp.pts)} ponto\` a cada \`${fmt(xp.xp)}\`. Sobe o nível da guilda, o que libera mais slots de membro e de baú.
 > **Farm em grupo** — não pontua, mas rende amizade, dicas e progresso mais rápido.
 
 Território conquistado é conquista da guilda inteira e entra no histórico, mas não pontua ninguém em separado: o jogo não informa quem tomou o quê, e chutar isso já creditou guerra a quem não guerreou.

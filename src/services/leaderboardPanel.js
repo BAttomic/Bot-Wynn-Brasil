@@ -2,7 +2,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { collections } from '../db/mongo.js';
 import { getConfig } from '../config/guildConfig.js';
 import { ensurePanel, panelMessageId } from './panels.js';
-import { pointsLeaderboard, categoryLeaderboard, CATEGORIES } from './points.js';
+import { pointsLeaderboard, categoryLeaderboard, CATEGORIES, xpRate } from './points.js';
 import { getActiveSeason } from './seasons.js';
 import { allowanceDays, forgivenessDays, daysOffline } from './inactivity.js';
 import { wynn } from '../wynn/api.js';
@@ -68,7 +68,9 @@ export function renderPoints(doc, seasonId = null, page = 0) {
     return { title: '🏆 Pontos de contribuição', color: 0xf1c40f, description: 'Ainda não há pontos apurados.' };
   }
   const { fatia, inicio, page: p, pages } = paginar(rows, page);
-  const lines = fatia.map((r, i) => `${badge(inicio + i)} **${r.username}** — ${r.points} pts`);
+  const lines = fatia.map(
+    (r, i) => `${badge(inicio + i)} **${r.username}** — \`${Number(r.points).toLocaleString('pt-BR')}\` pts`,
+  );
   return { title: '🏆 Pontos de contribuição', color: 0xf1c40f, description: lines.join('\n'), ...stamp(doc, seasonId, p, pages, rows.length) };
 }
 
@@ -492,6 +494,7 @@ const SCORING_STATE_ID = 'scoringPanel';
 function scoringPanelPayload(params, view = DEFAULT_VIEW) {
   const w = params?.pointsWeights ?? {};
   const n = (v) => Number(v ?? 0).toLocaleString('pt-BR');
+  const xp = xpRate(w.contribPerMillion);
   const semanalMax = Math.round(Number(w.weekly ?? 0) * (1 + (Number(params?.weeklyStreakBonusMax) || 0)));
   const bonusSemana = Math.round((Number(params?.weeklyStreakBonusPerWeek) || 0) * 100);
 
@@ -515,8 +518,8 @@ function scoringPanelPayload(params, view = DEFAULT_VIEW) {
             value: `> ${n(w.war)} pontos por guerra, multiplicados pelo valor do território (teto de x${params?.territoryMultiplierCap}).`,
           },
           {
-            name: `${CATEGORIES.xp.emoji} ${CATEGORIES.xp.label} — ${n(w.contribPerMillion)} pt`,
-            value: `> ${n(w.contribPerMillion)} ponto a cada ${n(1e6)} de Guild XP doado ao cofre.`,
+            name: `${CATEGORIES.xp.emoji} ${CATEGORIES.xp.label} — ${n(xp.pts)} pt / ${shortNumber(xp.xp)}`,
+            value: `> ${n(xp.pts)} ponto a cada ${n(xp.xp)} de Guild XP doado ao cofre.`,
           },
           {
             name: `${CATEGORIES.weekly.emoji} ${CATEGORIES.weekly.label} — ${n(w.weekly)} pts`,

@@ -370,7 +370,11 @@ pontos += Δguerras · pesos.war
         + (Δcontribuição / 1.000.000) · pesos.contribPerMillion
 ```
 Pesos padrão (configuráveis em `/config param key:pointsWeights`):
-`{ war: 10, raid: 5, contribPerMillion: 1 }`.
+`{ war: 10, raid: 0, guildRaid: 25, weekly: 30, contribPerMillion: 0.5, territoryBase: 10 }`
+— guild raid vale 25 por membro, e Guild XP rende 1 ponto a cada 2.000.000.
+Mudança de peso que precisa valer para a config já gravada entra em
+`WEIGHT_REVISIONS` (guildConfig.js): aplicada uma vez no boot, com o histórico
+reapurado.
 
 **Fontes manuais** (staff): `/points add <user> <amount> <reason>` — para eventos
 da guilda, bônus, penalidades (valor negativo). Registrado em `pointsLog`.

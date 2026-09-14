@@ -115,7 +115,7 @@ export default {
       const page = Math.min(Math.max(0, (interaction.options.getInteger('pagina') ?? 1) - 1), pages - 1);
       const inicio = page * PAGE_SIZE;
       // A numeração segue a posição REAL: a página 2 começa no 21, não no 1.
-      const lines = rows.slice(inicio, inicio + PAGE_SIZE).map((r, i) => `${MEDALS[inicio + i] || `\`${String(inicio + i + 1).padStart(2, ' ')}\``} **${r.username}** — ${r.points} pts`);
+      const lines = rows.slice(inicio, inicio + PAGE_SIZE).map((r, i) => `${MEDALS[inicio + i] || `\`${String(inicio + i + 1).padStart(2, ' ')}\``} **${r.username}** — \`${Number(r.points).toLocaleString('pt-BR')}\` pts`);
       return interaction.editReply({
         embeds: [{
           title: `⭐ Ranking de Pontos${scope === 'season' ? ` — Season ${seasonId}` : ' — Acumulado'}`,
