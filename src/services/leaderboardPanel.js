@@ -596,7 +596,8 @@ export async function handleLeaderboardControl(interaction) {
   }
   await interaction.deferUpdate();
 
-  const state = await currentState();
+  const { client, guildId } = interaction;
+  const [state, cfg] = await Promise.all([currentState(), getConfig(guildId)]);
   // Trocar de ranking ou de escopo volta para a primeira página: a página 4 de
   // um ranking não quer dizer nada no outro, e costuma nem existir.
   // `lb:p:<página>:<tag>` — a tag só serve para o id ser único (ver pageRow).
@@ -619,23 +620,52 @@ export async function handleLeaderboardControl(interaction) {
     scope: validScope(state.scope),
     page: Math.max(0, Number(state.page) || 0),
   };
-  await saveState(next);
-  // Os controles moram em DUAS mensagens: o tipo de ponto na de "como pontuar",
-  // página e escopo na do ranking. Um clique em qualquer uma reflete nas duas —
-  // numa muda o botão destacado, na outra muda a lista. Por isso as duas são
-  // reeditadas no lugar, em vez de responder à interação: o botão clicado pode
-  // estar na mensagem que NÃO é a que precisa mudar de conteúdo.
+  // Os controles moram em DUAS mensagens: o tipo de ranking na de "como pontuar",
+  // página e escopo na do ranking.
   //
+  // O clique antigo reeditava as duas, uma depois da outra, sempre pela rota de
+  // mensagens do canal: buscava a mensagem, editava, buscava a outra, editava.
+  // Era lento — quatro idas ao Discord em série, disputando o limite de edições
+  // do canal com o job de painéis — e metade do trabalho era à toa: trocar de
+  // página ou de season não muda nada na mensagem de "como pontuar".
+  //
+  // Agora a mensagem CLICADA é editada pela própria interação (rota do webhook,
+  // com limite próprio e sem buscar nada), e a outra só é tocada quando muda de
+  // fato: numa troca de ranking. As duas escritas saem em paralelo.
+  // Botão de ranking mora na mensagem de "como pontuar"; página e escopo, na do
+  // placar. O select antigo também morava no placar.
+  const cliqueNasRegras = id.startsWith(VIEW_PREFIX);
+  const trocouRanking = cliqueNasRegras || id === SELECT_ID;
+
+  const [, placar] = await Promise.all([
+    saveState(next),
+    // O placar é montado já com o estado novo, sem reler o banco.
+    buildLeaderboardPanel(next.view, next.scope, next.page),
+  ]);
+  const regras = trocouRanking ? scoringPanelPayload(cfg.params, next.view) : null;
+  const editarPlacarNoCanal = () =>
+    ensurePanel(client, cfg.channels?.panel, STATE_ID, placar, 'leaderboards', [logoAttachment()]);
+  const editarRegrasNoCanal = () =>
+    ensurePanel(client, cfg.channels?.panel, SCORING_STATE_ID, regras, 'como pontuar', [logoAttachment()]);
+
+  const escritas = [];
+  if (cliqueNasRegras) {
+    // A mensagem clicada vai pela interação; o placar, que é a outra, muda a lista.
+    escritas.push(['como pontuar', interaction.editReply(regras)]);
+    escritas.push(['leaderboard', editarPlacarNoCanal()]);
+  } else {
+    escritas.push(['leaderboard', interaction.editReply(placar)]);
+    // Só o select antigo troca de ranking a partir do placar.
+    if (trocouRanking) escritas.push(['como pontuar', editarRegrasNoCanal()]);
+  }
+
   // O erro é LOGADO, não engolido — mesma razão do ensurePanel em
   // services/panels.js: painel que para de atualizar calado é indistinguível de
   // bot fora do ar. Mas também não propaga: o estado já foi salvo, e uma falha de
   // rede na hora de redesenhar não pode virar "Interação falhou" para quem
   // clicou — no ciclo de 5 minutos os dois painéis se corrigem sozinhos.
-  for (const [nome, ensure] of [
-    ['como pontuar', ensureScoringPanel],
-    ['leaderboard', ensureLeaderboardPanel],
-  ]) {
-    const erro = await ensure(interaction.client, interaction.guildId).then(() => null, (e) => e);
-    if (erro) log.error(`Falha ao reeditar o painel de ${nome} depois do clique:`, erro);
-  }
+  const resultados = await Promise.allSettled(escritas.map(([, p]) => p));
+  resultados.forEach((r, i) => {
+    if (r.status === 'rejected') log.error(`Falha ao reeditar o painel de ${escritas[i][0]} depois do clique:`, r.reason);
+  });
 }
