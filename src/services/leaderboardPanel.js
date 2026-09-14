@@ -68,9 +68,7 @@ export function renderPoints(doc, seasonId = null, page = 0) {
     return { title: '🏆 Pontos de contribuição', color: 0xf1c40f, description: 'Ainda não há pontos apurados.' };
   }
   const { fatia, inicio, page: p, pages } = paginar(rows, page);
-  const lines = fatia.map(
-    (r, i) => `${badge(inicio + i)} **${r.username}** — ${r.points} pts · :crossed_swords: ${r.guildWars} · 🛡️ ${r.guildRaids}`,
-  );
+  const lines = fatia.map((r, i) => `${badge(inicio + i)} **${r.username}** — ${r.points} pts`);
   return { title: '🏆 Pontos de contribuição', color: 0xf1c40f, description: lines.join('\n'), ...stamp(doc, seasonId, p, pages, rows.length) };
 }
 
@@ -90,7 +88,17 @@ export function renderCategory(key, doc, seasonId = null, page = 0) {
   }
   const fmt = (v) => (cat.short ? shortNumber(v) : Number(v).toLocaleString('pt-BR'));
   const { fatia, inicio, page: p, pages } = paginar(rows, page);
-  const lines = fatia.map((r, i) => `${badge(inicio + i)} **${r.username}** — \`${fmt(r.value)}\` ${cat.unit}`);
+  // Ao lado do número cru, os pontos que ele rendeu e a fatia do total da
+  // pessoa. Cache anterior a isto não tem `points`: a linha sai só com o cru até
+  // a próxima apuração, em vez de mostrar "0 pts" falso.
+  const pontos = (r) => {
+    if (r.points === undefined) return '';
+    const fatiaPct = r.totalPoints > 0 ? ` (${Math.round((r.points / r.totalPoints) * 100)}%)` : '';
+    return ` · **${Number(r.points).toLocaleString('pt-BR')} pts**${fatiaPct}`;
+  };
+  const lines = fatia.map(
+    (r, i) => `${badge(inicio + i)} **${r.username}** — \`${fmt(r.value)}\` ${cat.unit}${pontos(r)}`,
+  );
   return { title: `${cat.emoji} ${cat.label}`, color: 0x3498db, description: lines.join('\n'), ...stamp(doc, seasonId, p, pages, rows.length) };
 }
 

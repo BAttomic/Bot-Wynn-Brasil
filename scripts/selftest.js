@@ -361,6 +361,11 @@ async function main() {
     check('guild raids: Bob na frente', await top('guildraid'), ['Bob:12', 'Alice:1']);
     check('objetivos semanais: Alice na frente', await top('weekly'), ['Alice:7', 'Bob:2']);
     check('categoria inexistente devolve vazio', (await P.categoryLeaderboard('xablau')).rows, []);
+    // Os pontos por atividade saem do livro-razão, não do número cru: Alice só tem
+    // eventos de guerra/território, então a fatia de guerra dela é positiva e
+    // nunca passa do total.
+    const guerraAlice = (await P.categoryLeaderboard('war')).rows.find((r) => r.username === 'Alice');
+    check('guerras trazem os pontos que renderam', guerraAlice.points > 0 && guerraAlice.points <= guerraAlice.totalPoints, true);
 
     const LP = await import('../src/services/leaderboardPanel.js');
     const painel = await LP.buildLeaderboardPanel();

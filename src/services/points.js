@@ -36,14 +36,21 @@ export const EVENT_TYPES = ['war', 'raid', 'guildRaid', 'weekly', 'contribution'
  * @property {string}  alltime  campo em guildStats
  * @property {string}  season   campo em seasonParticipation
  * @property {boolean} [short]  abreviar números grandes (ex.: 50M)
+ * @property {string[]} events  tipos de evento do livro-razão cujos pontos são
+ *                              desta categoria (território é bônus de guerra)
  * @type {Readonly<Record<string, Category>>}
  */
 export const CATEGORIES = Object.freeze({
-  war: { label: 'Guerras', btn: 'Guerras', emoji: ':crossed_swords:', menuEmoji: '🗡️', unit: 'guerras', alltime: 'guildWars', season: 'warsFought' },
-  guildraid: { label: 'Guild Raids', btn: 'Raids', emoji: '🛡️', unit: 'guild raids', alltime: 'guildRaids', season: 'guildRaidsDelta' },
-  xp: { label: 'XP contribuído', btn: 'XP', emoji: '📈', unit: 'XP', alltime: 'contributed', season: 'contributedDelta', short: true },
-  weekly: { label: 'Objetivos semanais', btn: 'Semanais', emoji: '📅', unit: 'objetivos', alltime: 'weeklyObjectives', season: 'weeklyDelta' },
+  war: { label: 'Guerras', btn: 'Guerras', emoji: ':crossed_swords:', menuEmoji: '🗡️', unit: 'guerras', alltime: 'guildWars', season: 'warsFought', events: ['war', 'territory'] },
+  guildraid: { label: 'Guild Raids', btn: 'Raids', emoji: '🛡️', unit: 'guild raids', alltime: 'guildRaids', season: 'guildRaidsDelta', events: ['guildRaid'] },
+  xp: { label: 'XP contribuído', btn: 'XP', emoji: '📈', unit: 'XP', alltime: 'contributed', season: 'contributedDelta', short: true, events: ['contribution'] },
+  weekly: { label: 'Objetivos semanais', btn: 'Semanais', emoji: '📅', unit: 'objetivos', alltime: 'weeklyObjectives', season: 'weeklyDelta', events: ['weekly'] },
 });
+
+/** Tipo de evento → chave de CATEGORIES. */
+const CATEGORY_OF_EVENT = Object.freeze(
+  Object.fromEntries(Object.entries(CATEGORIES).flatMap(([key, c]) => c.events.map((t) => [t, key]))),
+);
 
 export async function recordEvent({ uuid, username, type, qty, meta = null, at = new Date() }) {
   if (!qty) return null;
@@ -280,8 +287,51 @@ function categoryId(key, seasonId) {
   return seasonId ? `cat:${key}:season:${seasonId}` : `cat:${key}`;
 }
 
-// Ordena por um campo cru e materializa { username, value }.
-async function buildCategoryBoard(cache, _id, collection, field, extraFilter, builtAt) {
+/**
+ * Quantos pontos cada categoria rendeu a cada pessoa, numa passada só pelo
+ * livro-razão.
+ *
+ * Sai de `eventPoints`, e não de "número cru × peso": a semanal tem bônus de
+ * sequência e a guerra teve bônus de território, então só o intérprete do
+ * livro-razão dá o número que de fato entrou no total. Mesmas regras de escopo
+ * do recomputePoints — baseline conta no acumulado, nunca na season.
+ *
+ * @returns {Promise<Map<string, Map<string, Record<string, number>>>>}
+ *   escopo ('alltime' ou seasonId) → uuid → { chave da categoria: pontos }
+ */
+async function pointsBySource() {
+  const params = await currentParams();
+  const out = new Map();
+  const add = (scope, uuid, key, pts) => {
+    if (!out.has(scope)) out.set(scope, new Map());
+    const porPessoa = out.get(scope);
+    const linha = porPessoa.get(uuid) || {};
+    linha[key] = (linha[key] || 0) + pts;
+    porPessoa.set(uuid, linha);
+  };
+
+  const cursor = collections
+    .pointsEvents()
+    .find({ type: { $in: Object.keys(CATEGORY_OF_EVENT) } }, { projection: { uuid: 1, type: 1, qty: 1, meta: 1, seasonId: 1 } });
+  for await (const ev of cursor) {
+    const key = CATEGORY_OF_EVENT[ev.type];
+    const pts = eventPoints(ev, params);
+    add('alltime', ev.uuid, key, pts);
+    if (ev.seasonId && !ev.meta?.baseline) add(ev.seasonId, ev.uuid, key, pts);
+  }
+  return out;
+}
+
+/**
+ * Ordena por um campo cru e materializa { username, value, points, totalPoints }.
+ *
+ * `points` é o que ESTA atividade rendeu à pessoa; `totalPoints`, o total dela no
+ * mesmo escopo — o painel mostra a fatia que a atividade representa.
+ *
+ * @param {string} key  chave de CATEGORIES
+ * @param {Map<string, Record<string, number>>} [fonte]  pontos por uuid (pointsBySource)
+ */
+async function buildCategoryBoard(cache, _id, collection, field, extraFilter, builtAt, key, fonte) {
   const rows = await collection
     .find({ ...extraFilter, [field]: { $gt: 0 } })
     .sort({ [field]: -1 })
@@ -292,7 +342,13 @@ async function buildCategoryBoard(cache, _id, collection, field, extraFilter, bu
     {
       $set: {
         builtAt,
-        rows: rows.map((r) => ({ uuid: r.uuid, username: r.username, value: r[field] ?? 0 })),
+        rows: rows.map((r) => ({
+          uuid: r.uuid,
+          username: r.username,
+          value: r[field] ?? 0,
+          points: Math.round(fonte?.get(r.uuid)?.[key] ?? 0),
+          totalPoints: r.points ?? 0,
+        })),
       },
     },
     { upsert: true },
@@ -307,13 +363,9 @@ export async function rebuildLeaderboards() {
 
   const seasonIds = await part.distinct('seasonId');
 
-  const pointRow = (r, warsField, raidsField) => ({
-    uuid: r.uuid,
-    username: r.username,
-    points: r.points ?? 0,
-    guildWars: r[warsField] ?? 0,
-    guildRaids: r[raidsField] ?? 0,
-  });
+  // Só os pontos: guerras e raids têm ranking próprio, e repeti-los aqui só
+  // poluía a linha.
+  const pointRow = (r) => ({ uuid: r.uuid, username: r.username, points: r.points ?? 0 });
 
   const alltime = await stats
     .find({ points: { $gt: 0 } })
@@ -321,7 +373,7 @@ export async function rebuildLeaderboards() {
     .toArray();
   await cache.updateOne(
     { _id: pointsId(null) },
-    { $set: { builtAt, rows: alltime.map((r) => pointRow(r, 'guildWars', 'guildRaids')) } },
+    { $set: { builtAt, rows: alltime.map(pointRow) } },
     { upsert: true },
   );
 
@@ -332,16 +384,18 @@ export async function rebuildLeaderboards() {
       .toArray();
     await cache.updateOne(
       { _id: pointsId(seasonId) },
-      { $set: { builtAt, rows: rows.map((r) => pointRow(r, 'warsFought', 'guildRaidsDelta')) } },
+      { $set: { builtAt, rows: rows.map(pointRow) } },
       { upsert: true },
     );
   }
 
-  // Números crus, uma tabela por categoria e escopo.
+  // Números crus, uma tabela por categoria e escopo, cada linha com os pontos
+  // que aquela atividade rendeu.
+  const fontes = await pointsBySource();
   for (const [key, cat] of Object.entries(CATEGORIES)) {
-    await buildCategoryBoard(cache, categoryId(key, null), stats, cat.alltime, {}, builtAt);
+    await buildCategoryBoard(cache, categoryId(key, null), stats, cat.alltime, {}, builtAt, key, fontes.get('alltime'));
     for (const seasonId of seasonIds) {
-      await buildCategoryBoard(cache, categoryId(key, seasonId), part, cat.season, { seasonId }, builtAt);
+      await buildCategoryBoard(cache, categoryId(key, seasonId), part, cat.season, { seasonId }, builtAt, key, fontes.get(seasonId));
     }
   }
 
