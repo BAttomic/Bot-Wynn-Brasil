@@ -3,15 +3,36 @@ import { log } from '../util/log.js';
 // Scheduler mínimo, sem dependências (setInterval / setTimeout).
 const timers = [];
 
-export function everySeconds(seconds, name, fn, { runOnStart = false } = {}) {
-  const ms = Math.max(5, seconds) * 1000;
-  const wrapped = async () => {
+/**
+ * Uma execução por vez, por job.
+ *
+ * `setInterval` dispara no relógio, termine a rodada anterior ou não. Um ciclo
+ * lento (API do Wynncraft travada, fila de edições do Discord cheia) ganhava
+ * outro por cima, e mais outro: as rodadas empilhadas disputavam a mesma fila
+ * de requisições que os botões dos painéis usam, e o clique ficava esperando
+ * atrás delas. Rodada que encontra a anterior em curso é pulada.
+ */
+function exclusivo(name, fn) {
+  let emCurso = false;
+  return async () => {
+    if (emCurso) {
+      log.warn(`Job "${name}" ainda em curso; rodada pulada.`);
+      return;
+    }
+    emCurso = true;
     try {
       await fn();
     } catch (e) {
       log.error(`Job "${name}" falhou:`, e);
+    } finally {
+      emCurso = false;
     }
   };
+}
+
+export function everySeconds(seconds, name, fn, { runOnStart = false } = {}) {
+  const ms = Math.max(5, seconds) * 1000;
+  const wrapped = exclusivo(name, fn);
   if (runOnStart) wrapped();
   timers.push(setInterval(wrapped, ms));
   log.info(`Job agendado: ${name} (a cada ${seconds}s)`);
@@ -19,13 +40,7 @@ export function everySeconds(seconds, name, fn, { runOnStart = false } = {}) {
 
 export function everyMinutes(minutes, name, fn, { runOnStart = false } = {}) {
   const ms = Math.max(1, minutes) * 60_000;
-  const wrapped = async () => {
-    try {
-      await fn();
-    } catch (e) {
-      log.error(`Job "${name}" falhou:`, e);
-    }
-  };
+  const wrapped = exclusivo(name, fn);
   if (runOnStart) wrapped();
   timers.push(setInterval(wrapped, ms));
   log.info(`Job agendado: ${name} (a cada ${minutes} min)`);

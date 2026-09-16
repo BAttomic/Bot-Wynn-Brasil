@@ -16,6 +16,7 @@ const GAP_NO_KEY = 1_400; // ~43 req/min
 // abrir tão cedo, e insistir só empilha.
 const MAX_RETRIES = 3;
 const DEFAULT_BACKOFF_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 15_000;
 
 const cache = new Map(); // url -> { expires, data }
 let queue = Promise.resolve();
@@ -72,8 +73,12 @@ function request(path, { fresh = false } = {}) {
   const run = queue.then(async () => {
     for (let tentativa = 1; ; tentativa += 1) {
       await throttle();
+      // Prazo por requisição. A fila é SERIAL: sem isto, uma resposta que trava
+      // segura todas as chamadas atrás dela por até 5 min (o timeout padrão do
+      // undici) — e o "Meus pontos" do painel parecia morto, esperando na fila.
       const res = await fetch(url, {
         headers: { Accept: 'application/json', ...authHeaders() },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       if (res.status === 404) return null;
 

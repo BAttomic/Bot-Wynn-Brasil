@@ -6,6 +6,8 @@ import { pointsLeaderboard, categoryLeaderboard, CATEGORIES, xpRate } from './po
 import { getActiveSeason } from './seasons.js';
 import { allowanceDays, forgivenessDays, daysOffline } from './inactivity.js';
 import { wynn } from '../wynn/api.js';
+import { RANKS } from './guildData.js';
+import { optional } from '../config/env.js';
 import { shortNumber } from '../util/format.js';
 import { PECAS, anexo } from '../discord/commands/uniforme.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
@@ -330,6 +332,37 @@ async function myRanks(stats) {
     .toArray();
   return row ?? {};
 }
+/** Resolve com `null` se a promessa passar do prazo, em vez de segurar o clique. */
+function comPrazo(promise, ms) {
+  let timer;
+  const prazo = new Promise((r) => {
+    timer = setTimeout(() => r(null), ms);
+  });
+  return Promise.race([promise.catch(() => null), prazo]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * `lastJoin` e `online` de quem clicou.
+ *
+ * Sai do retrato da GUILDA, que o watcher renova a cada 60s e fica no cache da
+ * API: para membro, a resposta é imediata. A consulta de jogador ia para a fila
+ * serial da API do Wynncraft, atrás do watcher, das varreduras e de qualquer
+ * pausa de 429 — e o botão ficava dezenas de segundos sem responder.
+ *
+ * Ex-membro não está no retrato e cai na consulta de jogador, com prazo: sem
+ * resposta a tempo, a ficha sai sem a linha de presença.
+ */
+async function presenca(linked) {
+  const prefix = optional('WYNN_GUILD_PREFIX');
+  const guild = prefix ? await comPrazo(wynn.guildByPrefix(prefix), 2_000) : null;
+  for (const rank of RANKS) {
+    for (const m of Object.values(guild?.members?.[rank] ?? {})) {
+      if (m.uuid === linked.uuid) return m;
+    }
+  }
+  return comPrazo(wynn.player(linked.username), 2_000);
+}
+
 /**
  * Ficha pessoal: pontos, posição e a margem de inatividade que eles compram.
  * Responde só a quem clicou.
@@ -341,17 +374,18 @@ export async function handleMyPoints(interaction) {
   const linked = await collections.members().findOne({ discordId: interaction.user.id });
   if (!linked) return interaction.editReply('Você ainda não vinculou sua conta no canal de registro.');
 
-  const stats = await collections.guildStats().findOne({ uuid: linked.uuid });
+  // Em paralelo: nada aqui depende da presença, e ela é a parte que pode demorar.
+  const presencaP = presenca(linked);
+  const [stats, { params }] = await Promise.all([
+    collections.guildStats().findOne({ uuid: linked.uuid }),
+    getConfig(interaction.guildId),
+  ]);
   const points = stats?.points ?? 0;
+  const [ranks, player] = await Promise.all([myRanks(stats), presencaP]);
 
-  const ranks = await myRanks(stats);
-
-  const { params } = await getConfig(interaction.guildId);
   const limite = allowanceDays(points, params);
   const perdao = forgivenessDays(points, params);
 
-  // lastJoin não fica no banco; vem da API (com cache).
-  const player = await wynn.player(linked.username).catch(() => null);
   const offline = daysOffline(player?.lastJoin);
   const online = !!player?.online;
 
@@ -594,7 +628,13 @@ export async function handleLeaderboardControl(interaction) {
   ) {
     return interaction.reply({ content: 'Controle desconhecido.', ephemeral: true });
   }
+  // Cronômetro por etapa. Clique lento vira uma linha de log dizendo ONDE demorou
+  // (ack, banco ou edição), em vez de "os botões estão lentos" sem pista nenhuma.
+  const t0 = Date.now();
+  const etapas = [];
+  const marca = (nome) => etapas.push(`${nome} ${Date.now() - t0}ms`);
   await interaction.deferUpdate();
+  marca('ack');
 
   const { client, guildId } = interaction;
   const [state, cfg] = await Promise.all([currentState(), getConfig(guildId)]);
@@ -642,6 +682,7 @@ export async function handleLeaderboardControl(interaction) {
     // O placar é montado já com o estado novo, sem reler o banco.
     buildLeaderboardPanel(next.view, next.scope, next.page),
   ]);
+  marca('banco');
   const regras = trocouRanking ? scoringPanelPayload(cfg.params, next.view) : null;
   const editarPlacarNoCanal = () =>
     ensurePanel(client, cfg.channels?.panel, STATE_ID, placar, 'leaderboards', [logoAttachment()]);
@@ -665,7 +706,9 @@ export async function handleLeaderboardControl(interaction) {
   // rede na hora de redesenhar não pode virar "Interação falhou" para quem
   // clicou — no ciclo de 5 minutos os dois painéis se corrigem sozinhos.
   const resultados = await Promise.allSettled(escritas.map(([, p]) => p));
+  marca('edição');
   resultados.forEach((r, i) => {
     if (r.status === 'rejected') log.error(`Falha ao reeditar o painel de ${escritas[i][0]} depois do clique:`, r.reason);
   });
+  if (Date.now() - t0 > 2_500) log.warn(`Clique lento no painel (${id}): ${etapas.join(' · ')}`);
 }
