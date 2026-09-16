@@ -130,9 +130,9 @@ export default {
 
       const a = all.find((x) => x.uuid === link.uuid);
       if (!a || (a.earned === 0 && a.delivered === 0)) {
-        // Quem só fechou raid sozinho chega aqui com 0 gerado. Dizer apenas
-        // "não gerou" parece bug do bot, então a razão vai junto.
-        const porSolo = a?.solo ? ` As ${a.solo} raid(s) fechada(s) sozinho não rendem aspect.` : '';
+        // Quem só tem raid solo da regra antiga chega aqui com 0 gerado. Dizer
+        // apenas "não gerou" parece bug do bot, então a razão vai junto.
+        const porSolo = a?.solo ? ` ${a.solo} raid(s) fechada(s) sozinho pela regra antiga não renderam.` : '';
         return interaction.editReply(`**${link.username}** ainda não gerou aspects (a contagem começa do zero).${porSolo}`);
       }
       const gate = a.eligible ? '' : `\n-# ⏳ ${a.days ?? '?'} dia(s) na guilda — só recebe a partir de ${min} dias.`;
@@ -145,11 +145,12 @@ export default {
       const sobra = a.pending > 0 && a.pending % 1 ? ` (+${fmt(a.pending % 1)} acumulando)` : '';
       // Sem isto, "fiz 10 raids e gerou 4" não fecha para quem confere na mão.
       const solo = a.solo
-        ? `\n-# 🧍 ${a.solo} das ${a.raids} raid(s) foram fechadas sozinho e não rendem aspect.`
+        ? `
+-# 🧍 ${a.solo} raid(s) antiga(s) fechada(s) sozinho não renderam — hoje solo também vale.`
         : '';
       return interaction.editReply(
         `✨ **${a.username}** — **${a.deliverable}** a entregar${sobra}\n` +
-          `> Já recebeu **${fmt(a.delivered)}** aspect(s) · ${rate}/raid.${gate}${devendo}${solo}`,
+          `> Já recebeu **${fmt(a.delivered)}** aspect(s) em ${a.raids} raid(s) · ${rate}/raid.${gate}${devendo}${solo}`,
       );
     }
 

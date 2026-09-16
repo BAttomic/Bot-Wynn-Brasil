@@ -7,8 +7,8 @@ import { getConfig } from '../config/guildConfig.js';
 // como "gerado" — é sempre derivado. O que se acumula é só o ENTREGUE.
 //
 //   raids desde 0 = max(0, guildRaids − aspectBaseRaids)
-//   solo          = guildStats.aspectSoloRaids  (raids feitas sozinho)
-//   gerado        = aspectsPerGuildRaid × max(0, raids desde 0 − solo)
+//   solo antigo   = guildStats.aspectSoloRaids  (CONGELADO, ver abaixo)
+//   gerado        = aspectsPerGuildRaid × max(0, raids desde 0 − solo antigo)
 //   entregue      = guildStats.aspectsDelivered
 //   pendente      = gerado − entregue     (PODE SER NEGATIVO, de propósito)
 //
@@ -18,18 +18,18 @@ import { getConfig } from '../config/guildConfig.js';
 // o excedente antes de voltar a gerar aspect. Com o antigo `max(0, …)` o erro
 // sumia de vista e virava presente permanente, sem ninguém saber que houve.
 
-// TAMANHO DA PARTY. Uma guild raid só rende aspect com DOIS ou mais membros
-// nossos na party — 2 → 1 aspect, 3 → 1,5, 4 → 2, sempre 0,5 por cabeça. Quem
-// fecha a raid sozinho, no meio de randoms, não traz aspect nenhum para a guilda.
+// TAMANHO DA PARTY NÃO IMPORTA MAIS. Toda guild raid rende `aspectsPerGuildRaid`
+// a cada participante nosso, inclusive a fechada sozinho no meio de randoms.
 //
-// O contador da API não sabe o tamanho da party, então a conta segue derivada
-// dele, com um DESCONTO: o watcher, que vê a party na hora em que ela fecha,
-// marca as raids solo em `aspectSoloRaids`, e elas saem do gerado.
+// Valia outra regra antes: raid solo não rendia nada, e o watcher marcava cada
+// uma em `aspectSoloRaids` para descontar do gerado. A mudança vale DAQUI PRA
+// FRENTE, então o desconto continua na conta — o que as pessoas já perderam por
+// raid solo segue perdido, e só as raids novas ignoram o tamanho da party.
 //
-// O preço é que raid solo feita com o bot fora do ar passa batido: o contador
-// da API sobe e não fica registro de que foi solo. É o lado certo de errar —
-// a alternativa era creditar aspect só do que o bot vê ao vivo, e aí toda raid
-// feita durante um deploy sumiria.
+// `aspectSoloRaids` virou, portanto, um número CONGELADO: nada mais o incrementa
+// (o watcher parou de marcar), ele só guarda o passado. Não o zere numa migração
+// achando que é lixo: sem ele, todo mundo ganha de volta as raids solo antigas,
+// que é exatamente o efeito retroativo que não queremos.
 
 export async function getAspectRate(guildId) {
   const { params } = await getConfig(guildId);
@@ -73,9 +73,8 @@ function computeAspect(r, rate, minDays) {
   // Sem baseline ainda → base = total atual → 0 raids contados (começa do zero).
   const base = r.aspectBaseRaids ?? r.guildRaids ?? 0;
   const raids = Math.max(0, (r.guildRaids ?? 0) - base);
-  // Raid solo não rende aspect. O desconto pode passar na frente do contador da
-  // API por até uma apuração (o watcher marca na hora, o guildRaids só sobe no
-  // snapshot seguinte), por isso o piso em zero.
+  // Desconto CONGELADO das raids solo da regra antiga (ver o topo do arquivo).
+  // Raid solo nova não entra aqui: nada mais incrementa esse contador.
   const solo = r.aspectSoloRaids ?? 0;
   const earned = Math.max(0, raids - solo) * rate;
   const delivered = r.aspectsDelivered ?? 0;
@@ -94,17 +93,6 @@ function computeAspect(r, rate, minDays) {
     days,
     eligible: days !== null && days >= minDays,
   };
-}
-
-/**
- * Marca uma guild raid fechada SOZINHO, que não rende aspect.
- *
- * Sem upsert de propósito: quem ainda não tem doc em guildStats também não tem
- * baseline, e o snapshot que criar o doc já vai congelar a baseline DEPOIS
- * desta raid — ou seja, ela nunca entrou no gerado, e não há o que descontar.
- */
-export async function recordSoloRaid(uuid) {
-  await collections.guildStats().updateOne({ uuid }, { $inc: { aspectSoloRaids: 1 } });
 }
 
 /**

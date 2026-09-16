@@ -194,8 +194,9 @@ const DEFAULT_PARAMS = Object.freeze({
   // cada X minutos. Além do anti-spam, a espera deixa o contador de guerra
   // (cacheado) alcançar, então a atribuição de guerreiros fica correta.
   territoryDigestMinutes: 60,
-  // Cada membro NOSSO na party rende isto de aspect por guild raid (linear): uma
-  // party de 4 membros nossos = 2 aspects (0,5 cada). Com aliados, cada guilda
+  // Isto de aspect por guild raid para CADA membro nosso que participou, seja qual
+  // for o tamanho da party (solo inclusive): uma party de 4 membros nossos rende 2
+  // aspects, 0,5 para cada um. Com aliados, cada guilda
   // ganha proporcional aos seus. currentGuildRaids já é escopado à guilda, então
   // aspects do player = aspectsPerGuildRaid × guild raids dele.
   aspectsPerGuildRaid: 0.5,

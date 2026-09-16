@@ -121,7 +121,7 @@ No canal de status, o botão **Meus pontos** mostra os seus, sua posição em ca
 São as duas recompensas que a guilda distribui, e as duas saem por fila automática. Não precisa pedir nem cobrar.
 
 > **Tomes** — a fila é por **pontos**: quem mais contribuiu recebe primeiro. Requisitos do próprio jogo: alguma classe no nível **${params.tomeMinClassLevel}** e **${params.rewardMinGuildDays} dias** de guilda.
-> **Aspects** — saem das **guild raids**: cada membro nosso no grupo rende \`${fmt(params.aspectsPerGuildRaid)}\` aspect. Raid fechada **sozinho não rende** — é preciso ter pelo menos dois da guilda na party. Também exige **${params.rewardMinGuildDays} dias** de guilda.
+> **Aspects** — saem das **guild raids**: cada raid rende \`${fmt(params.aspectsPerGuildRaid)}\` aspect a **cada** membro nosso que participou, inclusive quem fechou **sozinho**. Também exige **${params.rewardMinGuildDays} dias** de guilda.
 
 Aspect é item inteiro, então meio aspect não some: fica no seu saldo e vira unidade quando a próxima raid fecha o par. Use \`/aspects\` para ver o seu, e acompanhe a fila no canal de tomes.
 

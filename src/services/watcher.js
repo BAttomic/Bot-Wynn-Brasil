@@ -9,7 +9,6 @@ import { captureValue, recordCapture } from './territories.js';
 // escreve no livro-razão de guerra — só o snapshot escreve.
 import { recordWeeklyCompletion } from './points.js';
 import { creditGuildRaidParty } from './events.js';
-import { recordSoloRaid } from './aspects.js';
 import { blockedUuids } from './eventBlacklist.js';
 import { communityRow, downloadsRow, downloadsField } from './leaderboardPanel.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
@@ -347,11 +346,6 @@ export async function runGuildWatch(client) {
       const at = new Date();
       for (const p of raids) {
         await creditGuildRaidParty({ members: p.members, at });
-        // Raid fechada SOZINHO não rende aspect para a guilda (a regra está em
-        // services/aspects.js). Só conta como solo com o mundo conhecido: sem
-        // mundo, o agrupamento acima já joga cada jogador num grupo separado, e
-        // um "solo" desses pode ser só um pedaço de uma party de verdade.
-        if (p.server && p.members.length === 1) await recordSoloRaid(p.members[0].uuid);
       }
       await announceGuildRaids(client, cfg, guild, raids);
     }

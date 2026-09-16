@@ -545,7 +545,7 @@ function scoringPanelPayload(params, view = DEFAULT_VIEW) {
             name: `${CATEGORIES.guildraid.emoji} ${CATEGORIES.guildraid.label} — ${n(w.guildRaid)} pts`,
             value:
               `> ${n(w.guildRaid)} pontos para **cada** membro nosso no grupo, no instante em que a raid fecha.` +
-              `\n> Party de 2 ou mais ainda rende **${n(params?.aspectsPerGuildRaid)}** aspect por cabeça — sozinho não rende.`,
+              `\n> E ainda rende **${n(params?.aspectsPerGuildRaid)}** aspect a cada um que participou, em qualquer tamanho de party — sozinho também vale.`,
           },
           {
             name: `${CATEGORIES.war.emoji} ${CATEGORIES.war.label} — ${n(w.war)} pts`,
