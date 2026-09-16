@@ -305,6 +305,12 @@ async function main() {
     check('1M de XP = 1 ponto', P.eventPoints({ type: 'contribution', qty: 1_000_000 }, { pointsWeights: base }), 1);
     check('1 guild raid = 10 pontos', P.eventPoints({ type: 'guildRaid', qty: 1 }, { pointsWeights: base }), 10);
     check('raid comum não pontua', P.eventPoints({ type: 'raid', qty: 5 }, { pointsWeights: base }), 0);
+    // 1 ponto a cada 2M: meio caminho não vira ponto inteiro.
+    const meio = { pointsWeights: { ...base, contribPerMillion: 0.5 } };
+    check('1,2M a 0,5/M = 0 ponto (piso, não arredonda)', P.xpPoints(1_200_000, meio), 0);
+    check('1.999.999 a 0,5/M = 0 ponto', P.xpPoints(1_999_999, meio), 0);
+    check('2M a 0,5/M = 1 ponto', P.xpPoints(2_000_000, meio), 1);
+    check('10M a 0,3/M = 3 (sem erro de ponto flutuante)', P.xpPoints(10_000_000, { pointsWeights: { contribPerMillion: 0.3 } }), 3);
 
     // Guerra = base 10; captura paga só o excedente. Somados, dão 10 × mult.
     const capParams = { pointsWeights: base, territoryMultiplierCap: 8 };
@@ -562,7 +568,7 @@ async function main() {
 
     const topo = await collections.guildStats().find({}).sort({ points: -1 }).limit(1).next();
     console.log(`       (topo: ${topo.username} = ${topo.points} pts de ${(topo.contributed / 1e6).toFixed(0)}M de XP)`);
-    check('pontos do topo batem com XP + guild raids', topo.points, Math.round(topo.contributed / 1e6) + topo.guildRaids * 10);
+    check('pontos do topo batem com XP + guild raids', topo.points, Math.floor(topo.contributed / 1e6) + topo.guildRaids * 10);
 
     // Rodar de novo não pode duplicar: o segundo snapshot só tem deltas (zero).
     await takeSnapshots();
@@ -570,6 +576,24 @@ async function main() {
     const topo2 = await collections.guildStats().findOne({ uuid: topo.uuid });
     check('segunda apuração não duplica a linha de base', topo2.points, topo.points);
     check('e não gera novo evento de baseline', await collections.pointsEvents().countDocuments({ 'meta.baseline': true }), baseEv.length);
+
+    // O reset antigo apagava os eventos de guild raid e deixava o contador: raids
+    // na coluna 🛡️, 0 pontos. A reconciliação completa o livro-razão até o contador.
+    check('livro-razão em dia: reconciliação não grava nada', await P.reconcileGuildRaidLedger(), 0);
+    const veterano = await collections.guildStats().findOne({ guildRaids: { $gt: 0 } });
+    await collections.pointsEvents().deleteMany({ uuid: veterano.uuid, type: 'guildRaid' });
+    await collections.guildStats().insertOne({ uuid: 'uuid-ex', username: 'ExMembro', guildRaids: 7 });
+    const completados = await P.reconcileGuildRaidLedger();
+    await P.recomputePoints();
+    check('completa quem ficou sem eventos, inclusive ex-membro', completados, 2);
+    check('ex-membro volta a valer 7 × 10 = 70', await pts('uuid-ex'), 70);
+    check('veterano volta ao total de antes', await pts(veterano.uuid), veterano.points);
+    check('segunda reconciliação é no-op', await P.reconcileGuildRaidLedger(), 0);
+    check(
+      'completado não vaza para a season',
+      await collections.seasonParticipation().countDocuments({ uuid: 'uuid-ex', points: { $gt: 0 } }),
+      0,
+    );
 
     // -------------------------------------------------- Empréstimo vencido
     section('13. Empréstimo vencido continua ativo e pode ser quitado');

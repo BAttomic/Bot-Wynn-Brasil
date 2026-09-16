@@ -29,7 +29,7 @@ import { runRecruitCleanup } from './jobs/recruitCleanup.js';
 import { ensureActiveSeason } from './services/seasons.js';
 import { initErrorReport, reportError } from './services/errorReport.js';
 import { getConfig, applyWeightRevisions } from './config/guildConfig.js';
-import { recomputePoints, rebuildLeaderboards } from './services/points.js';
+import { recomputePoints, rebuildLeaderboards, reconcileGuildRaidLedger } from './services/points.js';
 import { startHealthServer } from './health.js';
 import { log } from './util/log.js';
 
@@ -74,10 +74,13 @@ async function main() {
   // Peso novo reescreve o passado: o livro-razão guarda quantidades, e os pontos
   // saem dos pesos atuais. Reapura na hora para o ranking não esperar a apuração.
   const revisoes = await applyWeightRevisions(guildId);
-  if (revisoes.length) {
+  // Guild raid contada na coluna 🛡️ precisa valer ponto — inclusive a de quem já
+  // saiu da guilda. No-op quando o livro-razão já está em dia.
+  const completados = await reconcileGuildRaidLedger();
+  if (revisoes.length || completados) {
     await recomputePoints();
     await rebuildLeaderboards();
-    log.info(`Pesos revisados (${revisoes.join(', ')}): histórico de pontos reapurado.`);
+    if (revisoes.length) log.info(`Pesos revisados (${revisoes.join(', ')}): histórico de pontos reapurado.`);
   }
   // Black-list vazia não quebra nada, mas também não bane ninguém — e como o
   // auto-ban é silencioso, o log é o único lugar onde isso aparece.

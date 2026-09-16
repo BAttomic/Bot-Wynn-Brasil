@@ -145,6 +145,31 @@ export function xpRate(contribPerMillion) {
   return { pts: c, xp: 1_000_000 };
 }
 
+/**
+ * Pontos do Guild XP, sempre sobre o XP SOMADO e arredondados para BAIXO.
+ *
+ * Com 0,5 ponto por milhão, o `Math.round` do total dava 1 ponto a quem tinha
+ * 1,2M (0,6 → 1) — meio caminho de um ponto virava ponto inteiro. E converter
+ * evento a evento também não serve: a apuração é de hora em hora, cada delta
+ * fica abaixo de 2M e o piso zeraria todo mundo. Soma primeiro, piso depois.
+ *
+ * O epsilon cobre o ponto flutuante: 10M × 0,3 dá 2,9999999999999996.
+ * @param {number} qty  XP contribuído somado
+ * @param {object} params
+ * @returns {number}
+ */
+export function xpPoints(qty, params = {}) {
+  return Math.floor(eventPoints({ type: 'contribution', qty }, params) + 1e-9);
+}
+
+/** Acumulador de uma pessoa: pontos das outras fontes + XP cru, convertido no fim. */
+const somaVazia = () => ({ pts: 0, xp: 0 });
+function somar(acc, ev, params) {
+  if (ev.type === 'contribution') acc.xp += Number(ev.qty) || 0;
+  else acc.pts += eventPoints(ev, params);
+}
+const totalDe = (acc, params) => Math.round(acc.pts) + xpPoints(acc.xp, params);
+
 async function currentParams() {
   const gid = optional('DISCORD_GUILD_ID');
   if (!gid) return {};
@@ -156,18 +181,17 @@ export async function recomputePoints({ uuid = null } = {}) {
   const params = await currentParams();
   const filter = uuid ? { uuid } : {};
 
-  const totals = new Map(); // uuid -> { username, points, weekly }
-  const seasons = new Map(); // `${seasonId}|${uuid}` -> { seasonId, uuid, username, points, weekly }
+  const totals = new Map(); // uuid -> { username, points: {pts, xp}, weekly }
+  const seasons = new Map(); // `${seasonId}|${uuid}` -> { seasonId, uuid, username, points: {pts, xp}, weekly }
 
   for await (const ev of collections.pointsEvents().find(filter)) {
-    const pts = eventPoints(ev, params);
     // Objetivos semanais são CONTADOS aqui, não incrementados na hora: o
     // contador vira derivada do livro-razão, como os pontos, e reprocessar
     // conserta sozinho qualquer divergência.
     const wk = ev.type === 'weekly' ? Number(ev.qty) || 0 : 0;
 
-    const t = totals.get(ev.uuid) || { username: ev.username, points: 0, weekly: 0 };
-    t.points += pts;
+    const t = totals.get(ev.uuid) || { username: ev.username, points: somaVazia(), weekly: 0 };
+    somar(t.points, ev, params);
     t.weekly += wk;
     if (ev.username) t.username = ev.username;
     totals.set(ev.uuid, t);
@@ -183,10 +207,10 @@ export async function recomputePoints({ uuid = null } = {}) {
       seasonId: ev.seasonId,
       uuid: ev.uuid,
       username: ev.username,
-      points: 0,
+      points: somaVazia(),
       weekly: 0,
     };
-    s.points += pts;
+    somar(s.points, ev, params);
     s.weekly += wk;
     if (ev.username) s.username = ev.username;
     seasons.set(key, s);
@@ -205,7 +229,7 @@ export async function recomputePoints({ uuid = null } = {}) {
       {
         $set: {
           username: t.username,
-          points: Math.round(t.points),
+          points: totalDe(t.points, params),
           weeklyObjectives: t.weekly,
           updatedAt: new Date(),
         },
@@ -221,7 +245,7 @@ export async function recomputePoints({ uuid = null } = {}) {
       {
         $set: {
           username: s.username,
-          points: Math.round(s.points),
+          points: totalDe(s.points, params),
           weeklyDelta: s.weekly,
           lastUpdatedAt: new Date(),
         },
@@ -234,6 +258,65 @@ export async function recomputePoints({ uuid = null } = {}) {
     `Pontos recomputados (${totals.size} membro(s), ${seasons.size} linha(s) de season)${uuid ? ' [parcial]' : ''}.`,
   );
   return { members: totals.size, seasonRows: seasons.size };
+}
+
+/**
+ * Faz o livro-razão de guild raid alcançar a contagem exibida no ranking.
+ *
+ * A coluna 🛡️ é `guildStats.guildRaids`: o `currentGuildRaids` da API, a vida
+ * inteira do membro NESTA guilda. Os pontos saem do livro-razão. Os dois se
+ * separaram no `scripts/reset-stats.js`, que apaga os eventos de guild raid (a
+ * linha de base junto) mas deixa o contador, de propósito. Resultado: quem já
+ * tinha saído da guilda ficou com as raids na coluna e 0 pontos para sempre — sem
+ * snapshot novo, nada volta a creditá-lo —, e quem ficou só pontuou o que fez
+ * depois do reset.
+ *
+ * A diferença entra como linha de base (`meta.baseline`): conta no acumulado,
+ * nunca na season nem em evento de competição, igual à do primeiro snapshot.
+ *
+ * Só completa, nunca desconta. Idempotente: com o livro-razão em dia, a diferença
+ * é zero e nada é gravado. O snapshot grava o evento ANTES de subir o contador,
+ * então rodar no meio de uma apuração vê no máximo diferença negativa, que é
+ * ignorada.
+ *
+ * @returns {Promise<number>} membros completados — não zero = reapurar
+ */
+export async function reconcileGuildRaidLedger() {
+  const lancado = new Map(
+    (
+      await collections
+        .pointsEvents()
+        .aggregate([{ $match: { type: 'guildRaid' } }, { $group: { _id: '$uuid', qty: { $sum: '$qty' } } }])
+        .toArray()
+    ).map((r) => [r._id, Number(r.qty) || 0]),
+  );
+
+  const at = new Date();
+  const faltas = [];
+  const cursor = collections
+    .guildStats()
+    .find({ guildRaids: { $gt: 0 } }, { projection: { uuid: 1, username: 1, guildRaids: 1 } });
+  for await (const s of cursor) {
+    const falta = Number(s.guildRaids) - (lancado.get(s.uuid) ?? 0);
+    if (falta > 0) {
+      faltas.push({
+        uuid: s.uuid,
+        username: s.username,
+        type: 'guildRaid',
+        qty: falta,
+        meta: { baseline: true, reconciled: true },
+        seasonId: null,
+        at,
+      });
+    }
+  }
+
+  if (faltas.length) {
+    await collections.pointsEvents().insertMany(faltas, { ordered: false });
+    const raids = faltas.reduce((n, f) => n + f.qty, 0);
+    log.info(`Livro-razão de guild raid completado: +${raids} raid(s) em ${faltas.length} membro(s).`);
+  }
+  return faltas.length;
 }
 
 /**
@@ -314,12 +397,13 @@ function categoryId(key, seasonId) {
  */
 async function pointsBySource() {
   const params = await currentParams();
-  const out = new Map();
-  const add = (scope, uuid, key, pts) => {
-    if (!out.has(scope)) out.set(scope, new Map());
-    const porPessoa = out.get(scope);
+  const somas = new Map(); // escopo → uuid → categoria → {pts, xp}
+  const add = (scope, uuid, key, ev) => {
+    if (!somas.has(scope)) somas.set(scope, new Map());
+    const porPessoa = somas.get(scope);
     const linha = porPessoa.get(uuid) || {};
-    linha[key] = (linha[key] || 0) + pts;
+    linha[key] ||= somaVazia();
+    somar(linha[key], ev, params);
     porPessoa.set(uuid, linha);
   };
 
@@ -328,9 +412,18 @@ async function pointsBySource() {
     .find({ type: { $in: Object.keys(CATEGORY_OF_EVENT) } }, { projection: { uuid: 1, type: 1, qty: 1, meta: 1, seasonId: 1 } });
   for await (const ev of cursor) {
     const key = CATEGORY_OF_EVENT[ev.type];
-    const pts = eventPoints(ev, params);
-    add('alltime', ev.uuid, key, pts);
-    if (ev.seasonId && !ev.meta?.baseline) add(ev.seasonId, ev.uuid, key, pts);
+    add('alltime', ev.uuid, key, ev);
+    if (ev.seasonId && !ev.meta?.baseline) add(ev.seasonId, ev.uuid, key, ev);
+  }
+
+  // XP vira ponto só agora, sobre a soma — mesma conta do recomputePoints.
+  const out = new Map();
+  for (const [scope, porPessoa] of somas) {
+    const m = new Map();
+    for (const [uuid, linha] of porPessoa) {
+      m.set(uuid, Object.fromEntries(Object.entries(linha).map(([k, acc]) => [k, totalDe(acc, params)])));
+    }
+    out.set(scope, m);
   }
   return out;
 }

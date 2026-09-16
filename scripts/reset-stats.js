@@ -17,7 +17,12 @@
 //     inteira do membro nesta guilda), não um acumulador nosso. Zerá-lo seria
 //     inútil (o próximo snapshot o reescreve com o mesmo valor) e quebraria os
 //     aspects, que contam do zero por `guildRaids − aspectBaseRaids`. A coluna
-//     🛡️ do painel segue mostrando o total da API; o que zera é a PONTUAÇÃO.
+//     🛡️ do painel segue mostrando o total da API.
+//   • Os eventos de GUILD RAID. Raid contada na coluna 🛡️ vale ponto, sempre —
+//     apagar os eventos deixava gente com 900 raids e 0 pontos. E nem adiantaria:
+//     o boot completa o livro-razão até o contador (reconcileGuildRaidLedger em
+//     services/points.js), só que como linha de base, perdendo a season de cada
+//     raid. O `--only=raid` zera só a raid comum.
 //
 // Por que não basta apagar os eventos: `guildStats.guildWars`, `raidsInGuild` e
 // os campos de `seasonParticipation` são somados por $inc no snapshot e NÃO
@@ -54,9 +59,11 @@ const GRUPOS = {
     capturas: true,
   },
   raid: {
-    types: ['raid', 'guildRaid'],
+    types: ['raid'],
     stats: ['raidsInGuild'],
-    season: ['raidsDelta', 'guildRaidsDelta'],
+    // `guildRaidsDelta` fica: zerá-lo e manter os eventos descasaria a coluna de
+    // season dos pontos de season.
+    season: ['raidsDelta'],
     capturas: false,
   },
 };

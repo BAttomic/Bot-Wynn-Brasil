@@ -5,6 +5,7 @@ import {
   categoryLeaderboard,
   recomputePoints,
   rebuildLeaderboards,
+  reconcileGuildRaidLedger,
   CATEGORIES,
 } from '../../services/points.js';
 import {
@@ -101,6 +102,7 @@ export default {
         return interaction.editReply('Apenas staff pode forçar a apuração.');
       }
       // Recalcula do livro-razão, remonta as tabelas e reedita o painel fixo.
+      await reconcileGuildRaidLedger();
       const { members } = await recomputePoints();
       const { categories } = await rebuildLeaderboards();
       await ensureLeaderboardPanel(interaction.client, interaction.guildId);
