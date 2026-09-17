@@ -366,12 +366,17 @@ season em `seasonParticipation.points`).
 **Fontes automáticas** (no snapshot diário, a partir dos deltas — §8):
 ```
 pontos += Δguerras · pesos.war
+        + Σ(captura) (mult− 1) · pesos.territoryBase   ← peso do território
         + Δraids   · pesos.raid
         + (Δcontribuição / 1.000.000) · pesos.contribPerMillion
 ```
 Pesos padrão (configuráveis em `/config param key:pointsWeights`):
 `{ war: 10, raid: 0, guildRaid: 25, weekly: 30, contribPerMillion: 0.5, territoryBase: 10 }`
 — guild raid vale 25 por membro, e Guild XP rende 1 ponto a cada 2.000.000.
+A guerra é ponderada pelo peso do território que a guilda tomou na janela
+(`territoryMultiplierCap` = teto x8): a base vem do contador, a captura paga o
+excedente, e guerra + captura = `war × mult`. A atribuição tem orçamento — cada
+incremento de contador paga UMA captura (`attributeCaptures`, services/territories.js).
 Mudança de peso que precisa valer para a config já gravada entra em
 `WEIGHT_REVISIONS` (guildConfig.js): aplicada uma vez no boot, com o histórico
 reapurado.

@@ -52,9 +52,16 @@ const CATEGORY_OF_EVENT = Object.freeze(
   Object.fromEntries(Object.entries(CATEGORIES).flatMap(([key, c]) => c.events.map((t) => [t, key]))),
 );
 
-export async function recordEvent({ uuid, username, type, qty, meta = null, at = new Date() }) {
+/**
+ * @param {object} ev
+ * @param {string} [ev.seasonId]  balde da season; por padrão, a season ATIVA.
+ *   Só quem lança evento com data antiga precisa passar isto — a season certa é
+ *   a que estava aberta na hora do fato, e não a de hoje (ver
+ *   scripts/backfill-territory.js).
+ */
+export async function recordEvent({ uuid, username, type, qty, meta = null, at = new Date(), seasonId }) {
   if (!qty) return null;
-  const season = await getActiveSeason();
+  const balde = seasonId === undefined ? (await getActiveSeason())?.seasonId ?? null : seasonId;
   try {
     await collections.pointsEvents().insertOne({
       uuid,
@@ -62,7 +69,7 @@ export async function recordEvent({ uuid, username, type, qty, meta = null, at =
       type,
       qty,
       meta,
-      seasonId: season?.seasonId ?? null,
+      seasonId: balde,
       at,
     });
   } catch (e) {
@@ -106,12 +113,9 @@ export function eventPoints(event, params = {}) {
       return event.qty * (w.weekly || 0) * weeklyStreakFactor(event.meta?.streak, params);
     case 'contribution':
       return (event.qty / 1_000_000) * (w.contribPerMillion || 0);
-    // LEGADO. Nada produz eventos de território desde que a atribuição por
-    // janela de tempo foi removida (ver o bloco de atribuição em
-    // services/watcher.js): a API não diz quem capturou, e o palpite creditava
-    // guerra a quem não guerreou. O caso continua aqui porque `eventPoints` é o
-    // intérprete do livro-razão — tirá-lo zeraria em silêncio os eventos já
-    // gravados de quem ainda não rodou o reset.
+    // Peso do território capturado, creditado a quem guerreou na janela (ver
+    // attributeCaptures em services/territories.js e o bloco de atribuição no
+    // topo de services/watcher.js).
     case 'territory': {
       // `qty` é o multiplicador CRU da captura (1 + 0.3×conexões, e os externals
       // no QG). A GUERRA já pagou a base, então aqui entra só o excedente:

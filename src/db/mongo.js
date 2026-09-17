@@ -115,6 +115,19 @@ async function ensureIndexes() {
       { uuid: 1, type: 1, 'meta.day': 1 },
       { unique: true, partialFilterExpression: { 'meta.day': { $exists: true } } },
     );
+  // Idempotência do crédito de captura: um evento de território por membro e
+  // captura. Sem isto, reprocessar um resumo (ou rodar o backfill duas vezes)
+  // pagaria o mesmo peso de novo.
+  await collections
+    .pointsEvents()
+    .createIndex(
+      { uuid: 1, type: 1, 'meta.captureId': 1 },
+      { unique: true, partialFilterExpression: { 'meta.captureId': { $exists: true } } },
+    );
+  await collections.territoryCaptures().createIndex(
+    { captureId: 1 },
+    { unique: true, partialFilterExpression: { captureId: { $exists: true } } },
+  );
   await collections.config().createIndex({ guildDiscordId: 1 }, { unique: true });
   // Um booth ativo por usuário; o job de lembretes varre por reset mais próximo.
   await collections.booths().createIndex({ discordId: 1 }, { unique: true });

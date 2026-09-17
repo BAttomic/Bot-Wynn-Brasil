@@ -100,6 +100,34 @@ async function main() {
   // dele. Ver "3. Classificação de registro", mais abaixo.
 
   section('4. Multiplicador de território (fórmula da wiki)');
+  // Atribuição de captura: o furo da versão antiga era dar TODA captura da janela
+  // a cada guerreiro. O orçamento (uma guerra do contador paga uma captura) é o
+  // que impede isso, e é a única parte da conta que dá para verificar sem banco.
+  {
+    const BASE = Date.UTC(2026, 8, 1, 12, 0, 0);
+    const min = (m) => BASE + m * 60_000;
+    const janela = { beforeMs: 5 * 60_000, afterMs: 45 * 60_000 };
+    const caps = [
+      { captureId: 'c1', at: min(0), multiplier: 2.2 },
+      { captureId: 'c2', at: min(10), multiplier: 8 },
+      { captureId: 'c3', at: min(20), multiplier: 1.3 },
+    ];
+    const incs = [
+      { uuid: 'a', username: 'Ana', at: min(2), delta: 1 },
+      { uuid: 'b', username: 'Bia', at: min(2), delta: 1 },
+      { uuid: 'b', username: 'Bia', at: min(12), delta: 1 },
+      { uuid: 'b', username: 'Bia', at: min(22), delta: 1 },
+      { uuid: 'c', username: 'Caio', at: min(600), delta: 4 },
+    ];
+    const cred = terr.attributeCaptures(caps, incs, janela);
+    const de = (u) => cred.filter((x) => x.uuid === u).map((x) => x.captureId);
+    check('1 guerra no contador = 1 captura (não as três)', de('a'), ['c1']);
+    check('3 guerras = 3 capturas', de('b'), ['c1', 'c2', 'c3']);
+    check('quem guerreou fora da janela não entra', de('c'), []);
+    check('captura sem guerreiro na janela não credita ninguém',
+      terr.attributeCaptures([{ captureId: 'x', at: min(300), multiplier: 5 }], incs, janela), []);
+    check('id da captura é estável', terr.captureId('Ragni', new Date(BASE)), 'Ragni@2026-09-01T12:00:00.000Z');
+  }
   check('normal, 0 fronteiras => x1.0', terr.towerMultiplier({ connections: 0 }), 1);
   check('normal, 4 fronteiras => x2.2', Number(terr.towerMultiplier({ connections: 4 }).toFixed(2)), 2.2);
   check('QG, 0 e 0 => x1.5', terr.towerMultiplier({ connections: 0, externals: 0, isHq: true }), 1.5);

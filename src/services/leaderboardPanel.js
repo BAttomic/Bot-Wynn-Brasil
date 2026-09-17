@@ -549,7 +549,9 @@ function scoringPanelPayload(params, view = DEFAULT_VIEW) {
           },
           {
             name: `${CATEGORIES.war.emoji} ${CATEGORIES.war.label} — ${n(w.war)} pts`,
-            value: `> ${n(w.war)} pontos por guerra, multiplicados pelo valor do território (teto de x${params?.territoryMultiplierCap}).`,
+            value:
+              `> ${n(w.war)} pontos por guerra do seu contador, multiplicados pelo **peso do território** que a guilda tomou junto.` +
+              `\n> QG e fronteiras valem mais (teto de x${params?.territoryMultiplierCap}); território solto vale a base.`,
           },
           {
             name: `${CATEGORIES.xp.emoji} ${CATEGORIES.xp.label} — ${n(xp.pts)} pt / ${shortNumber(xp.xp)}`,

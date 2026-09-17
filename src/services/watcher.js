@@ -4,10 +4,10 @@ import { getConfig } from '../config/guildConfig.js';
 import { optional } from '../config/env.js';
 import { shortNumber, membersLimit, calcExperience, getByPath, diffPaths } from '../util/format.js';
 import { xpBarEmoji, EMOJI } from '../util/emojis.js';
-import { captureValue, recordCapture } from './territories.js';
+import { captureValue, recordCapture, attributeCaptures, captureId } from './territories.js';
 // Território não pontua mais ninguém individualmente, então este arquivo não
 // escreve no livro-razão de guerra — só o snapshot escreve.
-import { recordWeeklyCompletion } from './points.js';
+import { recordWeeklyCompletion, recordEvent, recomputePoints } from './points.js';
 import { creditGuildRaidParty } from './events.js';
 import { blockedUuids } from './eventBlacklist.js';
 import { communityRow, downloadsRow, downloadsField } from './leaderboardPanel.js';
@@ -43,16 +43,25 @@ let prevTerritory = null;
 // de guilda, que o Wynncraft cacheia pesado — o incremento aparece SEMPRE
 // depois da captura, com atraso variável.
 //
-// Este arquivo já tentou fechar essa ligação por janela de tempo, e o resultado
-// era crédito errado: cada captura levava TODO guerreiro da janela, então três
-// capturas numa hora davam três créditos a cada um dos cinco que guerrearam —
-// inclusive a quem lutou por outro território, ou por outra guilda. Um palpite
-// virava ponto, e ponto virava fila de tome e margem de inatividade.
+// DÁ, COM RESSALVA: que o peso do território capturado pertence a quem estava
+// guerreando ali. Cada território vale o multiplicador da torre do defensor
+// (conexões, externals, QG — ver services/territories.js), e guerra por um QG
+// x8 não pode valer o mesmo que guerra por um território solto.
 //
-// Hoje a captura é registro da GUILDA (territoryCaptures + anúncio) e não
-// pontua ninguém individualmente. O log abaixo sobrevive só para o resumo poder
-// LISTAR quem guerreou no intervalo — sem contagem por pessoa, porque essa
-// contagem nunca foi conhecível.
+// Este arquivo já fechou essa ligação por janela de tempo e teve que desfazer:
+// a janela era consultada POR CAPTURA, então três capturas numa hora davam três
+// créditos a cada guerreiro do intervalo, inclusive a quem guerreou uma vez.
+//
+// A volta é com ORÇAMENTO: cada incremento do contador de guerra é gasto uma vez
+// só (attributeCaptures em services/territories.js). Quem guerreou 1 leva 1
+// captura; quem guerreou 3 leva 3; ninguém leva mais capturas do que guerras.
+// O crédito é o EXCEDENTE do multiplicador — a base já veio do contador —, então
+// guerra + captura = war × mult, sem pagar a base duas vezes.
+//
+// O que resta de palpite: quem guerreou por outro território, ou por outra
+// guilda, na mesma janela entra no rateio. O contador da API é um número só e
+// não diz por onde a guerra foi. O log abaixo também segue servindo ao resumo,
+// que LISTA os guerreiros do intervalo.
 //
 // A janela continua assimétrica pelo motivo do cache: o incremento é visto
 // depois, nunca muito antes. O `antes` é curto, só cobre a ordem entre dois
@@ -60,7 +69,7 @@ let prevTerritory = null;
 const ATTRIB_BEFORE_MS = 5 * 60_000;
 const ATTRIB_AFTER_MAX_MS = 45 * 60_000;
 const FLUSH_GRACE_MS = 6 * 60_000; // idade mínima da captura antes de anunciar
-const warriorLog = []; // { uuid, username, at } — em ordem cronológica
+const warriorLog = []; // { uuid, username, at, delta } — em ordem cronológica
 
 /** Retenção do log: tem que cobrir a espera do resumo + a janela depois + folga. */
 function warLogRetentionMs(digestMs = 60 * 60_000) {
@@ -92,8 +101,12 @@ function trackWarParticipants(prev, curr, retentionMs = warLogRetentionMs()) {
   for (const [uuid, m] of membersByUuid(curr)) {
     const old = before.get(uuid);
     if (old && m.wars > old.wars) {
-      warriorLog.push({ uuid, username: m.username, at: now });
-      novos.push({ uuid, username: m.username, delta: m.wars - old.wars });
+      // O delta vai junto: é o orçamento da atribuição de captura (uma guerra
+      // do contador paga no máximo uma captura). Sem ele, quem guerreou uma vez
+      // levaria todas as capturas da janela — o furo da versão antiga.
+      const delta = m.wars - old.wars;
+      warriorLog.push({ uuid, username: m.username, at: now, delta });
+      novos.push({ uuid, username: m.username, delta });
     }
   }
   // Sem isto, "nenhum guerreiro detectado" é indistinguível de "o contador nunca
@@ -613,6 +626,7 @@ export async function flushTerritoryDigest(client) {
 
   const gains = [];
   const losses = [];
+  const creditaveis = [];
 
   for (const c of ready) {
     if (c.lost) {
@@ -621,29 +635,66 @@ export async function flushTerritoryDigest(client) {
     }
     const raw = c.value || { multiplier: 1 };
     gains.push({ name: c.name, multiplier: raw.multiplier });
+    const id = captureId(c.name, c.at);
+    // Multiplicador x1 não tem excedente para pagar (território sem fronteira
+    // nenhuma): a guerra do contador já cobriu a base.
+    if (raw.multiplier > 1) creditaveis.push({ captureId: id, at: c.at, multiplier: raw.multiplier });
 
     try {
-      // A captura entra no histórico da GUILDA, sem lista de participantes.
-      // Ver o bloco sobre atribuição no topo deste arquivo: a API não diz quem
-      // capturou, e gravar um palpite como se fosse registro é pior que não
-      // gravar nada.
       await recordCapture({
+        captureId: id,
         territory: c.name,
         defender: raw.defender ?? null,
         isHq: !!raw.isHq,
         connections: raw.connections ?? 0,
         externals: raw.externals ?? 0,
         multiplier: raw.multiplier,
+        at: new Date(c.at),
       });
     } catch (e) {
       log.error('Falha ao registrar captura de território:', e);
     }
   }
 
-  // Quem guerreou na janela. Isto é FATO — o contador de guerra da pessoa subiu
-  // — e é tudo que dá para afirmar. Quantas capturas cada um fez, não: ninguém
-  // sabe, e o número que aparecia aqui era a janela inteira multiplicada por
-  // cada captura do lote.
+  // Peso do território para quem guerreou na janela. O orçamento sai do log:
+  // uma guerra do contador paga no máximo uma captura (ver attributeCaptures).
+  if (creditaveis.length) {
+    const creditos = attributeCaptures(creditaveis, warriorLog, {
+      beforeMs: ATTRIB_BEFORE_MS,
+      afterMs: afterMs,
+    });
+    let gravados = 0;
+    for (const cr of creditos) {
+      // `qty` é o multiplicador CRU; quem converte em ponto é eventPoints, que
+      // paga só o excedente sobre a base da guerra (services/points.js).
+      const novo = await recordEvent({
+        uuid: cr.uuid,
+        username: cr.username,
+        type: 'territory',
+        qty: cr.multiplier,
+        meta: { captureId: cr.captureId },
+        at: new Date(cr.at),
+      }).catch((e) => {
+        log.error('Falha ao creditar peso de captura:', e);
+        return false;
+      });
+      if (novo) gravados += 1;
+    }
+    if (gravados) {
+      await recomputePoints().catch((e) => log.error('Falha ao reapurar depois das capturas:', e));
+      log.info(`Território: ${gravados} crédito(s) de peso gravado(s) em ${creditaveis.length} captura(s).`);
+    } else {
+      log.warn(
+        `Território: ${creditaveis.length} captura(s) com peso e nenhum incremento de contador na janela — ` +
+          'ninguém foi creditado. O endpoint de guilda pode estar atrasado.',
+      );
+    }
+  }
+
+  // Quem guerreou na janela, para o resumo LISTAR — o contador da pessoa subiu, e
+  // isso é fato. Sem contagem por pessoa aqui de propósito: a divisão das
+  // capturas entre os guerreiros é estimativa (attributeCaptures faz o rateio
+  // para os pontos), e estimativa exibida como placar público vira discussão.
   const warriors = warriorsInWindow(now - intervalMs, intervalMs + afterMs).map((w) => w.username);
   if (gains.length && !warriors.length) {
     log.warn(
