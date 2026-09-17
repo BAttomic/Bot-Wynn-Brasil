@@ -48,15 +48,59 @@ async function main() {
     .sort({ at: 1 })
     .toArray();
 
+  // ---- Camada 1: auditoria por poll (60s), ultimos 30 dias ----
   const auditoria = await collections.warAudit().find({}).sort({ at: 1 }).toArray();
-  const incrementos = auditoria.flatMap((a) =>
+  const daAuditoria = auditoria.flatMap((a) =>
     (a.membros ?? []).map((m) => ({ uuid: m.uuid, username: m.username, at: new Date(a.at).getTime(), delta: m.delta })),
   );
+  const inicioAuditoria = daAuditoria.length ? daAuditoria[0].at : Infinity;
 
-  const maisAntigo = incrementos.length ? incrementos[0].at : Infinity;
+  // ---- Camada 2: livro-razao, com a janela de cada apuracao ----
+  //
+  // A janela de um evento de guerra vai do snapshot ANTERIOR daquele membro ate
+  // o instante do evento. Sem snapshot anterior (o primeiro dele), cai na
+  // cadencia de uma hora, que e o intervalo do job de progresso.
+  const guerras = await collections
+    .pointsEvents()
+    .find({ type: 'war', qty: { $gt: 0 } }, { projection: { uuid: 1, username: 1, qty: 1, at: 1 } })
+    .sort({ at: 1 })
+    .toArray();
+  const snapshots = await collections
+    .progressSnapshots()
+    .find({}, { projection: { uuid: 1, takenAt: 1 } })
+    .sort({ takenAt: 1 })
+    .toArray();
+  const porMembro = new Map();
+  for (const snap of snapshots) {
+    if (!porMembro.has(snap.uuid)) porMembro.set(snap.uuid, []);
+    porMembro.get(snap.uuid).push(new Date(snap.takenAt).getTime());
+  }
+  const anterior = (uuid, at) => {
+    const lista = porMembro.get(uuid) ?? [];
+    let melhor = null;
+    for (const t of lista) {
+      if (t < at) melhor = t;
+      else break;
+    }
+    return melhor ?? at - 60 * 60_000;
+  };
+
+  const doLivro = [];
+  for (const g of guerras) {
+    const at = new Date(g.at).getTime();
+    // Onde a auditoria existe, ela manda: contar as duas fontes seria orcamento
+    // dobrado para a mesma guerra.
+    if (at >= inicioAuditoria) continue;
+    doLivro.push({ uuid: g.uuid, username: g.username, delta: g.qty, from: anterior(g.uuid, at), to: at });
+  }
+
+  const incrementos = [...doLivro, ...daAuditoria];
+  const maisAntigo = incrementos.length ? Math.min(...incrementos.map((i) => i.from ?? i.at)) : Infinity;
+  const dia = (ms) => new Date(ms).toISOString().slice(0, 10);
   console.log(
-    `${capturas.length} captura(s) com peso, ${incrementos.length} incremento(s) de contador na auditoria` +
-      `${incrementos.length ? ` (desde ${new Date(maisAntigo).toISOString().slice(0, 10)})` : ''}.\n`,
+    `${capturas.length} captura(s) com peso. Incrementos de contador: ` +
+      `${daAuditoria.length} da auditoria${daAuditoria.length ? ` (desde ${dia(inicioAuditoria)})` : ''}, ` +
+      `${doLivro.length} do livro-razao${doLivro.length ? ` (desde ${dia(maisAntigo)})` : ''}.`,
   );
 
   // Captura que já tem crédito não entra de novo (o índice recusaria, mas assim
@@ -78,7 +122,7 @@ async function main() {
   }
 
   if (semDados) {
-    p(`${semDados} captura(s) mais antiga(s) que a auditoria: sem como saber quem guerreou, ficam sem crédito.`);
+    p(`${semDados} captura(s) anterior(es) a qualquer registro de guerra: sem como saber quem guerreou, ficam sem crédito.`);
   }
   if (!pendentes.length) {
     console.log('Nada a creditar.');
@@ -115,7 +159,7 @@ async function main() {
   }
 
   if (DRY) {
-    p('\nnada foi gravado.');
+    p('nada foi gravado.');
     await closeMongo();
     return;
   }

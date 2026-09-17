@@ -649,6 +649,8 @@ export async function flushTerritoryDigest(client) {
         connections: raw.connections ?? 0,
         externals: raw.externals ?? 0,
         multiplier: raw.multiplier,
+        defences: raw.defences ?? null,
+        treasury: raw.treasury ?? null,
         at: new Date(c.at),
       });
     } catch (e) {

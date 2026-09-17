@@ -127,6 +127,17 @@ async function main() {
     check('captura sem guerreiro na janela não credita ninguém',
       terr.attributeCaptures([{ captureId: 'x', at: min(300), multiplier: 5 }], incs, janela), []);
     check('id da captura é estável', terr.captureId('Ragni', new Date(BASE)), 'Ragni@2026-09-01T12:00:00.000Z');
+
+    // Reprocessar o passado não tem o instante do poll: o livro-razão só diz "N
+    // guerras entre dois snapshots", e a marca vem com a janela inteira
+    // (scripts/backfill-territory.js).
+    const porJanela = [{ uuid: 'd', username: 'Dan', delta: 2, from: min(-30), to: min(30) }];
+    check('marca com janela própria credita o que cai dentro',
+      terr.attributeCaptures(caps, porJanela, janela).map((x) => x.captureId), ['c1', 'c2']);
+    check('o orçamento da janela também acaba (2 guerras, 3 capturas)',
+      terr.attributeCaptures(caps, porJanela, janela).length, 2);
+    check('fora da janela própria, nada',
+      terr.attributeCaptures([{ captureId: 'z', at: min(120), multiplier: 3 }], porJanela, janela), []);
   }
   check('normal, 0 fronteiras => x1.0', terr.towerMultiplier({ connections: 0 }), 1);
   check('normal, 4 fronteiras => x2.2', Number(terr.towerMultiplier({ connections: 4 }).toFixed(2)), 2.2);

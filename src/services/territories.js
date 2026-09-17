@@ -65,7 +65,12 @@ export function captureValue(territories, name) {
   return {
     defender: prefix,
     defenderName: t.guild.name ?? null,
+    // Nota de defesa e tesouro do DEFENSOR, como o jogo classifica (VERY_LOW ..
+    // VERY_HIGH). Nao entram na conta de pontos hoje, mas sao o unico sinal da
+    // API que reflete os upgrades de torre do defensor — ficam gravados na
+    // captura para uma eventual ponderação por dificuldade real.
     defences: t.defences ?? null,
+    treasury: t.treasury ?? null,
     isHq,
     connections,
     externals,
@@ -108,28 +113,47 @@ export function captureId(territory, at) {
  * As capturas são percorridas em ordem cronológica e cada pessoa gasta primeiro
  * o incremento mais antigo que serve, para o crédito seguir a ordem dos fatos.
  *
+ * Cada incremento vale pela JANELA em que ele pode ter acontecido. O caminho ao
+ * vivo conhece o instante do poll (`at`) e a janela sai de `beforeMs`/`afterMs`.
+ * Quem reprocessa o passado nao tem essa precisao: o livro-razao so diz "N
+ * guerras entre um snapshot e o seguinte", e ai o incremento traz `from`/`to`
+ * com o intervalo inteiro. A conta e a mesma; o que muda e o tamanho da janela.
+ *
  * @param {Array<{captureId: string, at: number, multiplier: number}>} captures
- * @param {Array<{uuid: string, username: string, at: number, delta: number}>} increments
- * @param {{beforeMs: number, afterMs: number}} janela
+ * @param {Array<{uuid: string, username: string, delta: number, at?: number, from?: number, to?: number}>} increments
+ * @param {{beforeMs: number, afterMs: number}} janela  padrao para incremento sem from/to
  * @returns {Array<{captureId: string, uuid: string, username: string, multiplier: number, at: number}>}
  */
 export function attributeCaptures(captures, increments, { beforeMs, afterMs }) {
-  // Orçamento por pessoa: uma marca por guerra que o contador dela acusou.
+  // Orçamento por pessoa: uma marca por guerra que o contador dela acusou, cada
+  // uma com a janela em que aquela guerra pode ter sido.
   const orcamento = new Map();
   for (const inc of increments) {
     const n = Math.max(0, Math.floor(Number(inc.delta) || 0));
     if (!n || !inc.uuid) continue;
+    // A janela de uma marca pontual é a das CAPTURAS que ela pode ter pago, e ela
+    // olha para TRÁS: o contador é cacheado pesado, então o incremento aparece
+    // depois da captura (até `afterMs`), e no máximo `beforeMs` antes — essa
+    // folga curta só cobre a ordem entre dois polls vizinhos.
+    const from = Number(inc.from ?? Number(inc.at) - afterMs);
+    const to = Number(inc.to ?? Number(inc.at) + beforeMs);
+    if (!Number.isFinite(from) || !Number.isFinite(to)) continue;
     const b = orcamento.get(inc.uuid) || { username: inc.username, marcas: [] };
-    for (let i = 0; i < n; i += 1) b.marcas.push(Number(inc.at));
+    for (let i = 0; i < n; i += 1) b.marcas.push({ from, to });
     if (inc.username) b.username = inc.username;
     orcamento.set(inc.uuid, b);
   }
-  for (const b of orcamento.values()) b.marcas.sort((x, y) => x - y);
+  // Marca mais ANTIGA primeiro, e entre duas que começam junto, a mais curta —
+  // gastar a janela larga antes desperdiçaria a única que serve para a captura
+  // seguinte.
+  for (const b of orcamento.values()) {
+    b.marcas.sort((x, y) => x.from - y.from || x.to - y.to);
+  }
 
   const out = [];
   for (const cap of [...captures].sort((a, b) => a.at - b.at)) {
     for (const [uuid, b] of orcamento) {
-      const i = b.marcas.findIndex((at) => at >= cap.at - beforeMs && at <= cap.at + afterMs);
+      const i = b.marcas.findIndex((m) => cap.at >= m.from && cap.at <= m.to);
       if (i === -1) continue;
       b.marcas.splice(i, 1);
       out.push({ captureId: cap.captureId, uuid, username: b.username, multiplier: cap.multiplier, at: cap.at });
