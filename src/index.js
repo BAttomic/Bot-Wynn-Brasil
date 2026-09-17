@@ -30,6 +30,7 @@ import { ensureActiveSeason } from './services/seasons.js';
 import { initErrorReport, reportError } from './services/errorReport.js';
 import { getConfig, applyWeightRevisions } from './config/guildConfig.js';
 import { recomputePoints, rebuildLeaderboards, reconcileGuildRaidLedger } from './services/points.js';
+import { backfillTerritoryCredits } from './services/territoryBackfill.js';
 import { startHealthServer } from './health.js';
 import { log } from './util/log.js';
 
@@ -77,7 +78,16 @@ async function main() {
   // Guild raid contada na coluna 🛡️ precisa valer ponto — inclusive a de quem já
   // saiu da guilda. No-op quando o livro-razão já está em dia.
   const completados = await reconcileGuildRaidLedger();
-  if (revisoes.length || completados) {
+  // Peso das capturas antigas, que ficaram sem crédito enquanto o território não
+  // pontuava ninguém. Roda no DEPLOY porque é isso que o deploy deve significar:
+  // script manual que ninguém rodou deixa o ranking mostrando guerra por 10 pts
+  // cravados, como se a ponderação nunca tivesse voltado. Idempotente, e sai
+  // barato quando não há captura pendente (ver services/territoryBackfill.js).
+  const territorio = await backfillTerritoryCredits().catch((e) => {
+    log.error('Falha ao repor o peso de território:', e);
+    return { gravados: 0 };
+  });
+  if (revisoes.length || completados || territorio.gravados) {
     await recomputePoints();
     await rebuildLeaderboards();
     if (revisoes.length) log.info(`Pesos revisados (${revisoes.join(', ')}): histórico de pontos reapurado.`);

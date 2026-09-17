@@ -89,6 +89,24 @@ export async function recordCapture(doc) {
  * Id estável de uma captura, para a gravação de pontos ser idempotente.
  * Território + instante: a mesma captura nunca acontece duas vezes no mesmo ms.
  */
+/**
+ * Fator de dificuldade da nota `defences` do jogo (VERY_LOW .. VERY_HIGH).
+ *
+ * Nota desconhecida ou ausente vale 1. Isso importa: captura gravada antes de o
+ * campo passar a ser registrado não tem nota, e o certo é ela valer a geografia
+ * limpa — tratar ausente como VERY_LOW seria inventar uma penalidade retroativa.
+ *
+ * @param {string|null|undefined} rating
+ * @param {{defenceFactors?: Record<string, number>}} params
+ * @returns {number}
+ */
+export function defenceFactor(rating, params = {}) {
+  const tabela = params.defenceFactors || {};
+  const chave = String(rating ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  const f = Number(tabela[chave]);
+  return Number.isFinite(f) && f > 0 ? f : 1;
+}
+
 export function captureId(territory, at) {
   return `${territory}@${new Date(at).toISOString()}`;
 }
@@ -119,7 +137,7 @@ export function captureId(territory, at) {
  * guerras entre um snapshot e o seguinte", e ai o incremento traz `from`/`to`
  * com o intervalo inteiro. A conta e a mesma; o que muda e o tamanho da janela.
  *
- * @param {Array<{captureId: string, at: number, multiplier: number}>} captures
+ * @param {Array<{captureId: string, at: number, multiplier: number, defences?: string|null}>} captures
  * @param {Array<{uuid: string, username: string, delta: number, at?: number, from?: number, to?: number}>} increments
  * @param {{beforeMs: number, afterMs: number}} janela  padrao para incremento sem from/to
  * @returns {Array<{captureId: string, uuid: string, username: string, multiplier: number, at: number}>}
@@ -156,7 +174,14 @@ export function attributeCaptures(captures, increments, { beforeMs, afterMs }) {
       const i = b.marcas.findIndex((m) => cap.at >= m.from && cap.at <= m.to);
       if (i === -1) continue;
       b.marcas.splice(i, 1);
-      out.push({ captureId: cap.captureId, uuid, username: b.username, multiplier: cap.multiplier, at: cap.at });
+      out.push({
+        captureId: cap.captureId,
+        uuid,
+        username: b.username,
+        multiplier: cap.multiplier,
+        defences: cap.defences ?? null,
+        at: cap.at,
+      });
     }
   }
   return out;

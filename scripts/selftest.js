@@ -139,6 +139,18 @@ async function main() {
     check('fora da janela própria, nada',
       terr.attributeCaptures([{ captureId: 'z', at: min(120), multiplier: 3 }], porJanela, janela), []);
   }
+  // Dificuldade da torre: o fator da nota `defences` do jogo entra no peso junto
+  // com a geografia. Nota ausente (captura antiga) tem de ser NEUTRA — tratar
+  // como VERY_LOW seria inventar penalidade retroativa.
+  {
+    const fatores = { defenceFactors: { VERY_LOW: 0.6, MEDIUM: 1, VERY_HIGH: 1.5 } };
+    check('VERY_HIGH puxa o peso para cima', terr.defenceFactor('VERY_HIGH', fatores), 1.5);
+    check('grafia com espaço e caixa baixa também vale', terr.defenceFactor('very low', fatores), 0.6);
+    check('nota ausente é neutra', terr.defenceFactor(null, fatores), 1);
+    check('nota fora da tabela é neutra', terr.defenceFactor('EPICA', fatores), 1);
+    check('sem tabela configurada, tudo neutro', terr.defenceFactor('VERY_HIGH', {}), 1);
+  }
+
   check('normal, 0 fronteiras => x1.0', terr.towerMultiplier({ connections: 0 }), 1);
   check('normal, 4 fronteiras => x2.2', Number(terr.towerMultiplier({ connections: 4 }).toFixed(2)), 2.2);
   check('QG, 0 e 0 => x1.5', terr.towerMultiplier({ connections: 0, externals: 0, isHq: true }), 1.5);

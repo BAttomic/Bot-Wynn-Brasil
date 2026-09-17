@@ -66,6 +66,7 @@ export const PARAM_KEYS = Object.freeze([
   'roleSyncMinutes',
   'pointsWeights',
   'territoryMultiplierCap',
+  'defenceFactors',
   'weeklyStreakBonusPerWeek',
   'weeklyStreakBonusMax',
   'seasonMode',
@@ -158,6 +159,31 @@ const DEFAULT_PARAMS = Object.freeze({
   // O QG de uma guilda grande chega a x25 pela fórmula do jogo, o que sozinho
   // dominaria o ranking.
   territoryMultiplierCap: 8,
+
+  // DIFICULDADE DA TORRE, do lado do defensor.
+  //
+  // `towerMultiplier` (services/territories.js) só conhece a geografia:
+  // conexões, externals e QG. Ele não vê os upgrades de torre que o defensor
+  // comprou — dano, vida, defesa, attack speed, multi-hit, aura, volley —, e
+  // esses não estão em endpoint nenhum da API.
+  //
+  // O que a API dá é a nota `defences` do próprio jogo, que embute tudo isso. E
+  // ela enxerga distâncias que a geografia achata: em 17/set, Fountain of Youth
+  // tinha 3 conexões (x1,9) e nota VERY_LOW, enquanto o nosso QG, com 2 conexões,
+  // dava x2,4 e nota VERY_HIGH. Pela fórmula, uma torre "muito fraca" e uma
+  // "muito forte" ficavam a 26% de distância; com o fator, a 3,2x.
+  //
+  // Por isso o peso final é o produto dos dois: geografia × dificuldade. A nota
+  // vai no evento (`meta.defences`) e o fator é aplicado na hora de somar, como
+  // todo peso deste sistema — mexer aqui reescreve o histórico. Nota ausente
+  // (captura antiga, que não gravava o campo) vale 1: neutro, nunca penalidade.
+  defenceFactors: {
+    VERY_LOW: 0.6,
+    LOW: 0.8,
+    MEDIUM: 1,
+    HIGH: 1.25,
+    VERY_HIGH: 1.5,
+  },
   // Objetivo semanal: +10% por semana consecutiva, acumulando no máximo +100%.
   weeklyStreakBonusPerWeek: 0.1,
   weeklyStreakBonusMax: 1,

@@ -109,7 +109,7 @@ Tudo que você faz pela guilda vira ponto, e ponto vira duas coisas: **prioridad
 
 > **Objetivo Semanal** — \`${w.weekly} pontos\`, +${streakPct}% por semana seguida (até o dobro). É o que mais rende por tempo gasto.
 > **Guild Raid** — \`${w.guildRaid} pontos\` para **cada** membro nosso no grupo. Ainda rende aspects (abaixo).
-> **Guerra** — \`${w.war} pontos\` por guerra do **seu** contador, multiplicados pelo **peso do território** que a guilda tomou na sua janela de guerra (QG e fronteiras valem mais, teto de x${params.territoryMultiplierCap}).
+> **Guerra** — \`${w.war} pontos\` por guerra do **seu** contador, multiplicados pelo **peso do território** que a guilda tomou na sua janela de guerra: fronteiras e QG do defensor, vezes a **dificuldade** que o jogo dá àquela torre (teto de x${params.territoryMultiplierCap}).
 > **Guild XP** (\`/guild xp 100\`) — \`${fmt(xp.pts)} ponto\` a cada \`${fmt(xp.xp)}\`. Sobe o nível da guilda, o que libera mais slots de membro e de baú.
 > **Farm em grupo** — não pontua, mas rende amizade, dicas e progresso mais rápido.
 

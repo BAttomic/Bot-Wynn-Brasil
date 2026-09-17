@@ -1,6 +1,7 @@
 import { collections } from '../db/mongo.js';
 import { getActiveSeason } from './seasons.js';
 import { getConfig } from '../config/guildConfig.js';
+import { defenceFactor } from './territories.js';
 import { optional } from '../config/env.js';
 import { log } from '../util/log.js';
 
@@ -125,7 +126,10 @@ export function eventPoints(event, params = {}) {
       //
       // Sem isso, capturar um território pagaria a base duas vezes.
       const cap = Number(params.territoryMultiplierCap) || Infinity;
-      const mult = Math.min(event.qty, cap);
+      // Geografia (`qty`, de towerMultiplier) × dificuldade (a nota `defences`
+      // do jogo, gravada no evento). O teto incide no produto: é ele o peso.
+      const bruto = event.qty * defenceFactor(event.meta?.defences, params);
+      const mult = Math.min(bruto, cap);
       return Math.max(0, mult - 1) * (w.territoryBase || 0);
     }
     case 'manual':

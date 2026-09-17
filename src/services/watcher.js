@@ -638,7 +638,9 @@ export async function flushTerritoryDigest(client) {
     const id = captureId(c.name, c.at);
     // Multiplicador x1 não tem excedente para pagar (território sem fronteira
     // nenhuma): a guerra do contador já cobriu a base.
-    if (raw.multiplier > 1) creditaveis.push({ captureId: id, at: c.at, multiplier: raw.multiplier });
+    if (raw.multiplier > 1) {
+      creditaveis.push({ captureId: id, at: c.at, multiplier: raw.multiplier, defences: raw.defences ?? null });
+    }
 
     try {
       await recordCapture({
@@ -674,7 +676,7 @@ export async function flushTerritoryDigest(client) {
         username: cr.username,
         type: 'territory',
         qty: cr.multiplier,
-        meta: { captureId: cr.captureId },
+        meta: { captureId: cr.captureId, defences: cr.defences ?? null },
         at: new Date(cr.at),
       }).catch((e) => {
         log.error('Falha ao creditar peso de captura:', e);

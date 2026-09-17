@@ -366,7 +366,7 @@ season em `seasonParticipation.points`).
 **Fontes automáticas** (no snapshot diário, a partir dos deltas — §8):
 ```
 pontos += Δguerras · pesos.war
-        + Σ(captura) (mult− 1) · pesos.territoryBase   ← peso do território
+        + Σ(captura) (mult·dif − 1) · pesos.territoryBase   ← peso do território
         + Δraids   · pesos.raid
         + (Δcontribuição / 1.000.000) · pesos.contribPerMillion
 ```
@@ -377,6 +377,14 @@ A guerra é ponderada pelo peso do território que a guilda tomou na janela
 (`territoryMultiplierCap` = teto x8): a base vem do contador, a captura paga o
 excedente, e guerra + captura = `war × mult`. A atribuição tem orçamento — cada
 incremento de contador paga UMA captura (`attributeCaptures`, services/territories.js).
+O peso é geografia × dificuldade: `towerMultiplier` (conexões, externals, QG) vezes
+`defenceFactors[defences]`, a nota que o jogo dá à torre — o único sinal da API que
+reflete os upgrades do defensor (dano, vida, aura, volley, multi-hit não estão em
+endpoint nenhum). A nota vai no evento (`meta.defences`) e o fator é aplicado na
+soma, então mexer nele reescreve o histórico; nota ausente vale 1.
+Capturas que ficaram sem crédito são repostas no BOOT
+(`backfillTerritoryCredits`, services/territoryBackfill.js), com relatório à mão em
+`scripts/backfill-territory.js --dry`.
 Mudança de peso que precisa valer para a config já gravada entra em
 `WEIGHT_REVISIONS` (guildConfig.js): aplicada uma vez no boot, com o histórico
 reapurado.
