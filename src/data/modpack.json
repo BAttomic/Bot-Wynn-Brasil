@@ -5,10 +5,12 @@
   "loader": "fabric",
   "mods": [
     { "slug": "fabric-api", "name": "Fabric API" },
+    { "slug": "cloth-config", "name": "Cloth Config API" },
     { "slug": "wynntils", "name": "Wynntils" },
     { "slug": "wynnventory", "name": "WynnVentory" },
     { "slug": "wynnmod", "name": "WynnMod" },
     { "slug": "wynnextras", "name": "WynnExtras", "allowPrerelease": true },
+    { "slug": "wynnmount", "name": "WynnMounts" },
     { "slug": "chatshot", "name": "ChatShot" },
     { "slug": "longer-chat-history", "name": "Longer Chat History" },
     { "slug": "sodium", "name": "Sodium" },
