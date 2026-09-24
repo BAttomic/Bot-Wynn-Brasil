@@ -20,10 +20,6 @@ const ROUTES = {
   '/modpack.mrpack': { data: MRPACK_FILE, maxAge: 300, missing: 'modpack ainda não foi gerado' },
   // Legado explícito: o pacote congelado, para quem já tem o link antigo salvo.
   '/modpack.rar': { asset: 'mods.rar', maxAge: 3600, missing: 'modpack indisponível' },
-  // O dossiê GsW × Wynn Brasil, uma página autocontida (~3,5 MB, com os prints
-  // embutidos em base64). Gerada por gsw/build.ps1. Cache curto de propósito: a
-  // página é regerada pelo build e o link é fixo.
-  '/gsw': { asset: 'gsw.html', maxAge: 300, missing: 'dossiê indisponível' },
 };
 
 // Tipo pela extensão, e não por rota: /modpack serve um .zip no caso normal e um
@@ -92,7 +88,7 @@ function serveFile(res, route, headOnly) {
 export function startHealthServer(getState) {
   const port = Number(optional('PORT', '8080'));
   const server = createServer((req, res) => {
-    // Ignora query string: /gsw?utm=... continua caindo na rota.
+    // Ignora query string: /modpack?utm=... continua caindo na rota.
     const path = (req.url || '/').split('?')[0].replace(/\/+$/, '') || '/';
     if (ROUTES[path]) {
       serveFile(res, ROUTES[path], req.method === 'HEAD');

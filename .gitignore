@@ -11,8 +11,8 @@ npm-debug.log*
 .env.*
 !.env.example
 
-# Fonte do dossiê GsW (template + prints + build.ps1). O que o bot serve em
-# /gsw é o HTML já montado em src/assets/gsw.html — esse SIM é versionado. Aqui
-# ficam só os 138 KB de template e os prints soltos, que ninguém consome em
-# runtime. A barra inicial evita casar com src/assets/gsw.html.
+# Dossê GsW — fora do ar. A rota /gsw foi removida do health.js e nem a fonte
+# (template + prints + build.ps1) nem o HTML montado vão mais pro repo. Os dois
+# continuam no disco local; só não sobem nem entram na imagem.
 /gsw/
+/src/assets/gsw.html

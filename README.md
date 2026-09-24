@@ -275,11 +275,10 @@ de tirar o mod da lista).
   partir dele. Os arquivos são **gerados em runtime** e vivem em `DATA_DIR`, que
   precisa ser um volume (ver `docker-compose.yml`): sem ele, o redeploy limpa o
   pack e o `/modpack` cai no `mods.rar` legado até o job rodar de novo.
-- **Dossiê GsW:** o mesmo servidor abre a página em `:$PORT/gsw` —
-  `${PUBLIC_URL}/gsw` no domínio público. É um HTML autocontido (os prints vão
-  embutidos em base64), gerado por `gsw/build.ps1` direto em `src/assets/`.
-  Editou o texto em `gsw/template.html` ou trocou print em `gsw/img/`? Roda
-  `powershell -ExecutionPolicy Bypass -File gsw/build.ps1` e sobe de novo.
+- **Dossiê GsW:** fora do ar. A rota `/gsw` foi removida e nem a fonte (`gsw/`)
+  nem o HTML montado (`src/assets/gsw.html`) vão pro repo — os dois seguem no
+  disco local, ignorados pelo git. Para voltar, reponha a rota em
+  `src/health.js` e tire as duas linhas do `.gitignore`/`.dockerignore`.
 - **Backup:** agende `scripts/backup.sh` (mongodump gzip, mantém 14 dias). Veja o
   cabeçalho do script para as variáveis.
 
@@ -296,7 +295,7 @@ Variáveis de ambiente (veja `.env.example`):
 | `MONGO_DB` | Nome do banco (padrão: `wynn_guild`) |
 | `WYNN_GUILD_PREFIX` | TAG da guilda na API |
 | `WYNN_API_KEY` | (Opcional) chave da API v3 |
-| `PUBLIC_URL` | Domínio público do bot (links de `/modpack` e `/gsw`) |
+| `PUBLIC_URL` | Domínio público do bot (links de `/modpack`) |
 | `DATA_DIR` | Onde o modpack gerado é gravado (padrão: `./data`; em produção, o volume) |
 
 ### Intent privilegiado
