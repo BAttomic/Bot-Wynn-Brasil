@@ -264,6 +264,15 @@ async function main() {
   const ricos = new Map([['u-saiu', 10_000]]);
   check('contribuição protege mesmo quem respondeu que saiu', inactivityStatus(membros, ricos, cp, registros, agora).kick.map((k) => k.username).includes('Desistiu'), false);
 
+  // O endpoint de guilda às vezes não renova o `lastJoin`; a atividade que o bot
+  // viu (contador subindo, online) vale como login.
+  const { lastSeen } = await import('../src/services/inactivityCheck.js');
+  check('atividade observada mais recente vence o lastJoin', lastSeen({ lastJoin: off(20) }, { activeAt: off(1) }).getTime(), off(1).getTime());
+  check('lastJoin mais recente vence atividade antiga', lastSeen({ lastJoin: off(2) }, { activeAt: off(9) }).getTime(), off(2).getTime());
+  check('sem atividade salva fica o lastJoin', lastSeen({ lastJoin: off(5) }, undefined).getTime(), off(5).getTime());
+  const viuJogar = membros.map((m) => (m.uuid === 'u-mudo' ? { ...m, lastJoin: lastSeen(m, { activeAt: off(0) }) } : m));
+  check('quem o bot viu jogar sai da lista', inactivityStatus(viuJogar, semPontos, cp, registros, agora).kick.map((k) => k.username).includes('Mudo'), false);
+
   section('7. Ordenação de cargos (peakRank)');
   check('capitão > recruta', gd.isHigherRank('captain', 'recruit'), true);
   check('recruta não > capitão', gd.isHigherRank('recruit', 'captain'), false);

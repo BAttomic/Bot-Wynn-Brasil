@@ -3,6 +3,7 @@ import { collections } from '../db/mongo.js';
 import { getConfig } from '../config/guildConfig.js';
 import { optional } from '../config/env.js';
 import { fetchGuildMembers } from './guildData.js';
+import { wynn } from '../wynn/api.js';
 import { evaluate } from './inactivity.js';
 import { audit } from './audit.js';
 import { log } from '../util/log.js';
@@ -220,6 +221,87 @@ async function sendDM(client, discordId, payload) {
   return !!msg;
 }
 
+/** Contadores do endpoint de guilda que só sobem jogando. */
+const COUNTERS = ['contributed', 'wars', 'guildRaids'];
+
+/**
+ * Último sinal de vida: o `lastJoin` da API ou a última atividade que o próprio
+ * bot observou, o que for mais recente.
+ * @param {{lastJoin: Date|null}} m
+ * @param {{activeAt?: Date|null}} [saved]  documento de memberActivity
+ * @returns {Date|null}
+ */
+export function lastSeen(m, saved) {
+  const api = m.lastJoin ? new Date(m.lastJoin) : null;
+  const visto = saved?.activeAt ? new Date(saved.activeAt) : null;
+  if (!api) return visto;
+  if (!visto) return api;
+  return visto > api ? visto : api;
+}
+
+/**
+ * Anota quem mostrou sinal de jogo desde a última volta: estava online, ou algum
+ * contador (XP de contribuição, guerras, guild raids) subiu.
+ *
+ * Existe porque o `lastJoin` do endpoint de guilda às vezes fica para trás do
+ * jogo — gente que entrou depois do check-in continuava na lista de kick. Um
+ * contador subindo é prova de jogo que não depende desse campo.
+ *
+ * A primeira vez que um membro é visto só grava a linha de base: sem ela não há
+ * como saber se o contador subiu, e marcar todo mundo como ativo no primeiro
+ * ciclo esvaziaria a lista sem motivo.
+ *
+ * @param {Array<object>} members  membros vindos de fetchGuildMembers
+ * @param {number} [now]
+ */
+export async function recordActivity(members, now = Date.now()) {
+  const col = collections.memberActivity();
+  const saved = new Map((await col.find({}).toArray()).map((a) => [a.uuid, a]));
+  const ops = [];
+
+  for (const m of members) {
+    const prev = saved.get(m.uuid);
+    const atual = Object.fromEntries(COUNTERS.map((k) => [k, Number(m[k] ?? 0)]));
+    const subiu = !!prev && COUNTERS.some((k) => atual[k] > Number(prev[k] ?? 0));
+    const set = { ...atual, username: m.username };
+    if (m.online || subiu) set.activeAt = new Date(now);
+    ops.push({ updateOne: { filter: { uuid: m.uuid }, update: { $set: set }, upsert: true } });
+  }
+
+  if (ops.length) await col.bulkWrite(ops, { ordered: false });
+}
+
+/**
+ * Os membros com o `lastJoin` mais confiável que dá para ter.
+ *
+ * Duas correções sobre o que o endpoint de guilda diz:
+ *   1. a atividade observada pelo bot (ver recordActivity);
+ *   2. para quem continua expulsável, o endpoint de JOGADOR — que é o que o
+ *      Wynncraft atualiza primeiro. É uma consulta por candidato, não por
+ *      membro, e cai calada para o dado da guilda se a API não responder.
+ *
+ * @param {Array<object>} members
+ * @param {Map<string, number>} pointsByUuid
+ * @param {import('../config/guildConfig.js').GuildParams} params
+ * @returns {Promise<Array<object>>} cópias; os originais não são tocados
+ */
+export async function withObservedActivity(members, pointsByUuid, params) {
+  const saved = new Map(
+    (await collections.memberActivity().find({}).toArray()).map((a) => [a.uuid, a]),
+  );
+  const out = members.map((m) => ({ ...m, lastJoin: lastSeen(m, saved.get(m.uuid)) }));
+
+  for (const m of out) {
+    if (!evaluate(m, pointsByUuid.get(m.uuid) ?? 0, params).kickable) continue;
+    const p = await wynn.player(m.uuid).catch(() => null);
+    if (!p) continue;
+    if (p.online) m.online = true;
+    const pj = p.lastJoin ? new Date(p.lastJoin) : null;
+    if (pj && (!m.lastJoin || pj > m.lastJoin)) m.lastJoin = pj;
+  }
+  return out;
+}
+
 /**
  * Pergunta a quem acabou de estourar a margem, e limpa o que não vale mais.
  * @param {import('discord.js').Client} client
@@ -248,12 +330,15 @@ export async function runInactivityCheck(client) {
   const linkByUuid = new Map(links.map((l) => [l.uuid, l]));
 
   const now = Date.now();
+  await recordActivity(res.members, now);
+  const members = await withObservedActivity(res.members, pointsByUuid, params);
+
   let tentativas = 0; // orçamento de DMs da volta (perguntas + avisos de prazo)
   let perguntas = 0;
   let avisos = 0;
   let semDM = 0;
 
-  for (const m of res.members) {
+  for (const m of members) {
     const link = linkByUuid.get(m.uuid);
     // Banido é decisão tomada, não pergunta em aberto — o /verificar já o ignora.
     if (link?.classification === 'banned') continue;

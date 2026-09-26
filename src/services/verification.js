@@ -1,7 +1,7 @@
 import { collections } from '../db/mongo.js';
 import { fetchGuildMembers, isHigherRank } from './guildData.js';
 import { membersLimit } from '../util/format.js';
-import { inactivityStatus } from './inactivityCheck.js';
+import { inactivityStatus, withObservedActivity } from './inactivityCheck.js';
 import { getConfig } from '../config/guildConfig.js';
 import { optional } from '../config/env.js';
 import { queueApplications } from './applications.js';
@@ -70,12 +70,11 @@ export async function computeVerification() {
       .find({}, { projection: { uuid: 1, points: 1 } })
       .toArray();
     const checks = await collections.inactivityChecks().find({}).toArray();
-    inactivity = inactivityStatus(
-      res.members,
-      new Map(stats.map((s) => [s.uuid, s.points ?? 0])),
-      params,
-      checks,
-    );
+    const pointsByUuid = new Map(stats.map((s) => [s.uuid, s.points ?? 0]));
+    // O `lastJoin` do endpoint de guilda às vezes fica para trás do jogo: quem
+    // já voltou continuava na lista de kick. Mesma correção que o job usa.
+    const members = await withObservedActivity(res.members, pointsByUuid, params);
+    inactivity = inactivityStatus(members, pointsByUuid, params, checks);
   }
 
   return {
