@@ -264,13 +264,16 @@ async function main() {
   const ricos = new Map([['u-saiu', 10_000]]);
   check('contribuição protege mesmo quem respondeu que saiu', inactivityStatus(membros, ricos, cp, registros, agora).kick.map((k) => k.username).includes('Desistiu'), false);
 
-  // O endpoint de guilda às vezes não renova o `lastJoin`; a atividade que o bot
-  // viu (contador subindo, online) vale como login.
-  const { lastSeen } = await import('../src/services/inactivityCheck.js');
-  check('atividade observada mais recente vence o lastJoin', lastSeen({ lastJoin: off(20) }, { activeAt: off(1) }).getTime(), off(1).getTime());
-  check('lastJoin mais recente vence atividade antiga', lastSeen({ lastJoin: off(2) }, { activeAt: off(9) }).getTime(), off(2).getTime());
-  check('sem atividade salva fica o lastJoin', lastSeen({ lastJoin: off(5) }, undefined).getTime(), off(5).getTime());
-  const viuJogar = membros.map((m) => (m.uuid === 'u-mudo' ? { ...m, lastJoin: lastSeen(m, { activeAt: off(0) }) } : m));
+  // O Wynncraft às vezes não renova o `lastJoin`; contador subindo no histórico
+  // de snapshots depois dele vale como login.
+  const { activitySince } = await import('../src/services/inactivityCheck.js');
+  const snap = (d, contributed, wars = 0) => ({ takenAt: off(d), metrics: { contributed, wars, raids: 0, guildRaids: 0 } });
+  const parado = { lastJoin: off(12), contributed: 100, wars: 0, raids: 0, guildRaids: 0 };
+  check('contadores parados não inventam login', activitySince(parado, [snap(11, 100), snap(5, 100), snap(1, 100)]), null);
+  check('XP subindo entre snapshots é login', activitySince(parado, [snap(11, 100), snap(3, 100), snap(2, 150), snap(1, 150)]).getTime(), off(3).getTime());
+  check('guerra também conta', activitySince({ ...parado, wars: 2 }, [snap(11, 100), snap(4, 100, 2)]).getTime(), off(11).getTime());
+  check('subida desde o último snapshot conta', activitySince({ ...parado, contributed: 999 }, [snap(11, 100), snap(1, 100)]).getTime(), off(1).getTime());
+  const viuJogar = membros.map((m) => (m.uuid === 'u-mudo' ? { ...m, lastJoin: off(0) } : m));
   check('quem o bot viu jogar sai da lista', inactivityStatus(viuJogar, semPontos, cp, registros, agora).kick.map((k) => k.username).includes('Mudo'), false);
 
   section('7. Ordenação de cargos (peakRank)');

@@ -49,7 +49,6 @@ export const collections = {
   giveaways: () => getDb().collection('giveaways'),
   giveawayEntries: () => getDb().collection('giveawayEntries'),
   inactivityChecks: () => getDb().collection('inactivityChecks'),
-  memberActivity: () => getDb().collection('memberActivity'),
 };
 
 async function ensureIndexes() {
@@ -147,7 +146,6 @@ async function ensureIndexes() {
   // mensagem" por episódio, mesmo se o job rodar duas vezes.
   await collections.inactivityChecks().createIndex({ uuid: 1 }, { unique: true });
   await collections.inactivityChecks().createIndex({ status: 1, sentAt: 1 });
-  await collections.memberActivity().createIndex({ uuid: 1 }, { unique: true });
 }
 
 export async function closeMongo() {

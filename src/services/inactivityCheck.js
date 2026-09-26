@@ -221,64 +221,47 @@ async function sendDM(client, discordId, payload) {
   return !!msg;
 }
 
-/** Contadores do endpoint de guilda que só sobem jogando. */
-const COUNTERS = ['contributed', 'wars', 'guildRaids'];
+/** Contadores que só sobem jogando (nomes de `metrics` no progressSnapshot). */
+const COUNTERS = ['contributed', 'wars', 'raids', 'guildRaids'];
 
 /**
- * Último sinal de vida: o `lastJoin` da API ou a última atividade que o próprio
- * bot observou, o que for mais recente.
- * @param {{lastJoin: Date|null}} m
- * @param {{activeAt?: Date|null}} [saved]  documento de memberActivity
- * @returns {Date|null}
+ * Última vez que um contador subiu DEPOIS do `lastJoin` da API, segundo o
+ * histórico de snapshots (um por hora, ver services/progress.js) e o valor ao
+ * vivo. Função pura.
+ *
+ * Existe porque o `lastJoin` do Wynncraft às vezes não é renovado — nem no
+ * endpoint de guilda, nem no de jogador: gente que entrou no jogo depois do
+ * check-in continuava na lista de kick. XP de contribuição, guerra ou raid
+ * subindo é prova de jogo que não depende desse campo.
+ *
+ * Um aumento entre dois snapshots diz que a pessoa jogou em algum momento do
+ * intervalo; a data usada é o INÍCIO dele, a leitura conservadora. Só contam
+ * intervalos que começam depois do `lastJoin` — o ganho da própria sessão do
+ * `lastJoin` não pode renovar a si mesmo.
+ *
+ * @param {{lastJoin: Date|null}} m  com os contadores ao vivo
+ * @param {Array<{takenAt: Date, metrics: object}>} snaps  em ordem cronológica
+ * @returns {Date|null} null se não há sinal além do `lastJoin`
  */
-export function lastSeen(m, saved) {
-  const api = m.lastJoin ? new Date(m.lastJoin) : null;
-  const visto = saved?.activeAt ? new Date(saved.activeAt) : null;
-  if (!api) return visto;
-  if (!visto) return api;
-  return visto > api ? visto : api;
-}
-
-/**
- * Anota quem mostrou sinal de jogo desde a última volta: estava online, ou algum
- * contador (XP de contribuição, guerras, guild raids) subiu.
- *
- * Existe porque o `lastJoin` do endpoint de guilda às vezes fica para trás do
- * jogo — gente que entrou depois do check-in continuava na lista de kick. Um
- * contador subindo é prova de jogo que não depende desse campo.
- *
- * A primeira vez que um membro é visto só grava a linha de base: sem ela não há
- * como saber se o contador subiu, e marcar todo mundo como ativo no primeiro
- * ciclo esvaziaria a lista sem motivo.
- *
- * @param {Array<object>} members  membros vindos de fetchGuildMembers
- * @param {number} [now]
- */
-export async function recordActivity(members, now = Date.now()) {
-  const col = collections.memberActivity();
-  const saved = new Map((await col.find({}).toArray()).map((a) => [a.uuid, a]));
-  const ops = [];
-
-  for (const m of members) {
-    const prev = saved.get(m.uuid);
-    const atual = Object.fromEntries(COUNTERS.map((k) => [k, Number(m[k] ?? 0)]));
-    const subiu = !!prev && COUNTERS.some((k) => atual[k] > Number(prev[k] ?? 0));
-    const set = { ...atual, username: m.username };
-    if (m.online || subiu) set.activeAt = new Date(now);
-    ops.push({ updateOne: { filter: { uuid: m.uuid }, update: { $set: set }, upsert: true } });
+export function activitySince(m, snaps) {
+  const desde = m.lastJoin ? new Date(m.lastJoin).getTime() : 0;
+  const leituras = [...snaps.map((s) => ({ at: new Date(s.takenAt), v: s.metrics ?? {} })), { at: null, v: m }];
+  let visto = null;
+  for (let i = 1; i < leituras.length; i += 1) {
+    const antes = leituras[i - 1];
+    if (antes.at.getTime() <= desde) continue;
+    const subiu = COUNTERS.some((k) => Number(leituras[i].v[k] ?? 0) > Number(antes.v[k] ?? 0));
+    if (subiu) visto = antes.at;
   }
-
-  if (ops.length) await col.bulkWrite(ops, { ordered: false });
+  return visto;
 }
 
 /**
- * Os membros com o `lastJoin` mais confiável que dá para ter.
- *
- * Duas correções sobre o que o endpoint de guilda diz:
- *   1. a atividade observada pelo bot (ver recordActivity);
- *   2. para quem continua expulsável, o endpoint de JOGADOR — que é o que o
- *      Wynncraft atualiza primeiro. É uma consulta por candidato, não por
- *      membro, e cai calada para o dado da guilda se a API não responder.
+ * Os membros com o `lastJoin` mais confiável que dá para ter. Roda a cada
+ * /verificar e a cada volta do job, só para quem hoje seria expulsável:
+ *   1. endpoint de JOGADOR (online agora, ou `lastJoin` mais novo que o da guilda);
+ *   2. contadores subindo no histórico de snapshots (ver activitySince).
+ * Se a API não responder, fica o dado da guilda.
  *
  * @param {Array<object>} members
  * @param {Map<string, number>} pointsByUuid
@@ -286,18 +269,27 @@ export async function recordActivity(members, now = Date.now()) {
  * @returns {Promise<Array<object>>} cópias; os originais não são tocados
  */
 export async function withObservedActivity(members, pointsByUuid, params) {
-  const saved = new Map(
-    (await collections.memberActivity().find({}).toArray()).map((a) => [a.uuid, a]),
-  );
-  const out = members.map((m) => ({ ...m, lastJoin: lastSeen(m, saved.get(m.uuid)) }));
+  const out = members.map((m) => ({ ...m }));
+  const snaps = collections.progressSnapshots();
 
   for (const m of out) {
     if (!evaluate(m, pointsByUuid.get(m.uuid) ?? 0, params).kickable) continue;
+
     const p = await wynn.player(m.uuid).catch(() => null);
-    if (!p) continue;
-    if (p.online) m.online = true;
-    const pj = p.lastJoin ? new Date(p.lastJoin) : null;
+    if (p?.online) m.online = true;
+    const pj = p?.lastJoin ? new Date(p.lastJoin) : null;
     if (pj && (!m.lastJoin || pj > m.lastJoin)) m.lastJoin = pj;
+
+    // O snapshot imediatamente anterior ao lastJoin fica de fora de propósito:
+    // o intervalo que ele abre começa antes do login e não prova nada novo.
+    const hist = m.lastJoin
+      ? await snaps
+          .find({ uuid: m.uuid, takenAt: { $gt: m.lastJoin } }, { projection: { takenAt: 1, metrics: 1 } })
+          .sort({ takenAt: 1 })
+          .toArray()
+      : [];
+    const visto = activitySince(m, hist);
+    if (visto && (!m.lastJoin || visto > m.lastJoin)) m.lastJoin = visto;
   }
   return out;
 }
@@ -330,7 +322,6 @@ export async function runInactivityCheck(client) {
   const linkByUuid = new Map(links.map((l) => [l.uuid, l]));
 
   const now = Date.now();
-  await recordActivity(res.members, now);
   const members = await withObservedActivity(res.members, pointsByUuid, params);
 
   let tentativas = 0; // orçamento de DMs da volta (perguntas + avisos de prazo)
