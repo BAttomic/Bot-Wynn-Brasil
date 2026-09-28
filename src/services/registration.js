@@ -14,7 +14,7 @@ import { audit } from './audit.js';
 import { isHigherRank } from './guildData.js';
 import { findBan, findExemption, recordBan, BAN_REASON_BLACKLIST_GUILD } from './bans.js';
 import { loadGuildIndex, allyRoleIds } from './guildList.js';
-import { applyAllyRole, ensureAllyRole } from './allyRoles.js';
+import { applyAllyRole, ensureAllyRole, ALLIES_ROLE_ID } from './allyRoles.js';
 import { ensurePanel } from './panels.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { log } from '../util/log.js';
@@ -162,8 +162,8 @@ export async function nickTagOf(player) {
 // Cargos que cada classificação DEVE ter. O membro da guilda também é da
 // comunidade — a recíproca não vale: o neutro tem só o de comunidade.
 //
-// O aliado é um neutro com identificação: mesmo acesso, mais o cargo `[TAG]
-// Nome` da guilda dele, que é aplicado à parte (ver applyAllyRole).
+// O aliado é um neutro com identificação: mesmo acesso, mais o cargo de aliado,
+// que é aplicado à parte (ver applyAllyRole).
 const ROLES_BY_KIND = {
   member: ['guildMember', 'community'],
   ally: ['community'],
@@ -191,7 +191,7 @@ const KIND_LABEL = {
 // Eles saem do nick que a pessoa digitou, que ninguém verificou — dar Capitão a
 // quem só escreveu o nick de um Capitão seria entregar a guilda. Rank é sempre
 // aplicado à mão pela staff; o bot no máximo avisa (ver peakRank em roleSync).
-// O 4º argumento é o cargo `[TAG] Nome` da guilda aliada. Ele é opcional de
+// O 4º argumento é o cargo de aliado. Ele é opcional de
 // propósito: quem não passa nada (ban.js, warn.js) está dizendo "esta pessoa não
 // é aliada", e o cargo de aliada que ela porventura tivesse é retirado.
 export async function applyClassificationRoles(member, cfg, kind, allyRoleId = null) {
@@ -217,7 +217,10 @@ export async function applyClassificationRoles(member, cfg, kind, allyRoleId = n
 
   // Exatamente um cargo de aliada, ou nenhum. Sempre: é isto que tira o `[TAG]`
   // de quem saiu da guilda aliada, entrou na nossa, ou foi banido.
-  await applyAllyRole(member, await allyRoleIds(), kind === 'ally' ? allyRoleId : null);
+  // O cargo fixo entra sempre na lista: sem isso, tirar a última aliada deixaria
+  // o cargo com quem era dela, porque nenhuma guilda apontaria mais para ele.
+  const conhecidos = [...new Set([...(await allyRoleIds()), ALLIES_ROLE_ID])];
+  await applyAllyRole(member, conhecidos, kind === 'ally' ? allyRoleId : null);
 
   if (kind === 'banned') return bannedId;
   if (kind === 'ally' && allyRoleId) return allyRoleId;
@@ -478,8 +481,7 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
   const cfg = await getConfig(guildId);
   let roleId = null;
   if (targetMember?.roles?.add) {
-    // O cargo da aliada é criado sob demanda: a guilda pode ter entrado na lista
-    // sem ninguém dela no servidor ainda.
+    // O cargo de aliado é o mesmo para todas as aliadas (ver services/allyRoles.js).
     const allyRoleId = allyGuild
       ? await ensureAllyRole(targetMember.guild, cfg, allyGuild).catch(() => null)
       : null;

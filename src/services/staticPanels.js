@@ -181,58 +181,6 @@ Dúvidas? Mencione um <@&${STAFF_ROLE}>. Estamos prontos para ajudar.`,
   };
 }
 
-/** @param {import('../config/guildConfig.js').GuildParams} params */
-function warApplicationPayload(params) {
-  const minDias = params.warMinGuildDays;
-  return {
-    ...SILENT,
-    embeds: [
-      {
-        title: '🛡️ Processo de Aplicação para Guerra',
-        color: COLOR.war,
-        description:
-`Se você deseja se juntar ao nosso time de guerra, siga as diretrizes abaixo.
-
-## 🎖️ Cargo de Guerreiro \`WAR\`
-> Para fazer parte do exército geral:
-> - Ter pelo menos uma classe **nível 120**.
-> - Estar disposto a receber PINGs sobre as guerras.
-> - Estar na guilda há **${minDias} dias**.
-
-**Sem avaliação:** clique em candidatar-se e o bot aplica o cargo na hora. Se você ainda não tem os **${minDias} dias** de guilda, sua aplicação fica guardada e o cargo cai sozinho quando você completar — não precisa aplicar de novo.
-
-## 🏆 Cargo de \`MAIN WAR\`
-> Papel mais sério, critérios mais exigentes:
-
-**Atividade e Confiança**
-> Seja ativo e conquiste nossa confiança. Builds, estratégias e consumíveis são informação privada. Vazamento resulta em **banimento permanente** da guilda e da comunidade.
-
-**Classe Exclusiva para Guerra**
-> Uma classe dedicada só à guerra, pronta a qualquer momento. Trocar de build antes de cada guerra não será bem visto.
-
-**Avaliação da Classe**
-> Sua build será avaliada pelo time e pode passar por ajustes. Se você é de confiança e não tem build, nós te passamos uma.
-
-**Acesso Total ao Mapa**
-> Sua classe de guerra precisa ter todas as regiões desbloqueadas (quests completas), para atuar em qualquer lugar.
-
-**Função na Guerra**
-> Após a aprovação você será designado a uma ou mais funções: \`DPS\`, \`HEALER\` ou \`TANK\`.
-
-## 📩 Como se candidatar?
-> Clique em **Candidatar-se** abaixo e preencha classe, interesse e função. O cargo \`WAR\` é aplicado automaticamente; o \`MAIN WAR\` vai para a staff avaliar.
-
--# 🔔 Não atingiu os critérios do cargo principal? Você ainda pode entrar no exército geral.
--# Precisa ter o nick registrado no canal de registro — é assim que o bot confere seu tempo de guilda.`,
-      },
-    ],
-    components: [
-      // Emoji de botão: a API só aceita Unicode ou <:nome:id>, shortcode não resolve.
-      row([{ id: 'war:apply', label: 'Candidatar-se', emoji: '🗡️', style: ButtonStyle.Danger }]),
-    ],
-  };
-}
-
 // O painel de Tomes é AO VIVO (fila + aspects a entregar) e vive em services/
 // tomes.js — não entra na lista de painéis estáticos abaixo.
 
@@ -316,7 +264,6 @@ export const PANELS = Object.freeze([
   // Segunda mensagem do MESMO canal, logo abaixo. A ordem do array é a ordem
   // em que os painéis nascem, e portanto a ordem deles no canal.
   { key: 'recruiters', stateId: 'recruitQueuePanel', label: 'fila de entrada', build: queueStaticPanel },
-  { key: 'warApplication', stateId: 'warApplicationPanel', label: 'aplicação war', build: warApplicationPayload },
   { key: 'loans', stateId: 'loanPanel', label: 'empréstimos', build: loanPayload },
   { key: 'appeals', stateId: 'appealPanel', label: 'apelações', build: appealPayload },
 ]);

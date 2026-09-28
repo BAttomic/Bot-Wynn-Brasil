@@ -2,8 +2,8 @@
  * Guildas do WynnCraft que o bot rastreia, em dois papéis opostos:
  *
  *   black-list → membro dela leva o cargo de banido, em silêncio;
- *   aliada     → membro dela ganha um cargo `[TAG] Nome` próprio, além do de
- *                comunidade.
+ *   aliada     → membro dela ganha o cargo de aliado (um só para todas), além
+ *                do de comunidade.
  *
  * Antes disto a black-list era UMA guilda, lida do ambiente
  * (`WYNN_BLACKLIST_GUILD_UUID/PREFIX`, com a GsW embutida no código). Banir uma
@@ -37,7 +37,7 @@ export const KIND_LABEL = {
  * @property {string}  prefix
  * @property {string}  name
  * @property {'blacklist'|'ally'} kind
- * @property {string?} roleId    só aliada: cargo [TAG] Nome no Discord
+ * @property {string?} roleId    só aliada: cargo de aliado no Discord
  * @property {Date}    addedAt
  * @property {string?} addedBy
  */

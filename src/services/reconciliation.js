@@ -118,10 +118,9 @@ function nickTagFor({ nickLower, uuid }, ctx) {
 /**
  * Monta o retrato completo. Não mexe em membro nenhum — só descreve.
  *
- * A uma exceção: os cargos `[TAG] Nome` das guildas aliadas são criados aqui se
- * ainda não existirem. Sem o cargo não há com o que comparar, e o painel diria
- * "tudo certo" para um aliado que não tem cargo nenhum. A operação é idempotente
- * e não toca em ninguém — cria o cargo, não o distribui.
+ * A uma exceção: cada guilda aliada é ligada ao cargo de aliado aqui, se ainda
+ * não estiver. Sem isso não há com o que comparar, e o painel diria "tudo
+ * certo" para um aliado sem cargo. Não toca em membro nenhum.
  *
  * @param {import('discord.js').Guild} guild
  * @returns {Promise<object|null>}
@@ -178,7 +177,7 @@ export async function computeReconciliation(guild) {
   }
 
   // Aliadas: cada jogador aponta para o documento da guilda dele, e cada guilda
-  // para o cargo `[TAG] Nome` correspondente.
+  // para o cargo de aliado (o mesmo para todas).
   const allyByUuid = new Map();
   const allyByName = new Map();
   const allyRoleByGuild = new Map();
@@ -269,8 +268,8 @@ export async function computeReconciliation(guild) {
     const holds = CLASSIFICATION_KEYS.filter((k) => roleIds[k] && member.roles.cache.has(roleIds[k]));
     const holdIds = new Set(holds.map((k) => roleIds[k]));
 
-    // O cargo `[TAG] Nome` entra na conta junto: um aliado sem o cargo da guilda
-    // dele está tão fora de sincronia quanto um membro sem o cargo de membro.
+    // O cargo de aliado entra na conta junto: um aliado sem ele está tão fora de
+    // sincronia quanto um membro sem o cargo de membro.
     const ally = kind === 'ally' ? allyFor({ nickLower, uuid }, ctx) : { doc: null, roleId: null };
     const allyRoleId = ally.roleId;
     const allyOk =

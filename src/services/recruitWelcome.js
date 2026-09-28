@@ -30,7 +30,6 @@ function roteiro(canais) {
     ['pings', '🔔', 'escolha seus cargos de notificação (guerra, raid, evento)'],
     ['panel', '📊', 'status da guilda ao vivo, ranking e os **seus pontos**'],
     ['tome', '📕', 'fila de tomes e aspects, por ordem de pontuação'],
-    ['warApplication', '⚔️', 'como pedir o cargo de guerra'],
     ['events', '🏆', 'eventos de competição e sorteios'],
     ['loans', '💰', 'empréstimos do baú da guilda'],
     ['forum', '💬', 'fórum da comunidade — dúvidas, builds, conversa'],

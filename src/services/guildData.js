@@ -65,12 +65,21 @@ export function rankRoleNames(ranks = RANKS) {
   return nomes;
 }
 
+/**
+ * Nome do cargo sem a trilha: `Chefe (Staff)` e `Chefe (War)` são o mesmo rank
+ * do jogo, dividido entre a Guild Staff e a War Team. Sem descascar, nenhum dos
+ * cargos de rank casava depois da divisão, e o Ocioso parou de ser atualizado.
+ */
+function semTrilha(nome) {
+  return String(nome ?? '').replace(/\s*\([^)]*\)\s*$/, '');
+}
+
 /** IDs dos cargos do servidor cujo nome bate com um dos ranks pedidos. */
 export function rankRoleIds(guild, ranks = RANKS) {
   const nomes = rankRoleNames(ranks);
   const ids = new Set();
   for (const role of guild.roles.cache.values()) {
-    if (nomes.has(normRank(role.name))) ids.add(role.id);
+    if (nomes.has(normRank(semTrilha(role.name)))) ids.add(role.id);
   }
   return ids;
 }

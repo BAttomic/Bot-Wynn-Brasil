@@ -21,7 +21,6 @@ const PANEL_CHANNEL_KEYS = new Set([
   'rules',
   'pings',
   'recruiters',
-  'warApplication',
   'tome',
   'loans',
   'panel',

@@ -16,7 +16,6 @@ export const CHANNEL_KEYS = Object.freeze([
   'recruiters', // painel de recrutamento e anúncio de recruta aprovado
   'recruitAlerts', // privado: avisa a staff quando um neutro se registra
   'war', // convocação de guerra e alerta de território
-  'warApplication', // painel de como pedir cargo WAR / MAIN WAR
   'tome', // painel e fila de tomes
   'loans', // painel de empréstimos e lembretes de vencimento
   'rules', // painel de regras
@@ -49,8 +48,6 @@ export const ROLE_KEYS = Object.freeze([
   'community', // todo mundo que se registrou e não está banido
   'guildMember', // quem está na guilda; recebe `community` junto
   'banned', // pertence à guilda da black-list, ou foi banido pela staff
-  'war', // pingado na convocação de guerra
-  'mainWar', // pode disparar /war
   // Quem tem cargo de LIDERANÇA no Discord (Capitão para cima) mas não está mais
   // na guilda. Aplicado e retirado pelo roleSync; ver jobs/roleSync.js.
   'idle',
@@ -86,7 +83,6 @@ export const PARAM_KEYS = Object.freeze([
   'aspectsPerGuildRaid',
   'rewardMinGuildDays',
   'tomeMinClassLevel',
-  'warMinGuildDays',
   'warnsToBan',
   'warnExpiryDays',
 ]);
@@ -135,7 +131,6 @@ export const PARAM_KEYS = Object.freeze([
  * @property {number}         aspectsPerGuildRaid   aspects que cada membro nosso rende por guild raid
  * @property {number}         rewardMinGuildDays    dias mínimos na guilda p/ fila de Tomes e receber aspects
  * @property {number}         tomeMinClassLevel     nível mínimo de uma classe p/ entrar na fila de Tomes
- * @property {number}         warMinGuildDays       dias mínimos na guilda p/ o cargo WAR automático
  * @property {number}         warnsToBan            advertências ativas que disparam o ban automático
  * @property {number}         warnExpiryDays        dias até uma advertência parar de contar
  */
@@ -231,10 +226,6 @@ const DEFAULT_PARAMS = Object.freeze({
   rewardMinGuildDays: 7,
   // Requisito do jogo para USAR um Tome: ter pelo menos uma classe neste nível.
   tomeMinClassLevel: 100,
-  // O cargo WAR é automático: quem aplica recebe na hora se já tiver este tempo
-  // de guilda, e senão espera na fila até completar. Bem menor que os 7 dias das
-  // recompensas — aqui o objetivo é só filtrar quem acabou de chegar.
-  warMinGuildDays: 3,
   // Advertências ATIVAS que disparam o ban automático. A staff continua podendo
   // banir antes disso à mão, ou isentar depois com /ban remove.
   warnsToBan: 3,

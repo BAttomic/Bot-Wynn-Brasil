@@ -25,7 +25,7 @@ Todos os módulos do roadmap. Comandos:
 | `/season start\|end\|current\|list` | (Staff) Gerencia temporadas |
 | `/leaderboard season\|alltime` | Placar de guerras pela guilda |
 | `/profile [nick]` | Progresso acumulado de um membro |
-| `/war [nota]` | (WAR/MAIN WAR) Convocação de guerra com presença |
+| `/war [nota]` | (War Team/MAIN WAR) Convocação de guerra com presença; pinga a WnBR War Team |
 | `/tome join\|leave\|queue\|grant` | Fila de Tomes (prioridade por pontos; 1 Tome por missão semanal, e só vale com 7 dias de guilda) |
 | `/loan new\|list\|repay\|cancel` | (Staff) Livro-razão de empréstimos |
 | `/points show\|leaderboard\|add` | Sistema de pontos unificado |
@@ -35,10 +35,10 @@ Todos os módulos do roadmap. Comandos:
 | `/booth registrar\|status\|cancelar` | Lembrete de reset do booth (24h): avisa o dono ~5 min antes, no canal `booth`, com botão de parar |
 | `/evento criar\|ranking\|listar\|encerrar\|cancelar\|apurar` | Competição por período: quem mais fizer guild raids, guerras ou XP leva a recompensa |
 | `/giveaway criar\|encerrar\|reroll\|listar` | Sorteio com inscrição por botão |
-| `/guilds list\|blacklist\|ally` | (Staff) Guildas rastreadas: black-list (auto-ban) e aliadas (cargo `[TAG] Nome`), com quem adicionou e quando |
+| `/guilds list\|blacklist\|ally` | (Staff) Guildas rastreadas: black-list (auto-ban) e aliadas (cargo `[WnBR] Allies`), com quem adicionou e quando |
 
 Automático (jobs):
-- **Sync de cargos**: cargo "Membro da Guilda" + "Top Contribuidor" (ranks são manuais) + reconciliação de ingresso/saída
+- **Sync de cargos**: cargo de membro da guilda, de aliado e Ocioso (ranks são manuais) + reconciliação de ingresso/saída
 - **Monitoramento em tempo real** (poller ~60s): painel ao vivo (`panel`), logs de atividade (`activity`), território + recursos (`territory`) e **auto-ping de guerra**
 - **Expiração de candidaturas** (fecha e apura no prazo)
 - **Snapshot diário**: progresso, placar de guerras e **pontos** (all-time + por season)
@@ -59,7 +59,7 @@ TAG** e guardadas no banco — mexer nelas não exige redeploy.
 
 ```
 /guilds blacklist add tag:GsW      # membros dela levam o cargo de banido
-/guilds ally      add tag:HAX      # membros dela ganham o cargo [HAX] Nome
+/guilds ally      add tag:HAX      # membros dela ganham o cargo [WnBR] Allies
 /guilds ally      remove tag:HAX
 /guilds list                       # os dois papéis, com quem adicionou e quando
 ```
@@ -74,18 +74,20 @@ membros da staff veriam horas diferentes para o mesmo registro.
 | Papel | O que acontece com quem for membro |
 |---|---|
 | **black-list** | Recebe o cargo de banido no registro, no `/reconciliar` e a cada ciclo do sync de cargos. **Em silêncio** — nenhuma mensagem, em canal nenhum |
-| **aliada** | Recebe o cargo de comunidade **mais** um cargo `[TAG] Nome`, criado pelo bot logo abaixo do cargo de membro da guilda e logo acima do de comunidade |
+| **aliada** | Recebe o cargo de comunidade **mais** o `[WnBR] Allies` (um cargo só para todas as aliadas), e a TAG da guilda no apelido |
 
 O `add` já aplica aos membros que estão no servidor; não é preciso esperar o
 próximo ciclo. A identificação é pelo **UUID** da guilda, não pela TAG: trocar a
-TAG no jogo não escapa da regra nem quebra o cargo de aliada — o cargo é
-renomeado sozinho no ciclo seguinte.
+TAG no jogo não escapa da regra nem quebra o cargo de aliada — a TAG do
+apelido acompanha sozinha no ciclo seguinte.
 
 **Tirar uma guilda da black-list não desbane ninguém.** Os banimentos já
 gravados são permanentes por decisão de projeto (ver `services/bans.js`); quem
-for perdoado sai pelo `/ban remove`, caso a caso. E `ally remove` **não apaga** o
-cargo do Discord — ele só para de ser distribuído; apagar o cargo é o que tira de
-todos de uma vez.
+for perdoado sai pelo `/ban remove`, caso a caso. Já o `ally remove` tira o
+`[WnBR] Allies` de quem era da guilda no ciclo seguinte do sync de cargos.
+
+O bot **não cria cargo nenhum**: aliados e pings usam cargos fixos, pelo id. Um
+cargo apagado no servidor some do painel em vez de ser recriado.
 
 A black-list **não tem nada embutido**: nem no código, nem no `.env`. Servidor
 novo (ou banco novo) sobe com a lista vazia e sem banir ninguém — o bot avisa no
@@ -321,10 +323,8 @@ Após subir, configure ao menos os cargos de classificação e o canal de regist
 /config channel key:registration channel:#registro
 ```
 
-O cargo do bot precisa estar **acima** do cargo de comunidade na lista de cargos
-do servidor: é o que permite criar e posicionar os cargos `[TAG] Nome` das
-guildas aliadas. Sem isso o bot avisa no log e segue sem o cargo, em vez de
-falhar o registro.
+O cargo do bot precisa estar **acima** de todos os cargos que ele aplica
+(comunidade, membro, aliado, banido, Ocioso e os de ping).
 
 Os cargos de liderança (votam nas candidaturas e podem usar `/forcelink`):
 

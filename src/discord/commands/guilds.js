@@ -14,8 +14,8 @@ import { audit } from '../../services/audit.js';
  * membro dela leva o cargo de banido, em silêncio, no registro e a cada ciclo do
  * sync de cargos.
  *
- * **Aliada** é o contrário: ganha um cargo `[TAG] Nome` próprio, entre o cargo
- * de membro da Wynn Brasil e o de comunidade, distribuído a quem estiver nela.
+ * **Aliada** é o contrário: quem estiver nela ganha o cargo de aliado
+ * (`[WnBR] Allies`, o mesmo para todas) e a TAG da guilda no apelido.
  *
  * A discrição da black-list é regra, não estilo: as respostas daqui são
  * ephemeral e NÃO passam pela auditoria. Um print do canal de logs mostrando
@@ -64,7 +64,7 @@ export default {
       grupo(
         g,
         'ally',
-        'Guildas aliadas: ganham um cargo [TAG] Nome no servidor',
+        'Guildas aliadas: ganham o cargo [WnBR] Allies no servidor',
         'Adiciona uma guilda aliada pela TAG e cria o cargo dela',
         'Tira uma guilda da lista de aliadas',
         'Mostra as guildas aliadas',
@@ -167,7 +167,7 @@ async function list(interaction, kind) {
         color: blacklist.length && !aliadas.length ? 0xe74c3c : 0x9b59b6,
         fields,
         footer: {
-          text: 'Black-list: cargo de banido, sem aviso nenhum. Aliada: cargo [TAG] Nome + comunidade.',
+          text: 'Black-list: cargo de banido, sem aviso nenhum. Aliada: cargo [WnBR] Allies + comunidade.',
         },
         timestamp: new Date().toISOString(),
       },
@@ -196,16 +196,16 @@ async function add(interaction, kind) {
     linhas.push(`**[${doc.prefix}] ${doc.name}** já estava na lista — dados atualizados.`);
   }
 
-  // O cargo da aliada nasce aqui, e não no próximo ciclo do sync: a staff
-  // precisa ver o resultado do próprio comando.
+  // Liga a guilda ao cargo de aliado já aqui, e não no próximo ciclo do sync: a
+  // staff precisa ver o resultado do próprio comando.
   if (kind === KIND_ALLY) {
     const cfg = await getConfig(interaction.guildId);
     const roleId = await ensureAllyRole(interaction.guild, cfg, doc);
     if (roleId) {
-      linhas.push(`Cargo <@&${roleId}> pronto.`);
+      linhas.push(`Membros dela recebem <@&${roleId}>.`);
     } else {
       linhas.push(
-        `⚠️ Não consegui criar o cargo **${allyRoleName(doc)}**. Confira se o cargo do bot está acima do cargo de comunidade e se \`/config role key:community\` está preenchido.`,
+        `⚠️ O cargo de aliado não existe mais no servidor, então **${allyRoleName(doc)}** fica sem cargo até ele voltar.`,
       );
     }
   }
@@ -247,18 +247,9 @@ async function remove(interaction, kind) {
       '-# Os banimentos já gravados continuam valendo — a lista de bans é permanente. Use `/ban remove` para isentar caso a caso.',
     );
   } else {
-    // O cargo fica de pé, e com ele quem já o tinha. Apagar um cargo é
-    // irreversível e é a staff que decide — mas é também o jeito certo de tirar
-    // de todo mundo de uma vez, já que o Discord remove o cargo de cada membro
-    // quando o cargo deixa de existir. Uma varredura de reconciliação aqui não
-    // resolveria nada: sem a guilda na lista, o bot nem sabe mais que aquele
-    // cargo era de aliada.
-    if (doc.roleId) {
-      linhas.push(
-        `O cargo <@&${doc.roleId}> **não** foi apagado e quem já o tinha continua com ele. Apague o cargo para tirar de todos de uma vez.`,
-      );
-    }
-    linhas.push('O bot para de distribuí-lo a partir de agora.');
+    // O cargo de aliado é um só para todas as aliadas: quem era desta guilda
+    // vira neutro e perde o cargo no próximo ciclo do sync, sem apagar nada.
+    linhas.push('Quem é dessa guilda perde o cargo de aliado no próximo ciclo do sync de cargos.');
     await audit(
       interaction.client,
       interaction.guildId,

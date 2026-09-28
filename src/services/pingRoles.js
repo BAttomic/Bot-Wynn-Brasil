@@ -10,10 +10,10 @@ import { log } from '../util/log.js';
  * cargo; tirou a reação = perde. O menu nativo <id:customize> foi removido do
  * servidor, então é assim que o membro se auto-atribui agora.
  *
- * Cada cargo é identificado por `id` OU por `name`. Com `name`, o bot resolve o
- * cargo pelo nome na guilda a cada boot — e o CRIA se ainda não existir. É assim
- * que um ping novo entra sem ninguém precisar copiar id de cargo: basta o nome.
- * Um slot que não resolve para cargo nenhum é omitido (não consome letra).
+ * Cada cargo é identificado só pelo `id`, e o bot NUNCA cria cargo. Ele já
+ * resolveu pelo nome e criava o que faltava, e isso desfazia a staff: renomear
+ * "Fruma Lighthouse" para "Aelumia Lighthouse" fazia o bot recriar o Fruma no
+ * ciclo seguinte. Cargo apagado no servidor é omitido (não consome letra).
  */
 
 // Indicadores regionais A–T = 20, exatamente o teto de reações por mensagem do
@@ -28,8 +28,7 @@ const SILENT = { allowedMentions: { parse: [] } };
 
 /**
  * @typedef {object} PingRole
- * @property {string} [id]   id do cargo (tem prioridade sobre o nome)
- * @property {string} [name] nome do cargo; resolvido/criado na guilda quando não há id
+ * @property {string} id  id do cargo
  *
  * @typedef {object} PingGroup
  * @property {string}     key    identificador estável (vira o stateId da mensagem)
@@ -44,17 +43,15 @@ export const PING_GROUPS = Object.freeze([
     key: 'xp',
     title: '1. Pings de Experiência (XP)',
     roles: [
-      { name: 'PING GUILD XP' },
-      { name: 'PING XP - Fruma Lighthouse (115+)' },
-      { name: 'PING XP - Fruma BatCave (107+)' },
-      { id: '1268213746585698375' }, // Lutho Witness Church (100+)
-      { id: '1268211113942847603' }, // Corkus Scrapyard (85+)
-      { id: '1268209833090486423' }, // Cinfras Waterfall (75-85)
-      { id: '1268209831219560560' }, // Geliboard Visceral Cave (65-75)
-      { id: '1268209827457400844' }, // Troms Idol Cave (60-75)
-      { id: '1268208726058205245' }, // Troms Herb Cave (50-65)
-      { id: '1268208320452235306' }, // Almuj Desert Altar (35-50)
-      { id: '1268208320343445516' }, // Nemract Saint's Row (20-35)
+      { id: '1295773573272571904' }, // GUILD XP
+      { id: '1524987240605028432' }, // Aelumia Lighthouse (115+)
+      { id: '1524987071356469430' }, // Espren BatCave (104+)
+      { id: '1268211113942847603' }, // Corkus Scrapyard (85-104)
+      { id: '1268209833090486423' }, // Cinfras Waterfall (70-85)
+      { id: '1268209831219560560' }, // Geliboard Visceral Cave (45-70)
+      { id: '1554250997600354314' }, // Llevigar Spiders (29-45)
+      { id: '1268208320343445516' }, // Nemract Saint's Row (15-29)
+      { id: '1554250979669581915' }, // Nivla Zombie Tree (1-15)
     ],
   },
   {
@@ -101,28 +98,18 @@ export const PING_GROUPS = Object.freeze([
       { id: '1271168738002997279' }, // QUEST - Qira's Hive (80+)
       { id: '1269810703972171908' }, // QUEST - ??? (80+)
       { id: '1269810688352718918' }, // QUEST - Tower of Ascension (75+)
-      { name: 'PING RAID - The Wartorn Palace (119+)' },
+      { id: '1524987913366929522' }, // RAID - The Wartorn Palace (119+)
       { id: '1268229834455253013' }, // RAID - The Nameless Anomaly (103+)
       { id: '1268229845398327417' }, // RAID - The Canyon Colossus (95+)
       { id: '1268229846144647170' }, // RAID - Orphion's Nexus of Light (79+)
       { id: '1268229847075786853' }, // RAID - Nest of the Grootslangs (54+)
     ],
   },
-  {
-    key: 'classes',
-    title: '5. Pings de Classes',
-    note: 'Encontre jogadores da mesma classe.',
-    roles: [
-      { id: '1269826644693221466' }, // Archer 120+
-      { id: '1269826646886584413' }, // Assassin 120+
-      { id: '1269826649386385520' }, // Mage 120+
-      { id: '1269826651878068374' }, // Shaman 120+
-      { id: '1269826654381805669' }, // Warrior 120+
-    ],
-  },
+  // Os pings de Classes saíram do servidor. Sem o grupo aqui, a mensagem antiga
+  // dele perde a proteção e a limpeza de 48h do canal a apaga sozinha.
   {
     key: 'events',
-    title: '6. Pings de Eventos',
+    title: '5. Pings de Eventos',
     note: 'Fique por dentro dos eventos.',
     roles: [
       { id: '1273252381018165308' }, // WORLD EVENT - Annihilation
@@ -131,10 +118,10 @@ export const PING_GROUPS = Object.freeze([
   },
   {
     key: 'bombs',
-    title: '7. Pings de Bombas',
+    title: '6. Pings de Bombas',
     note: 'Jogadores com rank Champion conseguem ver as bombas ativas, pingue-os e pergunte quais tem ativas.',
     roles: [
-      { name: 'PING BOMBS - Champion' },
+      { id: '1324782914847899648' }, // BOMBS - Champion
     ],
   },
 ]);
@@ -151,31 +138,14 @@ export const PING_STATE_IDS = Object.freeze([
 ]);
 
 /**
- * Resolve um slot para o id de um cargo real: usa o `id` se houver, senão procura
- * pelo `name` na guilda e, não achando, cria o cargo. `null` se não der.
+ * O id do slot, se o cargo ainda existe no servidor. Um cargo apagado não vira
+ * letra: ela mostraria `@cargo-desconhecido` e a reação não daria nada.
  * @param {import('discord.js').Guild} guild
  * @param {PingRole} slot
- * @returns {Promise<string | null>}
+ * @returns {string | null}
  */
-async function resolveRoleId(guild, slot) {
-  if (slot.id) return slot.id;
-  if (!slot.name) return null;
-
-  const existing = guild.roles.cache.find((r) => r.name === slot.name);
-  if (existing) return existing.id;
-
-  try {
-    const created = await guild.roles.create({
-      name: slot.name,
-      mentionable: true,
-      reason: 'Cargo de ping criado automaticamente pelo bot',
-    });
-    log.info(`Cargo de ping criado: "${slot.name}" (${created.id}).`);
-    return created.id;
-  } catch (e) {
-    log.warn(`Não consegui criar o cargo de ping "${slot.name}": ${e.message}`);
-    return null;
-  }
+function resolveRoleId(guild, slot) {
+  return slot.id && guild.roles.cache.has(slot.id) ? slot.id : null;
 }
 
 /**
@@ -189,7 +159,7 @@ async function assign(guild, g) {
   const out = [];
   for (const slot of g.roles) {
     if (out.length >= LETTERS.length) break;
-    const id = await resolveRoleId(guild, slot);
+    const id = resolveRoleId(guild, slot);
     if (id) out.push({ id, emoji: LETTERS[out.length] });
   }
   return out;
@@ -318,7 +288,7 @@ export async function ensurePingRolePanels(client, guildDiscordId) {
     return;
   }
 
-  // Resolver/criar cargos por nome precisa do cache de cargos populado.
+  // Conferir se o cargo ainda existe precisa do cache de cargos populado.
   const guild = channel.guild;
   await guild.roles.fetch().catch(() => {});
 

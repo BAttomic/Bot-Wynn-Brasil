@@ -1,99 +1,38 @@
 /**
- * Cargos das guildas aliadas: um `[TAG] Nome` por guilda, criado pelo bot e
- * posicionado ENTRE o cargo de membro da nossa guilda e o de comunidade.
+ * Cargo das guildas aliadas: um cargo só, `[WnBR] Allies`, para todo aliado.
  *
- * O lugar na lista é a mensagem: o aliado aparece logo abaixo dos nossos e logo
- * acima do público geral. Ele também carrega o cargo de comunidade — o `[TAG]`
- * identifica, não dá acesso, e por isso nenhuma permissão de canal precisa ser
- * escrita para ele (ver `scripts/lockdown-banned.js`, que só cuida do banido).
+ * Já foi um `[TAG] Nome` por guilda, criado, renomeado e reposicionado pelo bot.
+ * O servidor passou a ter um cargo único, e o bot recriava os cargos por guilda
+ * que a staff apagava. Agora ele não cria cargo nenhum: aplica o fixo.
  *
- * Duas falhas são esperadas e silenciosas, como em `syncNickname` e
- * `grantWarRole`: o bot não mexe em cargo acima do próprio, e não posiciona nada
- * se o cargo de comunidade não estiver configurado. Nos dois casos fica um
- * `log.warn` e a vida segue — nada disso pode derrubar um registro.
+ * A guilda de origem continua visível pelo apelido (`[TAG] Fulano`, ver
+ * syncNickname em services/registration.js). O aliado também carrega o cargo
+ * de comunidade.
  */
 import { loadGuildIndex, setAllyRoleId, refreshGuildIdentity } from './guildList.js';
-import { log } from '../util/log.js';
 
-/** Nome canônico do cargo de uma guilda aliada. */
+/** `[WnBR] Allies`. */
+export const ALLIES_ROLE_ID = '1554204990451753122';
+
+/** Nome de exibição de uma guilda aliada, para as mensagens da staff. */
 export function allyRoleName(doc) {
   return `[${doc.prefix}] ${doc.name}`;
 }
 
 /**
- * Posição desejada: uma casa acima do cargo de comunidade. Devolve `null` quando
- * não dá para calcular (comunidade não configurada) ou quando o bot não alcança.
- */
-function targetPosition(guild, cfg) {
-  const community = cfg.roles?.community ? guild.roles.cache.get(cfg.roles.community) : null;
-  if (!community) return null;
-  const wanted = community.position + 1;
-  const me = guild.members.me?.roles?.highest;
-  // Criar/mover um cargo na altura do próprio cargo do bot (ou acima) é recusado
-  // pelo Discord. Melhor não tentar do que estourar uma exceção por registro.
-  if (me && me.position <= wanted) {
-    log.warn(`Cargo de aliada não pode ir para a posição ${wanted}: o cargo do bot está em ${me.position}.`);
-    return null;
-  }
-  return wanted;
-}
-
-/** O cargo está entre o de membro da guilda e o de comunidade? */
-function wellPlaced(role, guild, cfg) {
-  const community = cfg.roles?.community ? guild.roles.cache.get(cfg.roles.community) : null;
-  const guildMember = cfg.roles?.guildMember ? guild.roles.cache.get(cfg.roles.guildMember) : null;
-  if (!community) return true; // sem referência, qualquer lugar serve
-  if (role.position <= community.position) return false;
-  if (guildMember && role.position >= guildMember.position) return false;
-  return true;
-}
-
-/**
- * Garante o cargo de uma guilda aliada: acha por id, senão por nome, senão cria.
- * Renomeia se a guilda trocou de TAG ou de nome, e reposiciona se saiu do lugar.
+ * O cargo de aliado, para qualquer guilda aliada. Grava o id no documento da
+ * guilda para `allyRoleIds` convergir: o cargo por guilda antigo sai da lista
+ * e deixa de ser tratado como cargo de aliada.
  *
  * @param {import('discord.js').Guild} guild
- * @param {object} cfg  saída de getConfig()
+ * @param {object} _cfg  mantido pela assinatura; o cargo é fixo
  * @param {import('./guildList.js').TrackedGuild} doc
- * @returns {Promise<string|null>} id do cargo, ou null se não deu
+ * @returns {Promise<string|null>} id do cargo, ou null se ele sumiu do servidor
  */
-export async function ensureAllyRole(guild, cfg, doc) {
-  const name = allyRoleName(doc);
-  let role = doc.roleId ? guild.roles.cache.get(doc.roleId) : null;
-  if (!role) role = guild.roles.cache.find((r) => r.name === name);
-
-  if (!role) {
-    const community = cfg.roles?.community ? guild.roles.cache.get(cfg.roles.community) : null;
-    const position = targetPosition(guild, cfg);
-    try {
-      role = await guild.roles.create({
-        name,
-        mentionable: true,
-        // Acompanha o cargo de comunidade: se ele aparece separado na lista de
-        // membros, o de aliado também aparece.
-        hoist: community?.hoist ?? false,
-        ...(position === null ? {} : { position }),
-        reason: 'Cargo de guilda aliada criado automaticamente pelo bot',
-      });
-      log.info(`Cargo de aliada criado: "${name}" (${role.id}).`);
-    } catch (e) {
-      log.warn(`Não consegui criar o cargo de aliada "${name}": ${e.message}`);
-      return null;
-    }
-  } else {
-    if (role.name !== name) await role.setName(name, 'Guilda aliada renomeada').catch(() => {});
-    if (!wellPlaced(role, guild, cfg)) {
-      const position = targetPosition(guild, cfg);
-      if (position !== null) {
-        await role
-          .setPosition(position, { reason: 'Reposicionando cargo de guilda aliada' })
-          .catch((e) => log.warn(`Não consegui reposicionar "${name}": ${e.message}`));
-      }
-    }
-  }
-
-  if (doc.roleId !== role.id) await setAllyRoleId(doc.uuid, role.id);
-  return role.id;
+export async function ensureAllyRole(guild, _cfg, doc) {
+  if (!guild.roles.cache.has(ALLIES_ROLE_ID)) return null;
+  if (doc.roleId !== ALLIES_ROLE_ID) await setAllyRoleId(doc.uuid, ALLIES_ROLE_ID);
+  return ALLIES_ROLE_ID;
 }
 
 /**

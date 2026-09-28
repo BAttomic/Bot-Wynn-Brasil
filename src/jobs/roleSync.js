@@ -156,8 +156,8 @@ export async function runRoleSync(client) {
       continue;
     }
     // A guilda pode ter trocado de TAG ou de nome desde que entrou na lista; o
-    // roster que acabamos de pagar já traz a versão atual, então o cargo é
-    // renomeado junto, de graça.
+    // roster que acabamos de pagar já traz a versão atual, e a TAG do apelido
+    // acompanha, de graça.
     doc = await syncAllyIdentity(doc, roster.guild);
     const roleId = await ensureAllyRole(guild, cfg, doc);
     if (!roleId) continue;

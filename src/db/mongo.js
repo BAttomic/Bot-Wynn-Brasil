@@ -84,7 +84,7 @@ async function ensureIndexes() {
   await collections.bans().createIndex({ uuid: 1 }, { unique: true });
   await collections.bans().createIndex({ discordIds: 1 });
   // Guildas do WynnCraft que o bot rastreia: black-list (auto-ban) e aliadas
-  // (cargo [TAG] Nome). O UUID é a chave porque o prefixo pode ser trocado pelo
+  // (cargo de aliado). O UUID é a chave porque o prefixo pode ser trocado pelo
   // dono a qualquer momento — a mesma razão que fez a black-list nascer com os
   // dois campos no ambiente.
   await collections.trackedGuilds().createIndex({ uuid: 1 }, { unique: true });
