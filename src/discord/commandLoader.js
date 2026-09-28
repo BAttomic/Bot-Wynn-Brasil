@@ -10,7 +10,6 @@ import apply from './commands/apply.js';
 import season from './commands/season.js';
 import leaderboard from './commands/leaderboard.js';
 import profile from './commands/profile.js';
-import war from './commands/war.js';
 import tome from './commands/tome.js';
 import loan from './commands/loan.js';
 import calc from './commands/calc.js';
@@ -38,7 +37,7 @@ import fila from './commands/fila.js';
 // este: comando novo que não entre na lista não é registrado E não recebe os
 // próprios botões — o clique cai em "Este botão não responde mais", porque o
 // `owns()` dele nunca chega a ser consultado. Ver `ownerOf` abaixo.
-const commands = [link, unlink, config, apply, season, leaderboard, profile, war, tome, loan, calc, points, verificar, reconciliar, membros, registro, missao, ban, warn, forcelink, uniforme, modpack, booth, apelacao, aspects, evento, giveaway, guilds, fila];
+const commands = [link, unlink, config, apply, season, leaderboard, profile, tome, loan, calc, points, verificar, reconciliar, membros, registro, missao, ban, warn, forcelink, uniforme, modpack, booth, apelacao, aspects, evento, giveaway, guilds, fila];
 const byName = new Map(commands.map((c) => [c.data.name, c]));
 
 /** Só para o selftest conferir os limites do Discord sem ligar o bot. */

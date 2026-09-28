@@ -25,7 +25,6 @@ Todos os módulos do roadmap. Comandos:
 | `/season start\|end\|current\|list` | (Staff) Gerencia temporadas |
 | `/leaderboard season\|alltime` | Placar de guerras pela guilda |
 | `/profile [nick]` | Progresso acumulado de um membro |
-| `/war [nota]` | (War Team/MAIN WAR) Convocação de guerra com presença; pinga a WnBR War Team |
 | `/tome join\|leave\|queue\|grant` | Fila de Tomes (prioridade por pontos; 1 Tome por missão semanal, e só vale com 7 dias de guilda) |
 | `/loan new\|list\|repay\|cancel` | (Staff) Livro-razão de empréstimos |
 | `/points show\|leaderboard\|add` | Sistema de pontos unificado |
@@ -39,6 +38,9 @@ Todos os módulos do roadmap. Comandos:
 
 Automático (jobs):
 - **Sync de cargos**: cargo de membro da guilda, de aliado e Ocioso (ranks são manuais) + reconciliação de ingresso/saída
+  + WnBR War Team para quem tem qualquer MAIN WAR (só adiciona)
+- **Alerta de hierarquia**: Fundador no topo, Wynn Brasil BOT logo abaixo e ninguém mais acima do bot. Qualquer violação, troca de dono do servidor ou mudança no cargo Fundador vai para 🤖・staff-bot e por DM a quem tem Fundador
+- **Diretrizes** da guilda, do War Team e da Staff (rascunho, `services/guidelinePanels.js`), com os números vindos dos parâmetros
 - **Monitoramento em tempo real** (poller ~60s): painel ao vivo (`panel`), logs de atividade (`activity`), território + recursos (`territory`) e **auto-ping de guerra**
 - **Expiração de candidaturas** (fecha e apura no prazo)
 - **Snapshot diário**: progresso, placar de guerras e **pontos** (all-time + por season)

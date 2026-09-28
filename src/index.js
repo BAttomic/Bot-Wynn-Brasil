@@ -17,7 +17,9 @@ import { runInactivityCheck } from './services/inactivityCheck.js';
 import { runGuildWatch, flushTerritoryDigest } from './services/watcher.js';
 import { ensurePanels, attachRegistrationGuard } from './services/registration.js';
 import { ensureStaticPanels } from './services/staticPanels.js';
+import { ensureGuidelinePanels } from './services/guidelinePanels.js';
 import { ensurePingRolePanels, attachPingRoleHandler } from './services/pingRoles.js';
+import { attachHierarchyGuard } from './services/hierarchyGuard.js';
 import { retireDownloadsPanel, ensureScoringPanel, ensureLeaderboardPanel } from './services/leaderboardPanel.js';
 import { ensureTomePanel, ensureDeliveryLogPanel } from './services/tomes.js';
 import { ensureAspectBaselines } from './services/aspects.js';
@@ -114,6 +116,7 @@ async function main() {
     log.info(`Logado como ${client.user.tag}`);
     initErrorReport(client, guildId);
     attachPingRoleHandler(client);
+    attachHierarchyGuard(client, guildId);
     const cfg = await getConfig(guildId);
     const minutes = Number(cfg.params?.roleSyncMinutes) || 10;
     const snapH = Number(cfg.params?.snapshotHourUTC) || 5;
@@ -131,6 +134,7 @@ async function main() {
       const passos = [
         ['registro', () => ensurePanels(client, guildId)],
         ['estáticos', () => ensureStaticPanels(client, guildId)],
+        ['diretrizes', () => ensureGuidelinePanels(client, guildId)],
         ['pings', () => ensurePingRolePanels(client, guildId)],
         // Ordem no canal de tomes: fila ao vivo primeiro, histórico logo abaixo.
         ['tomes', () => ensureTomePanel(client, guildId)],

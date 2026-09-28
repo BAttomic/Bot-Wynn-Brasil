@@ -90,6 +90,43 @@ async function syncIdleRole(client, guild, cfg, naGuilda, cacheCompleto) {
   }
 }
 
+/** WnBR War Team: obrigatório para quem tem qualquer MAIN WAR. */
+const WAR_TEAM_ROLE = '1554163813387993208';
+const MAIN_WAR_ROLES = Object.freeze([
+  '1333249418945892422', // MAIN WAR - DPS
+  '1333249422137495664', // MAIN WAR - HEALER
+  '1333249407193448548', // MAIN WAR - TANK
+  '1332557073656975370', // MAIN WAR - SOLO
+]);
+
+/**
+ * Quem tem qualquer MAIN WAR tem a WnBR War Team. Os MAIN WAR são aplicados à
+ * mão pela liderança de guerra; a War Team vem junto, sem ninguém lembrar.
+ *
+ * Só ADICIONA: a War Team também é dada por outros caminhos (à mão, e pela
+ * contagem de guerras), então perder o MAIN WAR não diz nada sobre ela.
+ *
+ * @param {import('discord.js').Client} client
+ * @param {import('discord.js').Guild} guild
+ */
+async function syncWarTeamRole(client, guild) {
+  if (!guild.roles.cache.has(WAR_TEAM_ROLE)) return;
+  const deram = [];
+  for (const member of guild.members.cache.values()) {
+    if (member.user.bot || member.roles.cache.has(WAR_TEAM_ROLE)) continue;
+    if (!MAIN_WAR_ROLES.some((id) => member.roles.cache.has(id))) continue;
+    const ok = await member.roles.add(WAR_TEAM_ROLE, 'Tem MAIN WAR').then(() => true, () => false);
+    if (ok) deram.push(member.id);
+  }
+  if (deram.length) {
+    await audit(
+      client,
+      guild.id,
+      `⚔️ WnBR War Team aplicada a ${deram.map((id) => `<@${id}>`).join(', ')} — tem MAIN WAR.`,
+    );
+  }
+}
+
 /**
  * Consultas de jogador por ciclo para descobrir a guilda de quem não aparece em
  * nenhum roster baixado. A 10 por ciclo de 10 min, 300 vínculos de fora dão a
@@ -342,6 +379,9 @@ export async function runRoleSync(client) {
     await syncNickname(member, nomeAtual, tag);
   }
   await syncIdleRole(client, guild, cfg, naGuilda, cacheCompleto);
+  // Só adiciona, então cache incompleto não faz estrago: quem não veio fica para
+  // o próximo ciclo.
+  await syncWarTeamRole(client, guild);
 
   log.info(
     `Role sync concluído (${linked.length} vínculos, ${res.members.length} membros na guilda, ` +
