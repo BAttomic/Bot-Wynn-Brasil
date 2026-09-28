@@ -144,19 +144,32 @@ export async function allyGuildOf(player) {
 }
 
 /**
- * A TAG que vai na frente do apelido: a da guilda RASTREADA da pessoa, aliada ou
- * da black-list. `null` para membro nosso e para quem está em guilda que não
- * acompanhamos — esses ficam com o nick puro.
+ * A TAG que vai na frente do apelido: a da guilda do jogador, QUALQUER que seja
+ * — a nossa inclusa. `null` só para quem está sem guilda.
  */
-export async function nickTagOf(player) {
-  const g = player?.guild;
-  if (!g) return null;
-  const idx = await loadGuildIndex();
-  if (isOurGuild(g)) return null;
-  const aliada = idx.allyByUuid.get(g.uuid) ?? idx.allyByPrefix.get(g.prefix);
-  if (aliada) return aliada.prefix;
-  const proibida = idx.blacklist.find((b) => b.uuid === g.uuid || b.prefix === g.prefix);
-  return proibida?.prefix ?? null;
+export function nickTagOf(player) {
+  return player?.guild?.prefix ?? null;
+}
+
+/**
+ * A TAG de um vínculo, com o que se sabe neste ciclo.
+ *
+ * O roster baixado agora é a fonte mais fresca e vence tudo. Sem roster, vale a
+ * TAG gravada na última consulta do jogador (`members.guildTag`) — MENOS quando
+ * ela é de uma guilda cujo roster acabou de ser baixado: se a pessoa ainda
+ * estivesse lá, teria aparecido nele. É assim que quem sai da WnBR perde o
+ * `[WnBR]` no mesmo ciclo, em vez de esperar a próxima consulta.
+ *
+ * Mora aqui porque registro, roleSync e /reconciliar precisam concordar, senão
+ * um escreve `[WnBR] Fulano` e o outro "conserta" para `Fulano`.
+ *
+ * @param {{rosterTag?: string|null, stored?: string|null, freshPrefixes: Set<string>}} p
+ * @returns {string|null}
+ */
+export function currentGuildTag({ rosterTag = null, stored = null, freshPrefixes }) {
+  if (rosterTag) return rosterTag;
+  if (stored && !freshPrefixes.has(stored)) return stored;
+  return null;
 }
 
 // Cargos que cada classificação DEVE ter. O membro da guilda também é da
@@ -231,24 +244,6 @@ export async function applyClassificationRoles(member, cfg, kind, allyRoleId = n
 const NICK_MAX = 32;
 
 /**
- * O apelido que a pessoa DEVE ter no Discord.
- *
- * Quem é de fora — guilda aliada ou da black-list — carrega a TAG na frente:
- * `[GsW] Fulano`. Isso torna a guilda de origem legível na lista de membros e em
- * qualquer menção, sem depender de ninguém abrir o perfil. Membro nosso e neutro
- * ficam com o nick puro: aqui é a Wynn Brasil, marcar todo mundo com [WnBR] só
- * geraria ruído.
- *
- * Existe como função única porque três lugares precisam concordar sobre isso —
- * o registro, o roleSync e o /reconciliar. Se cada um montasse a string, o
- * painel de reconciliação passaria a vida "corrigindo" o que o job acabou de
- * escrever.
- *
- * @param {string} username  nick do WynnCraft, na grafia da API
- * @param {string|null} [tag]  prefixo da guilda, se a pessoa for de fora
- * @returns {string}
- */
-/**
  * `[GsW] Fulano` -> `Fulano`.
  *
  * Indispensável desde que o apelido passou a carregar a TAG: a identificação de
@@ -262,6 +257,21 @@ export function stripNickTag(nick) {
     .trim();
 }
 
+/**
+ * O apelido que a pessoa DEVE ter no Discord: `[TAG] Fulano`, com a TAG da
+ * guilda dela — `[WnBR]` para os nossos, a da guilda de fora para os outros.
+ * Quem está sem guilda fica com o nick puro. Torna a guilda legível na lista de
+ * membros e em qualquer menção, sem ninguém abrir o perfil.
+ *
+ * Existe como função única porque três lugares precisam concordar sobre isso —
+ * o registro, o roleSync e o /reconciliar. Se cada um montasse a string, o
+ * painel de reconciliação passaria a vida "corrigindo" o que o job acabou de
+ * escrever.
+ *
+ * @param {string} username  nick do WynnCraft, na grafia da API
+ * @param {string|null} [tag]  prefixo da guilda; null = sem guilda
+ * @returns {string}
+ */
 export function expectedNickname(username, tag = null) {
   if (!tag) return username;
   const comTag = `[${tag}] ${username}`;
@@ -270,8 +280,8 @@ export function expectedNickname(username, tag = null) {
   return comTag.length <= NICK_MAX ? comTag : username.slice(0, NICK_MAX);
 }
 
-// Deixa o apelido no Discord igual ao esperado (nick, com a TAG na frente se a
-// pessoa for de guilda aliada ou da black-list).
+// Deixa o apelido no Discord igual ao esperado (nick, com a TAG da guilda na
+// frente se a pessoa estiver em uma).
 //
 // Falha silenciosamente em dois casos que o Discord não deixa contornar: o dono
 // do servidor nunca pode ser renomeado por um bot, e nem quem tem cargo acima do
@@ -466,6 +476,10 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
     guildRank: rank,
     classification: kind,
     allyGuildUuid: allyGuild?.uuid ?? null,
+    // A guilda de agora, para a TAG do apelido de quem não aparece em nenhum
+    // roster que o roleSync baixa (ver currentGuildTag).
+    guildTag: nickTagOf(player),
+    guildTagCheckedAt: now,
   };
   if (kind === 'member' && isHigherRank(rank, byUuid?.peakRank)) {
     set.peakRank = rank;
@@ -488,7 +502,7 @@ async function performLink({ client, guildId, targetDiscordId, targetMember, raw
     roleId = await applyClassificationRoles(targetMember, cfg, kind, allyRoleId);
     // A TAG sai da guilda REAL do jogador, não do `kind`: um banido isento
     // continua na guilda proibida e continua sendo identificado por ela.
-    await syncNickname(targetMember, player.username, await nickTagOf(player));
+    await syncNickname(targetMember, player.username, nickTagOf(player));
   }
 
   // Em registro em massa (silent) não geramos aviso de recruta nem uma linha de
@@ -756,6 +770,14 @@ export async function sweepMembers(guild, {
         // errada se outra pessoa tiver adotado aquele nome.
         const player = await wynn.player(l.uuid);
         atual = player?.username ?? null;
+        // A consulta já veio: a guilda de quem não está em roster nenhum sai
+        // de graça, e é a TAG que o apelido dela vai carregar.
+        if (player) {
+          await collections.members().updateOne(
+            { uuid: l.uuid },
+            { $set: { guildTag: nickTagOf(player), guildTagCheckedAt: new Date() } },
+          );
+        }
       } catch (e) {
         if (isRateLimited(e)) {
           summary.rateLimited = true;
@@ -801,10 +823,10 @@ export function panelPayload() {
 > ⚪ Não está na guilda → cargo de comunidade. Depois é só clicar em **Enviar candidatura** em <#${RECRUIT_CHANNEL}>.
 
 **O que o bot passa a rastrear**
-> Seu apelido no Discord vira o seu nick, e se atualiza sozinho caso você troque de nome no jogo.
+> Seu apelido no Discord vira **[TAG] Nick**, com a TAG da sua guilda, e se atualiza sozinho se você trocar de nome ou de guilda no jogo.
 > Guild XP, guerras, guild raids e objetivos semanais viram **pontos de contribuição**, que definem a fila de Tomes e a sua margem de inatividade. O botão **Meus pontos**, em <#${STATUS_CHANNEL}>, mostra os seus.
 
-🇬🇧 **English** — Click **Verificar minha conta** below and type your WynnCraft username. The bot checks the official API and gives you the right role: guild member, ally, or community. Your Discord nickname is set to your in-game name and kept in sync. The bot replies in English if your Discord is set to English.
+🇬🇧 **English** — Click **Verificar minha conta** below and type your WynnCraft username. The bot checks the official API and gives you the right role: guild member, ally, or community. Your Discord nickname becomes **[TAG] Name**, with your guild's tag, and is kept in sync. The bot replies in English if your Discord is set to English.
 
 -# Só você enxerga a resposta da verificação. Este canal não aceita mensagens.`,
         footer: { text: 'Dados verificados na API oficial do Wynncraft' },

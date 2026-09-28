@@ -8,7 +8,13 @@ import {
 } from '../services/guildData.js';
 import { getConfig } from '../config/guildConfig.js';
 import { audit } from '../services/audit.js';
-import { applyClassificationRoles, syncNickname } from '../services/registration.js';
+import {
+  applyClassificationRoles,
+  syncNickname,
+  nickTagOf,
+  currentGuildTag,
+} from '../services/registration.js';
+import { wynn, isRateLimited } from '../wynn/api.js';
 import { loadGuildIndex } from '../services/guildList.js';
 import { ensureAllyRole, syncAllyIdentity } from '../services/allyRoles.js';
 import { closeJoinedApplications } from '../services/applications.js';
@@ -85,6 +91,43 @@ async function syncIdleRole(client, guild, cfg, naGuilda, cacheCompleto) {
 }
 
 /**
+ * Consultas de jogador por ciclo para descobrir a guilda de quem não aparece em
+ * nenhum roster baixado. A 10 por ciclo de 10 min, 300 vínculos de fora dão a
+ * volta em ~5h, e o custo é ~1 req/min num limite de 120.
+ */
+const TAG_REFRESH_PER_CYCLE = 10;
+
+/**
+ * Atualiza `guildTag` dos vínculos que os rosters não cobrem, poucos por vez.
+ *
+ * Primeiro quem tem TAG sabidamente vencida (uma guilda cujo roster veio agora
+ * e não tem a pessoa: ela saiu, e para onde foi só a consulta diz), depois a
+ * consulta mais antiga. Quem não existe mais na API também tem a data gravada;
+ * sem isso, ficaria para sempre na frente da fila, travando os outros.
+ *
+ * @param {Array<object>} candidatos  vínculos (mutados com o resultado)
+ * @param {Set<string>} freshPrefixes  TAGs cujo roster foi baixado neste ciclo
+ */
+async function refreshGuildTags(candidatos, freshPrefixes) {
+  const vencida = (m) => !!m.guildTag && freshPrefixes.has(m.guildTag);
+  const quando = (m) => (m.guildTagCheckedAt ? new Date(m.guildTagCheckedAt).getTime() : 0);
+  const fila = [...candidatos].sort((a, b) => Number(vencida(b)) - Number(vencida(a)) || quando(a) - quando(b));
+
+  for (const m of fila.slice(0, TAG_REFRESH_PER_CYCLE)) {
+    let player = null;
+    try {
+      player = await wynn.player(m.uuid);
+    } catch (e) {
+      if (isRateLimited(e)) break;
+    }
+    const $set = { guildTagCheckedAt: new Date() };
+    if (player) $set.guildTag = nickTagOf(player);
+    Object.assign(m, $set);
+    await collections.members().updateOne({ uuid: m.uuid }, { $set });
+  }
+}
+
+/**
  * Sincroniza a classificação de cada vínculo (membro / neutro / banido), o
  * apelido e o cargo mais alto já alcançado.
  *
@@ -111,6 +154,14 @@ export async function runRoleSync(client) {
   if (!res) return;
   const rankByUuid = new Map(res.members.map((m) => [m.uuid, m.rank]));
 
+  // uuid -> TAG da guilda, de todo roster que este ciclo baixar (a nossa, as da
+  // black-list e as aliadas). É a TAG do apelido: `[WnBR] Fulano`, `[GsW] Fulano`.
+  // `freshPrefixes` guarda de quais guildas o roster veio, para currentGuildTag
+  // saber que uma TAG gravada dessas guildas, sem a pessoa no roster, venceu.
+  const ourTag = res.guild?.prefix ?? prefix;
+  const tagByUuid = new Map(res.members.map((m) => [m.uuid, ourTag]));
+  const freshPrefixes = new Set([ourTag]);
+
   // Quem está no roster cumpriu a fila de entrada: a candidatura fecha aqui.
   //
   // Vai o roster INTEIRO, e não só quem entrou neste ciclo, porque isso também
@@ -132,17 +183,17 @@ export async function runRoleSync(client) {
   const tracked = await loadGuildIndex();
 
   const blacklistedUuids = new Set();
-  // uuid -> TAG da guilda proibida, para o apelido virar `[GsW] Fulano`.
-  const blTagByPlayer = new Map();
   for (const doc of tracked.blacklist) {
     const roster = await fetchGuildMembers(doc.prefix).catch(() => null);
     if (!roster) {
       log.warn(`Roster da black-list [${doc.prefix}] indisponível neste ciclo.`);
       continue;
     }
+    const tag = roster.guild?.prefix ?? doc.prefix;
+    freshPrefixes.add(tag);
     for (const m of roster.members) {
       blacklistedUuids.add(m.uuid);
-      blTagByPlayer.set(m.uuid, roster.guild?.prefix ?? doc.prefix);
+      tagByUuid.set(m.uuid, tag);
       nameByUuid.set(m.uuid, m.username);
     }
   }
@@ -159,10 +210,12 @@ export async function runRoleSync(client) {
     // roster que acabamos de pagar já traz a versão atual, e a TAG do apelido
     // acompanha, de graça.
     doc = await syncAllyIdentity(doc, roster.guild);
+    freshPrefixes.add(doc.prefix);
+    for (const m of roster.members) tagByUuid.set(m.uuid, doc.prefix);
     const roleId = await ensureAllyRole(guild, cfg, doc);
     if (!roleId) continue;
     for (const m of roster.members) {
-      allyByPlayer.set(m.uuid, { roleId, guildUuid: doc.uuid, tag: doc.prefix });
+      allyByPlayer.set(m.uuid, { roleId, guildUuid: doc.uuid });
       nameByUuid.set(m.uuid, m.username);
     }
   }
@@ -179,6 +232,7 @@ export async function runRoleSync(client) {
   if (!cacheCompleto) log.warn('Lista de membros do Discord indisponível neste ciclo; cargos e apelidos ficam para o próximo.');
 
   const linked = await collections.members().find({}).toArray();
+  await refreshGuildTags(linked.filter((m) => !tagByUuid.has(m.uuid)), freshPrefixes);
   // Quem o roster confirma na guilda AGORA, por Discord. Alimenta o cargo de
   // Ocioso lá embaixo, e sai de graça deste laço que já roda de qualquer jeito.
   const naGuilda = new Set();
@@ -232,6 +286,8 @@ export async function runRoleSync(client) {
       classification: kind,
       allyGuildUuid: ally?.guildUuid ?? null,
     };
+    const tag = currentGuildTag({ rosterTag: tagByUuid.get(m.uuid), stored: m.guildTag, freshPrefixes });
+    if ((m.guildTag ?? null) !== tag) update.guildTag = tag;
     if (nomeAtual !== m.username) {
       update.username = nomeAtual;
       // Aqui o nick antigo e o novo já aparecem no texto, então repetir o atual
@@ -281,9 +337,8 @@ export async function runRoleSync(client) {
 
     await applyClassificationRoles(member, cfg, kind, allyRoleId);
     // Pega quem trocou de nick no Minecraft depois de registrado, e mantém a TAG
-    // da guilda de fora na frente do apelido. A TAG vem da guilda REAL, não do
-    // `kind`: quem está na guilda proibida carrega a TAG dela mesmo isento.
-    const tag = blTagByPlayer.get(m.uuid) ?? ally?.tag ?? null;
+    // da guilda na frente do apelido. A TAG vem da guilda REAL, não do `kind`:
+    // quem está na guilda proibida carrega a TAG dela mesmo isento.
     await syncNickname(member, nomeAtual, tag);
   }
   await syncIdleRole(client, guild, cfg, naGuilda, cacheCompleto);

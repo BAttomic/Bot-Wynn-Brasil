@@ -93,6 +93,19 @@ A black-list **não tem nada embutido**: nem no código, nem no `.env`. Servidor
 novo (ou banco novo) sobe com a lista vazia e sem banir ninguém — o bot avisa no
 log. Rode `/guilds blacklist add tag:<TAG>` uma vez e pronto.
 
+## Apelido no Discord
+
+Todo vínculo fica com o apelido `[TAG] Nick`, com a TAG da guilda do jogador:
+`[WnBR]` para os nossos, a da guilda de fora para os outros, e só o nick para
+quem está sem guilda. O registro, o sync de cargos e o `/reconciliar` aplicam a
+mesma regra (`currentGuildTag`, em `services/registration.js`).
+
+A guilda sai dos rosters que o sync já baixa (a nossa, as aliadas e as da
+black-list). Quem está em outra guilda é consultado pelo jogador, 10 por ciclo,
+da informação mais antiga para a mais nova — trocar para uma guilda não
+rastreada pode levar algumas horas para aparecer. Sair da WnBR tira o `[WnBR]`
+no ciclo seguinte.
+
 ## Check-in de inatividade
 
 Ninguém é expulso sem ser perguntado. Quando um membro estoura a **própria**

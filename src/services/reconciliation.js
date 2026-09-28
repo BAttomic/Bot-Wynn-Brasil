@@ -7,6 +7,7 @@ import {
   expectedNickname,
   stripNickTag,
   nickCandidates,
+  currentGuildTag,
 } from './registration.js';
 import { loadGuildIndex } from './guildList.js';
 import { ensureAllyRole, syncAllyIdentity } from './allyRoles.js';
@@ -104,15 +105,14 @@ function allyFor({ nickLower, uuid }, ctx) {
 }
 
 /**
- * A TAG que vai na frente do apelido: a da guilda RASTREADA da pessoa, aliada ou
- * proibida. Independe da classificação — quem está na guilda proibida carrega a
- * TAG dela mesmo isento pela staff.
+ * A TAG que vai na frente do apelido: a da guilda da pessoa, qualquer que seja.
+ * Mesma regra do roleSync (currentGuildTag): o roster baixado agora vence, e sem
+ * roster vale a guilda gravada no vínculo. Independe da classificação — quem
+ * está na guilda proibida carrega a TAG dela mesmo isento pela staff.
  */
-function nickTagFor({ nickLower, uuid }, ctx) {
-  const proibida = (uuid && ctx.blByUuid.get(uuid)) || ctx.blByName.get(nickLower);
-  if (proibida) return proibida.prefix;
-  const aliada = (uuid && ctx.allyByUuid.get(uuid)) || ctx.allyByName.get(nickLower);
-  return aliada?.prefix ?? null;
+function nickTagFor({ nickLower, uuid, link }, ctx) {
+  const rosterTag = (uuid && ctx.tagByUuid.get(uuid)) || ctx.tagByName.get(nickLower) || null;
+  return currentGuildTag({ rosterTag, stored: link?.guildTag ?? null, freshPrefixes: ctx.freshPrefixes });
 }
 
 /**
@@ -158,20 +158,30 @@ export async function computeReconciliation(guild) {
   };
   for (const m of ours.members) remember(m);
 
-  // Black-list: a união de todas as guildas proibidas. Guardamos o documento por
-  // jogador (e não só o uuid) porque a TAG dele vai para o apelido.
+  // TAG de cada jogador de roster baixado, e de quais guildas o roster veio.
+  const ourTag = ours.guild?.prefix ?? prefix;
+  const tagByUuid = new Map();
+  const tagByName = new Map();
+  const freshPrefixes = new Set([ourTag]);
+  const tagRoster = (members, tag) => {
+    freshPrefixes.add(tag);
+    for (const m of members) {
+      if (m.uuid) tagByUuid.set(m.uuid, tag);
+      tagByName.set(norm(m.username), tag);
+    }
+  };
+  tagRoster(ours.members, ourTag);
+
+  // Black-list: a união de todas as guildas proibidas.
   const blUuids = new Set();
   const blNames = new Set();
-  const blByUuid = new Map();
-  const blByName = new Map();
   for (const doc of tracked.blacklist) {
     const roster = await fetchGuildMembers(doc.prefix).catch(() => null);
     if (!roster) continue;
+    tagRoster(roster.members, roster.guild?.prefix ?? doc.prefix);
     for (const m of roster.members) {
       blUuids.add(m.uuid);
       blNames.add(norm(m.username));
-      blByUuid.set(m.uuid, doc);
-      blByName.set(norm(m.username), doc);
       remember(m);
     }
   }
@@ -185,6 +195,7 @@ export async function computeReconciliation(guild) {
     const roster = await fetchGuildMembers(doc.prefix).catch(() => null);
     if (!roster) continue;
     doc = await syncAllyIdentity(doc, roster.guild);
+    tagRoster(roster.members, doc.prefix);
     const roleId = await ensureAllyRole(guild, cfg, doc);
     if (roleId) allyRoleByGuild.set(doc.uuid, roleId);
     for (const m of roster.members) {
@@ -203,11 +214,12 @@ export async function computeReconciliation(guild) {
     guildNames: new Set(ours.members.map((m) => norm(m.username))),
     blUuids,
     blNames,
-    blByUuid,
-    blByName,
     allyByUuid,
     allyByName,
     allyRoleByGuild,
+    tagByUuid,
+    tagByName,
+    freshPrefixes,
     ban,
   };
   const linkByDiscord = new Map(links.map((l) => [l.discordId, l]));
@@ -293,10 +305,10 @@ export async function computeReconciliation(guild) {
     // Com a ordem invertida, o painel "corrigia" o apelido de quem trocou de
     // nome de volta para o nome velho, toda vez, para sempre.
     const nickReal = (uuid ? canonicalByUuid.get(uuid) : null) ?? link?.username ?? canonicalByName.get(nickLower) ?? null;
-    // Quem é de guilda rastreada carrega a TAG na frente. Vem da mesma função
-    // que o registro e o roleSync usam, senão os três ficariam se corrigindo em
-    // círculo — um escreve `[GsW] Fulano`, o outro "conserta" para `Fulano`.
-    const canonical = nickReal ? expectedNickname(nickReal, nickTagFor({ nickLower, uuid }, ctx)) : null;
+    // A TAG da guilda vai na frente. Sai da mesma regra que o registro e o
+    // roleSync usam, senão os três ficariam se corrigindo em círculo — um
+    // escreve `[WnBR] Fulano`, o outro "conserta" para `Fulano`.
+    const canonical = nickReal ? expectedNickname(nickReal, nickTagFor({ nickLower, uuid, link }, ctx)) : null;
     const nickWrong = !!canonical && member.nickname !== canonical;
 
     const inSync = rolesInSync && !nickWrong;
