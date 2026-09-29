@@ -1,7 +1,6 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { getConfig } from '../config/guildConfig.js';
 import { ensurePanel } from './panels.js';
-import { xpRate } from './points.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { queueStaticPanel } from './recruitQueuePanel.js';
 
@@ -27,125 +26,13 @@ function row(buttons) {
 // Os textos vieram da staff; só foram ajustados onde o contexto mudou (fila de
 // tomes por pontos, empréstimos sem lista de itens, registro pelo botão).
 
-const COLOR = { rules: 0x5865f2, guild: 0x2ecc71, pings: 0xe67e22, recruit: 0x3498db, war: 0xe74c3c, tome: 0x9b59b6, loan: 0xf1c40f, appeal: 0x1abc9c };
+const COLOR = { recruit: 0x3498db, loan: 0xf1c40f, appeal: 0x1abc9c };
 
 /** IDs fixos referenciados nos textos da staff. @type {string} */
 const STAFF_ROLE = '1262574400587169863';
-const RECRUIT_CHANNEL = '1309848293278486578';
-const BOT_ID = '1285402380648583199';
-// Canal de pings (reaction-role). Substituiu o antigo menu nativo <id:customize>.
-const PINGS_CHANNEL = '1524986783694065736';
 
 // Menções cruas nunca pingam ninguém num painel fixo.
 const SILENT = { allowedMentions: { parse: [] } };
-
-/** @param {import('../config/guildConfig.js').GuildParams} params */
-function rulesPayload(params) {
-  const w = params.pointsWeights;
-  const xp = xpRate(w.contribPerMillion);
-  const base = params.inactivityDays;
-  const per = params.inactivityForgivenessPerPoints;
-  const maxDays = params.inactivityForgivenessMaxDays;
-  const checkHoras = params.inactivityCheckHours;
-  const voltaDias = params.inactivityReturnDays;
-  const streakPct = Math.round(params.weeklyStreakBonusPerWeek * 100);
-  // Exemplo de 10 dias de perdão, escrito a partir do divisor real.
-  const exemploPts = per * 10;
-  const exemploDias = Math.min(maxDays, 10);
-  const exemploTotal = base + exemploDias;
-  const fmt = (n) => n.toLocaleString('pt-BR');
-
-  return {
-    ...SILENT,
-    embeds: [
-      {
-        title: '📜 Regras da Comunidade Wynn Brasil',
-        color: COLOR.rules,
-        description:
-`Bem-vindo à Wynn Brasil! Aqui, nosso foco é criar um espaço amigável para jogadores de Wynncraft compartilharem informações, dicas e experiências. Para manter esse ambiente saudável, pedimos que todos sigam as regras abaixo:
-
-## 1. Respeito Mútuo
-> - Trate todos com respeito. Comportamentos abusivos, discriminatórios ou ofensivos não serão tolerados.
-> - Respeite opiniões diferentes e mantenha um diálogo saudável.
-
-## 2. Proibido Conteúdo Ofensivo
-> - Não publique ou compartilhe conteúdo inapropriado, incluindo violência gráfica, pornografia ou material discriminatório.
-> - Evite linguagem vulgar ou ofensiva.
-
-## 3. Uso Adequado dos Canais e Sem Spam
-> - Use os canais para os propósitos definidos.
-> - Não envie mensagens repetitivas, desnecessárias ou links externos irrelevantes.
-> - Promoção de outros servidores ou autopromoção só é permitida com autorização prévia.
-> - Nos canais de voz, mantenha um comportamento respeitoso e evite interrupções.
-
-## 4. Privacidade
-> - Respeite a privacidade de outros membros.
-> - Não compartilhe ou solicite informações pessoais sem consentimento.
-
-## 5. Comportamento no Jogo
-> - Siga as regras oficiais do Wynncraft.
-> - Não promova ou participe de trapaças ou exploração de bugs.
-> - Seja um bom representante da comunidade dentro e fora do jogo.
-
-## 6. Colaboração e Diversão
-> - Participe de forma colaborativa e ajude a manter um ambiente positivo.
-> - Lembre-se: estamos aqui para nos divertir e crescer juntos!
-
-### Observações Importantes
-- Caso presencie comportamento inadequado, denuncie aos moderadores.
-- Violações podem resultar em advertências, suspensões ou banimentos, dependendo da gravidade.
-- Escolha seus cargos de notificação em <#${PINGS_CHANNEL}>, reagindo nas mensagens. Isso ajuda na organização da guilda e na comunicação sobre eventos.
-
--# Divirta-se e boas aventuras em Wynncraft!`,
-      },
-      {
-        title: '🛡️ Avisos da Guilda Wynn Brasil',
-        color: COLOR.guild,
-        description:
-`Como a guilda funciona por dentro: o que rende ponto, o que o ponto compra, e o que libera vaga. Nada aqui é proibição — as regras de convivência estão no aviso acima.
-
-## 1. Pontos de Contribuição
-Tudo que você faz pela guilda vira ponto, e ponto vira duas coisas: **prioridade na fila de Tomes** e **margem de inatividade**. A contagem é automática — ninguém precisa avisar nada.
-
-> **Objetivo Semanal** — \`${w.weekly} pontos\`, +${streakPct}% por semana seguida (até o dobro). É o que mais rende por tempo gasto.
-> **Guild Raid** — \`${w.guildRaid} pontos\` para **cada** membro nosso no grupo. Ainda rende aspects (abaixo).
-> **Guerra** — \`${w.war} pontos\` por guerra do **seu** contador, multiplicados pelo **peso do território** que a guilda tomou na sua janela de guerra: fronteiras e QG do defensor, vezes a **dificuldade** que o jogo dá àquela torre (teto de x${params.territoryMultiplierCap}).
-> **Guild XP** (\`/guild xp 100\`) — \`${fmt(xp.pts)} ponto\` a cada \`${fmt(xp.xp)}\`. Sobe o nível da guilda, o que libera mais slots de membro e de baú.
-> **Farm em grupo** — não pontua, mas rende amizade, dicas e progresso mais rápido.
-
-Território conquistado é conquista da guilda inteira e entra no histórico, mas não pontua ninguém em separado: o jogo não informa quem tomou o quê, e chutar isso já creditou guerra a quem não guerreou.
-
-No canal de status, o botão **Meus pontos** mostra os seus, sua posição em cada categoria e quantos dias de tolerância eles te dão.
-
-## 2. Tomes e Aspects
-São as duas recompensas que a guilda distribui, e as duas saem por fila automática. Não precisa pedir nem cobrar.
-
-> **Tomes** — a fila é por **pontos**: quem mais contribuiu recebe primeiro. Requisitos do próprio jogo: alguma classe no nível **${params.tomeMinClassLevel}** e **${params.rewardMinGuildDays} dias** de guilda.
-> **Aspects** — saem das **guild raids**: cada raid rende \`${fmt(params.aspectsPerGuildRaid)}\` aspect a **cada** membro nosso que participou, inclusive quem fechou **sozinho**. Também exige **${params.rewardMinGuildDays} dias** de guilda.
-
-Aspect é item inteiro, então meio aspect não some: fica no seu saldo e vira unidade quando a próxima raid fecha o par. Use \`/aspects\` para ver o seu, e acompanhe a fila no canal de tomes.
-
-## 3. Inatividade e Expulsão
-> Membros que ficarem **${base} dias offline** podem ser removidos.
-> **Quem contribui ganha margem:** a cada **${fmt(per)} pontos**, você ganha **+1 dia** de perdão, até **+${maxDays} dias**.
-> Exemplo: ${fmt(exemploPts)} pontos = ${base} + ${exemploDias} = **${exemploTotal} dias** de tolerância.
-> O bot <@${BOT_ID}> calcula isso sozinho. Ninguém precisa pedir: o botão **Meus pontos** te diz quantos dias ainda restam.
-
-**Ninguém é expulso sem ser perguntado.** Ao atingir o seu limite, o bot te chama **no privado** com dois botões: *ainda quero jogar* ou *perdi o interesse*. Quem não responde em ${checkHoras}h entra na lista da staff. Quem responde que quer ficar ganha **${voltaDias} dias para entrar no jogo** — um login zera o contador e encerra o assunto. Se o prazo passar sem login, o bot avisa **uma última vez** e a vaga volta para a fila do mesmo jeito.
-
-**Isso não é punição.** A guilda tem um número limitado de slots, e um slot parado é um slot que um membro ativo não pode ocupar — liberar a vaga é o único motivo da regra existir.
-
-**Expulsão por inatividade não é banimento.** Você pode voltar quando quiser, refazendo o processo em <#${RECRUIT_CHANNEL}>.
-
-## 4. Guild Bank
-> O Guild Bank é público e aberto para todos. Pegue o que precisar.
-> **Scrolls** e **Ferramentas** devem ser devolvidos após o uso. Pegou? Devolva!
-
-**Dúvidas ou sugestões?** Procure um membro da <@&${STAFF_ROLE}>. Estamos aqui para ajudar!`,
-      },
-    ],
-  };
-}
 
 function recruitPayload() {
   return {
