@@ -259,7 +259,8 @@ function appealPayload() {
  * @type {ReadonlyArray<{key: string, stateId: string, label: string, build: (params: object) => object|Promise<object>}>}
  */
 export const PANELS = Object.freeze([
-  { key: 'rules', stateId: 'rulesPanel', label: 'regras', build: rulesPayload },
+  // As regras da comunidade saíram daqui: vivem em guidelinePanels.js, com as
+  // da guilda, do War Team e da Staff, e usam o mesmo `rulesPanel`.
   { key: 'recruiters', stateId: 'recruitPanel', label: 'recrutamento', build: recruitPayload },
   // Segunda mensagem do MESMO canal, logo abaixo. A ordem do array é a ordem
   // em que os painéis nascem, e portanto a ordem deles no canal.

@@ -2,7 +2,6 @@ import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
 import { collections } from '../../db/mongo.js';
 import { wynn } from '../../wynn/api.js';
 import { getConfig } from '../../config/guildConfig.js';
-import { applyClassificationRoles } from '../../services/registration.js';
 import {
   recordWarn,
   removeWarn,
