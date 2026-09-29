@@ -343,7 +343,7 @@ function staffPayload(p) {
 > 📚 **Confiança** — a palavra da Staff é referência. Na dúvida, confira antes de responder.
 
 ### 🎖️ Próximas promoções
-> **${fmt(TRILHAS.estrategistaStaff)} pontos** → o bot avisa os ${r('chefeStaff')}; um deles abre a votação para ${r('estrategistaStaff')}
+> **${fmt(TRILHAS.estrategistaStaff)} pontos** → o bot abre sozinho a votação dos ${r('chefeStaff')} para ${r('estrategistaStaff')}
 > ${r('chefeStaff')} → um Chefe sugere e abre a votação; aprovada, o ${r('fundador')} confirma
 
 ### 🗳️ Votações
