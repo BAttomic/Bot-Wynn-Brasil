@@ -294,7 +294,7 @@ async function main() {
   check('capitão não > capitão', gd.isHigherRank('captain', 'captain'), false);
 
   section('7b. Trilhas: um cargo por trilha, só sobe, e o rank do jogo que ele pede');
-  const { TRACKS, planTrack, expectedGameRank } = await import('../src/services/promotions.js');
+  const { TRACKS, planTrack, expectedGameRank, missingRequirements } = await import('../src/services/promotions.js');
   const cargo = (t, k) => TRACKS[t].steps.find((s) => s.key === k).role;
   const com = (...ids) => new Set(ids);
   const war = TRACKS.war;
@@ -314,6 +314,10 @@ async function main() {
   check('trilhas independentes: rank do jogo é o maior', expectedGameRank(com(cargo('war', 'estrategistaWar'), cargo('staff', 'capitaoStaff'))), 'strategist');
   check('Chefe pede Chefe no jogo', expectedGameRank(com(cargo('staff', 'chefeStaff'))), 'chief');
   check('sem cargo de trilha: nada', expectedGameRank(com(war.team, staff.team)), null);
+  check('Capitão (War) com 20 guerras: sem a meta', missingRequirements(com(cargo('war', 'capitaoWar')), { guildWars: 20 }), [{ label: 'Capitão (War)', medida: 'guerras', tem: 20, meta: 50 }]);
+  check('Estrategista (Staff) com 3.000: meta é a da votação', missingRequirements(com(cargo('staff', 'estrategistaStaff')), { points: 3000 }).map((f) => f.meta), [5000]);
+  check('com a meta: nada', missingRequirements(com(cargo('war', 'capitaoWar'), cargo('staff', 'capitaoStaff')), { guildWars: 50, points: 2500 }), []);
+  check('Chefe não tem meta', missingRequirements(com(cargo('war', 'chefeWar'), cargo('staff', 'chefeStaff')), {}), []);
 
   // -------------------------------------------------------- Livro-razão
   section('8. Pontos derivam do histórico (banco descartável)');

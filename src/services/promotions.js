@@ -32,7 +32,6 @@ const ROLE = Object.freeze({
   chefeStaff: '1554224233721372692',
 });
 
-const CH_ANUNCIOS = '1265848355452616828'; // anúncios da WnBR
 const CH_CHEFES = '1332548770940063776'; // canal dos Chefes (Staff)
 
 const fmt = (n) => Number(n).toLocaleString('pt-BR');
@@ -41,28 +40,35 @@ const fmt = (n) => Number(n).toLocaleString('pt-BR');
  * Cada trilha, do cargo mais alto para o mais baixo. `auto`: o bot dá sozinho
  * ao chegar lá. `vote`: o bot abre a votação dos Chefes (Staff). Sem nenhum dos
  * dois, o cargo é manual. `rank` é o rank do jogo que o cargo representa.
+ *
+ * A promoção é anunciada no canal de anúncios da PRÓPRIA trilha — nunca nos
+ * anúncios gerais da WnBR.
  */
 export const TRACKS = Object.freeze({
   war: Object.freeze({
     stat: 'guildWars',
     emoji: '⚔️',
+    medida: 'guerras',
     unidade: (n) => `${fmt(n)} guerras pela WnBR`,
     team: ROLE.warTeam,
+    anuncios: '1554170883432517675', // anúncios da War Team
     steps: Object.freeze([
-      { key: 'chefeWar', role: ROLE.chefeWar, rank: 'chief' },
-      { key: 'estrategistaWar', role: ROLE.estrategistaWar, rank: 'strategist', auto: TRILHAS.estrategistaWar },
-      { key: 'capitaoWar', role: ROLE.capitaoWar, rank: 'captain', auto: TRILHAS.capitaoWar },
+      { key: 'chefeWar', role: ROLE.chefeWar, label: 'Chefe (War)', rank: 'chief' },
+      { key: 'estrategistaWar', role: ROLE.estrategistaWar, label: 'Estrategista (War)', rank: 'strategist', auto: TRILHAS.estrategistaWar },
+      { key: 'capitaoWar', role: ROLE.capitaoWar, label: 'Capitão (War)', rank: 'captain', auto: TRILHAS.capitaoWar },
     ]),
   }),
   staff: Object.freeze({
     stat: 'points',
     emoji: '🛡️',
+    medida: 'pontos',
     unidade: (n) => `${fmt(n)} pontos`,
     team: ROLE.guildStaff,
+    anuncios: '1554169631231451276', // anúncios da Staff
     steps: Object.freeze([
-      { key: 'chefeStaff', role: ROLE.chefeStaff, rank: 'chief' },
-      { key: 'estrategistaStaff', role: ROLE.estrategistaStaff, rank: 'strategist', vote: TRILHAS.estrategistaStaff },
-      { key: 'capitaoStaff', role: ROLE.capitaoStaff, rank: 'captain', auto: TRILHAS.capitaoStaff },
+      { key: 'chefeStaff', role: ROLE.chefeStaff, label: 'Chefe (Staff)', rank: 'chief' },
+      { key: 'estrategistaStaff', role: ROLE.estrategistaStaff, label: 'Estrategista (Staff)', rank: 'strategist', vote: TRILHAS.estrategistaStaff },
+      { key: 'capitaoStaff', role: ROLE.capitaoStaff, label: 'Capitão (Staff)', rank: 'captain', auto: TRILHAS.capitaoStaff },
     ]),
   }),
 });
@@ -117,16 +123,39 @@ export function expectedGameRank(held) {
 }
 
 /**
- * Manda as linhas de promoção no canal de anúncios, quantas mensagens precisar.
- * Pinga só a pessoa promovida; os cargos citados aparecem sem pingar ninguém.
+ * Cargos de trilha que o membro tem SEM ter a meta: o mais alto de cada trilha,
+ * quando ele tem limiar (`auto` ou `vote`) e as guerras ou os pontos não chegam
+ * lá. Chefe não tem meta, então nunca aparece. O bot não tira nada por isso —
+ * cargo dado à mão é decisão da staff —, só aponta no /verificar.
+ *
+ * @param {{has(id: string): boolean}} held
+ * @param {{points?: number, guildWars?: number}} stats
+ * @returns {Array<{label: string, medida: string, tem: number, meta: number}>}
+ */
+export function missingRequirements(held, stats = {}) {
+  const out = [];
+  for (const track of Object.values(TRACKS)) {
+    const topo = track.steps.find((s) => held.has(s.role));
+    const meta = topo?.auto ?? topo?.vote;
+    const tem = Number(stats?.[track.stat] ?? 0);
+    if (meta != null && tem < meta) out.push({ label: topo.label, medida: track.medida, tem, meta });
+  }
+  return out;
+}
+
+/**
+ * Manda as linhas de promoção no canal de anúncios da trilha, quantas
+ * mensagens precisar. Pinga só a pessoa promovida; os cargos citados aparecem
+ * sem pingar ninguém.
  * @param {import('discord.js').Client} client
+ * @param {object} track  um de TRACKS
  * @param {Array<{userId: string, texto: string}>} linhas
  */
-async function anunciar(client, linhas) {
+async function anunciar(client, track, linhas) {
   if (!linhas.length) return;
-  const canal = await client.channels.fetch(CH_ANUNCIOS).catch(() => null);
+  const canal = await client.channels.fetch(track.anuncios).catch(() => null);
   if (!canal) {
-    log.warn('Canal de anúncios da WnBR indisponível; promoções não anunciadas.');
+    log.warn(`Canal de anúncios da trilha (${track.anuncios}) indisponível; promoções não anunciadas.`);
     return;
   }
   const CABECALHO = '## 🎖️ Promoções\n';
@@ -161,7 +190,7 @@ async function anunciar(client, linhas) {
  * ciclo, e o contador de guerras só conta as feitas pela WnBR mesmo.
  *
  * O primeiro ciclo pega todo mundo que já tinha passado dos limiares, e o
- * anúncio sai numa mensagem só (ou poucas), não uma por pessoa.
+ * anúncio sai numa mensagem só por trilha (ou poucas), não uma por pessoa.
  *
  * @param {import('discord.js').Client} client
  * @param {import('discord.js').Guild} guild
@@ -175,7 +204,7 @@ export async function syncTrailRoles(client, guild, alvos) {
     .toArray();
   const statsByUuid = new Map(stats.map((s) => [s.uuid, s]));
 
-  const anuncios = [];
+  const anuncios = new Map(Object.values(TRACKS).map((t) => [t, []]));
   const ajustes = [];
   for (const { member, uuid, nome } of alvos) {
     const s = statsByUuid.get(uuid) ?? {};
@@ -193,7 +222,7 @@ export async function syncTrailRoles(client, guild, alvos) {
         ajustes.push(`⚠️ Não consegui dar ${dar.map((id) => `<@&${id}>`).join(' e ')} a <@${member.id}> — o cargo do bot está abaixo?`);
       } else if (plano.give) {
         const time = plano.team ? ` e <@&${track.team}>` : '';
-        anuncios.push({
+        anuncios.get(track).push({
           userId: member.id,
           texto: `${track.emoji} <@${member.id}> chegou a **${track.unidade(valor)}** → <@&${STEP_BY_KEY.get(plano.give).role}>${time}`,
         });
@@ -210,8 +239,12 @@ export async function syncTrailRoles(client, guild, alvos) {
     }
   }
 
-  await anunciar(client, anuncios);
-  if (anuncios.length) await audit(client, guild.id, `🎖️ ${anuncios.length} promoção(ões) de trilha no Discord — o rank no jogo aparece no /verificar.`);
+  let total = 0;
+  for (const [track, linhas] of anuncios) {
+    await anunciar(client, track, linhas);
+    total += linhas.length;
+  }
+  if (total) await audit(client, guild.id, `🎖️ ${total} promoção(ões) de trilha no Discord — o rank no jogo aparece no /verificar.`);
   for (const linha of ajustes) await audit(client, guild.id, linha);
 }
 
@@ -372,7 +405,7 @@ export async function finalizePromotionVote(client, id, cause = 'deadline') {
   }
   const tirar = plano.remove.map((k) => STEP_BY_KEY.get(k).role);
   if (tirar.length) await member.roles.remove(tirar, 'Um cargo por trilha').catch(() => {});
-  await anunciar(client, [
+  await anunciar(client, track, [
     { userId: member.id, texto: `${track.emoji} <@${member.id}> foi aprovado pelos <@&${ROLE.chefeStaff}> → <@&${step.role}>` },
   ]);
   return result;

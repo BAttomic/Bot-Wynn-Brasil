@@ -5,7 +5,10 @@ import { inactivityStatus, withObservedActivity } from './inactivityCheck.js';
 import { getConfig } from '../config/guildConfig.js';
 import { optional } from '../config/env.js';
 import { queueApplications } from './applications.js';
-import { expectedGameRank } from './promotions.js';
+import { expectedGameRank, missingRequirements } from './promotions.js';
+
+/** Ranks do jogo que um cargo de trilha representa. Recrutador e Recruta não. */
+const TRAIL_RANKS = new Set(['captain', 'strategist', 'chief']);
 
 // Cruza os membros da guilda (API) com os vínculos no banco (o "registro").
 //
@@ -13,14 +16,18 @@ import { expectedGameRank } from './promotions.js';
 // Recruiter (rank acima de Recruit) ou é Recruit. A regra: quem está no Discord
 // pode ser Recruiter; quem não está deve ser Recruit.
 //
-// Depois vem quem falta PROMOVER NO JOGO: o cargo de trilha no Discord (dado
-// pelo bot por guerras e pontos, ou o Chefe à mão) pede um rank acima do que a
-// pessoa tem lá. O bot não mexe no jogo; a staff promove com esta lista.
+// Depois vem o RANK NO JOGO contra o cargo de trilha no Discord, nos dois
+// sentidos. O cargo (dado pelo bot por guerras e pontos, ou o Chefe à mão) é a
+// referência: pede um rank acima do que a pessoa tem no jogo → promover lá; a
+// pessoa tem no jogo Capitão para cima sem cargo que o sustente → rebaixar lá
+// (para o rank do cargo, ou Recrutador sem cargo nenhum). O bot não mexe no
+// jogo; a staff ajusta com esta lista. E, à parte, quem tem cargo de trilha sem
+// ter as guerras ou os pontos da meta.
 //
 // O relatório fecha com a lista de kick por inatividade: quem estourou a margem
 // E já teve a chance de responder ao check-in por DM (ver inactivityCheck.js).
 //
-// @param {import('discord.js').Client} [client]  sem ele, a lista de promoção fica vazia
+// @param {import('discord.js').Client} [client]  sem ele, as listas de cargo ficam vazias
 export async function computeVerification(client) {
   const prefix = optional('WYNN_GUILD_PREFIX');
   if (!prefix) return null;
@@ -29,6 +36,11 @@ export async function computeVerification(client) {
 
   const linkByUuid = new Map((await collections.members().find({}).toArray()).map((m) => [m.uuid, m]));
   const guildDiscordId = optional('DISCORD_GUILD_ID');
+  const stats = await collections
+    .guildStats()
+    .find({}, { projection: { uuid: 1, points: 1, guildWars: 1 } })
+    .toArray();
+  const statsByUuid = new Map(stats.map((s) => [s.uuid, s]));
 
   // Os cargos vêm do cache de membros. O fetch o completa; se falhar, vale o
   // que o cache já tem (o roleSync o enche a cada ciclo).
@@ -42,7 +54,8 @@ export async function computeVerification(client) {
   const missingRecruiter = []; // registro + na guilda + ainda Recruit → falta promover
   const shouldBeRecruit = []; // sem registro + na guilda + Recruiter → deveria ser Recruit
   const recruitNoLink = []; // sem registro + na guilda + Recruit → certo
-  const promoteInGame = []; // cargo de trilha no Discord acima do rank no jogo
+  const rankInGame = []; // rank no jogo diferente do que o cargo de trilha pede
+  const missingReq = []; // cargo de trilha sem a meta de guerras/pontos
 
   for (const gm of res.members) {
     const link = linkByUuid.get(gm.uuid);
@@ -53,14 +66,27 @@ export async function computeVerification(client) {
     if (registered) (isRecruiter ? verified : missingRecruiter).push(nick(gm.username));
     else (isRecruiter ? shouldBeRecruit : recruitNoLink).push(nick(gm.username));
 
+    // Sem o membro no Discord não há cargo para comparar. Quem não tem vínculo e
+    // é Capitão para cima já aparece acima, em "deveria ser Recruit".
     const member = link?.discordId ? discordGuild?.members.cache.get(link.discordId) : null;
-    const esperado = member ? expectedGameRank(member.roles.cache) : null;
+    if (!member) continue;
+
+    const esperado = expectedGameRank(member.roles.cache);
     if (esperado && isHigherRank(esperado, gm.rank)) {
-      promoteInGame.push({ username: gm.username, from: gm.rank, to: esperado });
+      rankInGame.push({ username: gm.username, from: gm.rank, to: esperado, up: true });
+    } else if (TRAIL_RANKS.has(gm.rank) && isHigherRank(gm.rank, esperado)) {
+      // O Líder (owner) fica de fora: não é rank de trilha.
+      rankInGame.push({ username: gm.username, from: gm.rank, to: esperado ?? 'recruiter', up: false });
     }
+
+    const faltas = missingRequirements(member.roles.cache, statsByUuid.get(gm.uuid));
+    if (faltas.length) missingReq.push({ username: gm.username, faltas });
   }
-  // Rank mais alto primeiro: é a promoção que mais pesa, e a staff a faz antes.
-  promoteInGame.sort((a, b) => rankWeight(b.to) - rankWeight(a.to) || a.username.localeCompare(b.username));
+  // Promoções antes, e o rank mais alto primeiro: é o ajuste que mais pesa.
+  rankInGame.sort(
+    (a, b) => Number(b.up) - Number(a.up) || rankWeight(b.to) - rankWeight(a.to) || a.username.localeCompare(b.username),
+  );
+  missingReq.sort((a, b) => a.username.localeCompare(b.username));
 
   // FILA DE ENTRADA: aprovados na votação que ainda não entraram no jogo, em
   // ordem de aprovação — que é a ordem em que a staff convida.
@@ -86,10 +112,6 @@ export async function computeVerification(client) {
   if (guildDiscordId) {
     const { params, channels } = await getConfig(guildDiscordId);
     recrutamento = { slots, esperando, canal: channels?.recruiters ?? null };
-    const stats = await collections
-      .guildStats()
-      .find({}, { projection: { uuid: 1, points: 1 } })
-      .toArray();
     const checks = await collections.inactivityChecks().find({}).toArray();
     const pointsByUuid = new Map(stats.map((s) => [s.uuid, s.points ?? 0]));
     // O `lastJoin` do endpoint de guilda às vezes fica para trás do jogo: quem
@@ -103,7 +125,8 @@ export async function computeVerification(client) {
     missingRecruiter,
     shouldBeRecruit,
     recruitNoLink,
-    promoteInGame,
+    rankInGame,
+    missingReq,
     inactivity,
     recrutamento,
     total: res.members.length,
@@ -173,28 +196,51 @@ function reasonSummary(kick) {
 }
 
 /**
- * Quem subir no jogo, uma linha por pessoa: `Nick` Recrutador → **Capitão**.
- * Corta pelo fim se não couber no campo, avisando quantos ficaram de fora.
- * @param {Array<{username: string, from: string, to: string}>} lista
+ * Um campo de uma linha por pessoa, cortado pelo fim se não couber, avisando
+ * quantos ficaram de fora.
+ * @param {string} desc    linha de explicação, já com `> ` e `\n`
+ * @param {string[]} todas
  */
-function promoteField(lista) {
-  const desc = '> O cargo no Discord pede um rank acima do que a pessoa tem no jogo.\n';
-  if (!lista.length) {
-    return { name: '🎖️ Promover no jogo (0)', value: '> Ninguém para promover no jogo agora. 🎉' };
-  }
+function linesValue(desc, todas) {
   const linhas = [];
   let len = desc.length;
-  for (const p of lista) {
-    const linha = `\`${p.username}\` ${RANK_LABEL[p.from] ?? p.from} → **${RANK_LABEL[p.to] ?? p.to}**`;
+  for (const linha of todas) {
     if (len + linha.length + 1 + RESTO_RESERVA > FIELD_LIMIT) break;
     linhas.push(linha);
     len += linha.length + 1;
   }
-  const resto = lista.length - linhas.length;
-  return {
-    name: `🎖️ Promover no jogo (${lista.length})`,
-    value: `${desc}${linhas.join('\n')}${resto > 0 ? `\n-# … e mais ${resto}.` : ''}`,
-  };
+  const resto = todas.length - linhas.length;
+  return `${desc}${linhas.join('\n')}${resto > 0 ? `\n-# … e mais ${resto}.` : ''}`;
+}
+
+const rotulo = (rank) => RANK_LABEL[rank] ?? rank;
+
+/**
+ * Rank no jogo × cargo de trilha no Discord: `⬆️ Nick Recrutador → Capitão`.
+ * Sempre aparece, como a lista de kick: "ninguém" também é resposta.
+ * @param {Array<{username: string, from: string, to: string, up: boolean}>} lista
+ */
+function rankField(lista) {
+  const nome = `🎖️ Rank no jogo × cargo no Discord (${lista.length})`;
+  if (!lista.length) return { name: nome, value: '> Todo rank no jogo bate com o cargo no Discord. 🎉' };
+  const desc = '> ⬆️ promover / ⬇️ rebaixar no jogo, para o rank que o cargo no Discord pede.\n';
+  const linhas = lista.map((p) => `${p.up ? '⬆️' : '⬇️'} \`${p.username}\` ${rotulo(p.from)} → **${rotulo(p.to)}**`);
+  return { name: nome, value: linesValue(desc, linhas) };
+}
+
+/**
+ * Cargo de trilha sem a meta: `Nick` Capitão (War): 20 de 50 guerras. Só
+ * aparece quando há alguém — é exceção, não rotina.
+ * @param {Array<{username: string, faltas: Array<{label: string, medida: string, tem: number, meta: number}>}>} lista
+ */
+function missingReqFields(lista) {
+  if (!lista.length) return [];
+  const fmt = (n) => Number(n).toLocaleString('pt-BR');
+  const desc = '> Tem o cargo sem ter as guerras ou os pontos. O bot não tira: a staff decide.\n';
+  const linhas = lista.map(
+    (p) => `\`${p.username}\` ${p.faltas.map((f) => `${f.label}: ${fmt(f.tem)} de ${fmt(f.meta)} ${f.medida}`).join(' · ')}`,
+  );
+  return [{ name: `🏷️ Cargo sem a meta (${lista.length})`, value: linesValue(desc, linhas) }];
 }
 
 /** @param {{kick: Array<object>, waiting: Array<object>}} inactivity */
@@ -285,9 +331,10 @@ export function verificationEmbed(data) {
       field('⬆️ No Discord', 'Na guilda e com registro — falta virar Recruiter.', data.missingRecruiter),
       field('⬇️ Na guilda', 'Recruiter sem registro — deveria ser Recruit.', data.shouldBeRecruit),
       field('🤙 Sem vínculo no Discord', 'Recruit sem registro — tá certo. Vale convidar para o Discord: com registro, vira Recruiter.', data.recruitNoLink),
-      // Depois das 4 listagens: o fitEmbed só encurta as 4 primeiras, e esta é
-      // uma lista que a staff executa, como a de kick.
-      promoteField(data.promoteInGame ?? []),
+      // Depois das 4 listagens: o fitEmbed só encurta as 4 primeiras, e estas
+      // são listas que a staff executa, como a de kick.
+      rankField(data.rankInGame ?? []),
+      ...missingReqFields(data.missingReq ?? []),
       ...inactivityFields(data.inactivity ?? { kick: [], waiting: [] }),
     ],
     footer: { text: 'Use /reconciliar para auditar cargos.' },
