@@ -66,6 +66,11 @@ const CH = Object.freeze({
   staffChiefs: '1332548770940063776',
   staffConversas: '1267311891072417886',
   staffBot: '1524911725424414861',
+  vozCallEterna: '1262155312769794068',
+  vozBatePapo: '1267240558405877902',
+  vozWar: '1554171100823552010',
+  vozStaff: '1327509080105025556',
+  vozMeeting: '1554171016329302176',
 });
 
 const c = (key) => `<#${CH[key]}>`;
@@ -90,21 +95,24 @@ function communityPayload() {
 > Nada de conteúdo adulto, violento ou ilegal.
 > Golpe e calote são proibidos, dentro e fora do jogo. As regras oficiais do Wynncraft também valem aqui.
 
-### 💬 Canais
-> ${c('conversas')} em português · ${c('englishGeneral')} em inglês · ${c('memes')} · ${c('exibicao')} para builds e drops · ${c('forum')} para dúvidas e guias.
-> ${c('market')}: compra, venda e troca entre jogadores. A negociação é por sua conta — a staff não intermedeia.
-> ${c('pings')}: reaja para escolher o que quer receber. Cada ping é só para o assunto dele.
-
-### 🤝 Aliados
-> Quem é de guilda aliada recebe ${r('allies')} e fala com a Wynn Brasil em ${c('gAllies')}.
-
 ### 🔨 Advertências e banimentos
 > A moderação é feita pela staff, pelo bot, e tudo fica registrado. Advertência chega por DM.
 > O banimento vale para a pessoa: todas as contas do jogo e todos os Discords dela.
 > Quem é banido passa a ver só ${c('banimentos')}, onde um tópico privado com a staff reúne a evidência — e é ali que se contesta.
 
-### 📣 Avisos
-> ${c('anunciosComunidade')} — novidades do servidor · ${c('atualizacoesWynn')} — atualizações do Wynncraft.`);
+### 📌 Canais
+> ${c('anunciosComunidade')} — novidades do servidor
+> ${c('atualizacoesWynn')} — atualizações do Wynncraft
+> ${c('conversas')} — papo em português
+> ${c('englishGeneral')} — chat in English
+> ${c('forum')} — dúvidas, guias e builds
+> ${c('market')} — compra, venda e troca; a negociação é por sua conta, a staff não intermedeia
+> ${c('exibicao')} — mostre suas builds e drops
+> ${c('memes')} — memes
+> ${c('pings')} — reaja para escolher seus pings; cada ping é só para o assunto dele
+> ${c('recrutamento')} — quer entrar na Wynn Brasil? Candidate-se aqui e acompanhe a fila de entrada
+> ${c('gAllies')} — aliados (${r('allies')}) e a guilda conversam aqui
+> ${c('vozCallEterna')} e ${c('vozBatePapo')} — voz aberta`);
 }
 
 /** @param {import('../config/guildConfig.js').GuildParams} p */
@@ -116,7 +124,7 @@ function guildPayload(p) {
 `Valem para ${r('member')}, junto com as ${c('diretrizes')} da comunidade.
 
 ### 🎯 Entrada
-> A candidatura é feita em ${c('recrutamento')} e votada pelos Chefes (Staff). Aprovado, você recebe o convite no jogo; ao entrar, o cargo e a TAG **[WnBR]** chegam sozinhos.
+> A candidatura é votada pelos Chefes (Staff). Aprovado, você recebe o convite no jogo; ao entrar, o cargo e a TAG **[WnBR]** chegam sozinhos.
 
 ### ⭐ Contribuição
 > Tudo o que você faz pela guilda vira ponto:
@@ -124,11 +132,11 @@ function guildPayload(p) {
 > 🛡️ **${fmt(w.guildRaid)}** por guild raid
 > ⚔️ **${fmt(w.war)}** por guerra, multiplicados pelo peso do território (até x${fmt(p.territoryMultiplierCap)})
 > 📅 **${fmt(w.weekly)}** por objetivo semanal, **+${streak}%** por semana seguida
-> Ranking e o botão **Meus pontos** em ${c('status')}. Os pontos ordenam a fila de Tomes, compram margem de inatividade e abrem a trilha da Staff.
+> Os pontos ordenam a fila de Tomes, compram margem de inatividade e abrem a trilha da Staff.
 
 ### 📜 Tomes e ✨ Aspects
 > Tomes: fila por pontos, **1 por objetivo semanal** cumprido. Precisa de **${p.rewardMinGuildDays} dias** de guilda e uma classe **nível ${p.tomeMinClassLevel}**.
-> Aspects: **${String(p.aspectsPerGuildRaid).replace('.', ',')}** por guild raid, entregues pela staff a partir de **${p.rewardMinGuildDays} dias** de guilda. Tudo em ${c('tomesAspects')}.
+> Aspects: **${String(p.aspectsPerGuildRaid).replace('.', ',')}** por guild raid, entregues pela staff a partir de **${p.rewardMinGuildDays} dias** de guilda.
 
 ### 💤 Inatividade
 > Margem de **${p.inactivityDays} dias** offline, mais **1 dia** a cada **${fmt(p.inactivityForgivenessPerPoints)}** pontos (até **+${p.inactivityForgivenessMaxDays}**).
@@ -139,11 +147,13 @@ function guildPayload(p) {
 > Capitão, Estrategista e Chefe representam o rank no jogo, em duas trilhas independentes: **War Team** (${c('warDiretrizes')}) e **Guild Staff** (${c('staffDiretrizes')}). No máximo um cargo por trilha.
 > Quem tem rank e sai da guilda recebe **Ocioso**: mantém os cargos, perde o direito de voto, e o Ocioso sai sozinho na volta.
 
-### 🎊 Dia a dia
-> ${c('gConversas')} · ${c('eventos')} — competições e sorteios · ${c('emprestimos')} — empréstimos do baú, com acordo e prazo registrados pelo bot.
-
-### 📣 Avisos
-> ${c('anunciosWnbr')}.`);
+### 📌 Canais
+> ${c('anunciosWnbr')} — avisos da guilda
+> ${c('gConversas')} — papo da guilda
+> ${c('status')} — status ao vivo, ranking, **Meus pontos**, uniforme e modpack
+> ${c('tomesAspects')} — fila de Tomes e aspects a receber
+> ${c('eventos')} — competições e sorteios
+> ${c('emprestimos')} — empréstimos do baú, com acordo e prazo registrados pelo bot`);
 }
 
 function warPayload() {
@@ -161,16 +171,21 @@ function warPayload() {
 > Tenha uma classe dedicada à guerra, pronta a qualquer momento, com o mapa todo desbloqueado.
 
 ### 📡 Convocação
-> Guerras são convocadas por ping manual. Território ganho e perdido aparece em ${c('warBot')}.
-
-### 💬 Canais
-> ${c('warConversas')} e 🔊 War para o time · ${c('warForum')} e ${c('mainWarConversas')} só para MAIN WAR · avisos em ${c('warAnuncios')}.
+> Guerras são convocadas por ping manual.
 
 ### 🔒 Sigilo
 > Builds, estratégias e consumíveis do time são privados. Vazamento resulta em banimento.
 
 ### ⚖️ Limites
-> A War Team não tem poder de kick, ban ou decisão sobre a guilda — isso é da Guild Staff.`);
+> A War Team não tem poder de kick, ban ou decisão sobre a guilda — isso é da Guild Staff.
+
+### 📌 Canais
+> ${c('warAnuncios')} — avisos do time
+> ${c('warConversas')} — papo do time
+> ${c('vozWar')} — call das guerras
+> ${c('warBot')} — território ganho e perdido, ao vivo
+> ${c('warForum')} — só MAIN WAR: builds e estratégias
+> ${c('mainWarConversas')} — só MAIN WAR`);
 }
 
 /** @param {import('../config/guildConfig.js').GuildParams} p */
@@ -192,11 +207,17 @@ function staffPayload(p) {
 > **/ban** — só Chefe (Staff). Bane a pessoa inteira e abre um tópico privado em ${c('banimentos')} com o banido, quem baniu e os Chefes. Quem baniu coloca a evidência ou o relato.
 > **Unban** e **promoção a Chefe** — só o Owner.
 
-### 💬 Canais
-> ${c('staffConversas')} e 🔊 Staff · ${c('staffForum')} para discussões longas · ${c('staffBot')} — auditoria e alertas · ${c('staffChiefs')} e 🔊 Meeting só para Chefes (Staff) · avisos em ${c('staffAnuncios')}.
-
 ### 🛡️ Hierarquia
-> Fundador no topo, Wynn Brasil BOT logo abaixo. Qualquer mudança nisso gera alerta para o Owner.`);
+> Fundador no topo, Wynn Brasil BOT logo abaixo. Qualquer mudança nisso gera alerta para o Owner.
+
+### 📌 Canais
+> ${c('staffAnuncios')} — avisos da staff
+> ${c('staffConversas')} — papo da staff
+> ${c('vozStaff')} — call da staff
+> ${c('staffForum')} — discussões longas e casos
+> ${c('staffBot')} — auditoria, alertas de recrutamento e de hierarquia, relatório de verificação
+> ${c('staffChiefs')} — só Chefes (Staff)
+> ${c('vozMeeting')} — só Chefes (Staff)`);
 }
 
 /**
