@@ -253,21 +253,28 @@ export async function syncTrailRoles(client, guild, alvos) {
 /** Prefixo dos botões. O /apply os adota: é ele quem cuida de votação. */
 export const PROMO_PREFIX = 'promo:';
 
+/**
+ * Só Aprovar e Reprovar. Não votar JÁ é abster-se: a regra conta a maioria dos
+ * votos dados, então um botão de abstenção não mudaria resultado nenhum.
+ */
+const CHOICES = Object.freeze(['approve', 'reject']);
+
 function voteButtons(id, disabled = false) {
   return new ActionRowBuilder().addComponents(
-    ['approve', 'reject', 'abstain'].map((choice) =>
+    CHOICES.map((choice) =>
       new ButtonBuilder()
         .setCustomId(`${PROMO_PREFIX}vote:${id}:${choice}`)
         .setLabel(labelFor(choice))
-        .setStyle(choice === 'approve' ? ButtonStyle.Success : choice === 'reject' ? ButtonStyle.Danger : ButtonStyle.Secondary)
+        .setStyle(choice === 'approve' ? ButtonStyle.Success : ButtonStyle.Danger)
         .setDisabled(disabled),
     ),
   );
 }
 
-// Mesmo formato da candidatura: totais à vista, voto anônimo.
+// Voto anônimo: a mensagem mostra só os totais, nunca quem votou o quê. Quem
+// votou fica no banco só para garantir um voto por pessoa.
 function voteEmbed(v, eligibleCount) {
-  const { approve, reject, abstain } = tally(v.votes);
+  const { approve, reject } = tally(v.votes);
   const step = STEP_BY_KEY.get(v.role);
   return {
     title: `Promoção — ${v.username}`,
@@ -276,11 +283,23 @@ function voteEmbed(v, eligibleCount) {
     fields: [
       { name: 'Aprovar', value: String(approve), inline: true },
       { name: 'Reprovar', value: String(reject), inline: true },
-      { name: 'Abster', value: String(abstain), inline: true },
       { name: 'Eleitores elegíveis', value: String(eligibleCount), inline: true },
       { name: 'Encerra', value: `<t:${Math.floor(new Date(v.expiresAt).getTime() / 1000)}:R>`, inline: true },
     ],
-    footer: { text: `ID: ${v._id}` },
+    footer: { text: `Voto anônimo, um por Chefe · quem não vota se abstém · ID: ${v._id}` },
+  };
+}
+
+/**
+ * A mensagem da votação. `ping` só na abertura: reenviar uma votação apagada
+ * não chama os Chefes de novo.
+ */
+function votePayload(v, eligibleCount, ping) {
+  return {
+    content: `<@&${ROLE.chefeStaff}> votação de promoção.`,
+    embeds: [voteEmbed(v, eligibleCount)],
+    components: [voteButtons(v._id.toString())],
+    allowedMentions: ping ? { roles: [ROLE.chefeStaff] } : { parse: [] },
   };
 }
 
@@ -288,9 +307,9 @@ function voteEmbed(v, eligibleCount) {
  * Abre a votação dos Chefes (Staff) para o próximo cargo da trilha.
  *
  * Uma votação por pessoa e cargo, para sempre: reprovada, o bot não reabre
- * sozinho a cada ciclo. Se a mensagem não sair, o registro é desfeito e o
- * próximo ciclo tenta de novo — votação sem mensagem expiraria sem voto e
- * reprovaria a pessoa sem ninguém ter visto.
+ * sozinho a cada ciclo. Se a mensagem não sair, nada é gravado e o próximo
+ * ciclo tenta de novo — votação sem mensagem expiraria sem voto e reprovaria a
+ * pessoa sem ninguém ter visto.
  */
 async function openPromotionVote(client, guild, { member, uuid, nome, step, valor, track }) {
   const votes = collections.promotionVotes();
@@ -305,7 +324,11 @@ async function openPromotionVote(client, guild, { member, uuid, nome, step, valo
   const cfg = await getConfig(guild.id);
   const hours = Number(cfg.params?.voteWindowHours) || 24;
   const now = new Date();
+  // O id nasce aqui porque os botões precisam dele, e a mensagem sai ANTES do
+  // registro: votação aberta sem mensagem seria reenviada pelo job de reenvio,
+  // que roda em paralelo, e o canal ganharia duas.
   const doc = {
+    _id: new ObjectId(),
     guildDiscordId: guild.id,
     discordId: member.id,
     uuid,
@@ -319,26 +342,24 @@ async function openPromotionVote(client, guild, { member, uuid, nome, step, valo
     expiresAt: new Date(now.getTime() + hours * 3_600_000),
     channelId: canal.id,
   };
-  const { insertedId } = await votes.insertOne(doc);
-  doc._id = insertedId;
 
   const eligibleCount = await eligibleVoterCount(guild);
   const msg = await canal
-    .send({
-      content: `<@&${ROLE.chefeStaff}> nova votação de promoção.`,
-      embeds: [voteEmbed(doc, eligibleCount)],
-      components: [voteButtons(insertedId.toString())],
-      allowedMentions: { roles: [ROLE.chefeStaff] },
-    })
+    .send(votePayload(doc, eligibleCount, true))
     .catch((e) => {
       log.error('Falha ao abrir votação de promoção:', e);
       return null;
     });
-  if (!msg) {
-    await votes.deleteOne({ _id: insertedId });
+  if (!msg) return; // nada gravado: o próximo ciclo tenta de novo
+  const gravou = await votes.insertOne({ ...doc, messageId: msg.id }).then(() => true, (e) => {
+    log.error('Falha ao gravar votação de promoção:', e);
+    return false;
+  });
+  // Sem registro, os botões não achariam votação nenhuma.
+  if (!gravou) {
+    await msg.delete().catch(() => {});
     return;
   }
-  await votes.updateOne({ _id: insertedId }, { $set: { messageId: msg.id } });
   await audit(client, guild.id, `🗳️ Votação aberta: <@${member.id}> (**${nome}**) para <@&${step.role}> — ${track.unidade(valor)}.`);
 }
 
@@ -414,39 +435,108 @@ export async function finalizePromotionVote(client, id, cause = 'deadline') {
 /** Botões `promo:vote:<id>:<escolha>`. */
 export async function handlePromotionVoteButton(interaction) {
   const [, action, id, choice] = interaction.customId.split(':');
-  if (action !== 'vote' || !ObjectId.isValid(id) || !['approve', 'reject', 'abstain'].includes(choice)) return;
+  if (action !== 'vote' || !ObjectId.isValid(id)) return;
+  // Botão de abstenção de uma mensagem antiga, de antes de ele sair.
+  if (!CHOICES.includes(choice)) {
+    return interaction.reply({ content: 'Para se abster, é só não votar.', ephemeral: true });
+  }
   if (!canVote(interaction.member)) {
     return interaction.reply({ content: 'Só os Chefes (Staff) votam promoção.', ephemeral: true });
   }
 
-  const votes = collections.promotionVotes();
-  const _id = new ObjectId(id);
-  const v = await votes.findOne({ _id });
-  if (!v || v.status !== 'open') {
-    return interaction.reply({ content: 'Esta votação já foi encerrada.', ephemeral: true });
-  }
-
-  // Substitui o voto anterior deste eleitor, se houver.
-  const lista = (v.votes || []).filter((x) => x.voterDiscordId !== interaction.user.id);
-  lista.push({ voterDiscordId: interaction.user.id, choice, at: new Date() });
-  await votes.updateOne({ _id }, { $set: { votes: lista } });
-  v.votes = lista;
+  // Um voto por pessoa, numa operação só: tira o voto anterior deste Chefe e
+  // põe o novo no MESMO update. Ler, mudar e regravar a lista perderia o voto
+  // de quem clicasse no mesmo instante, e dois cliques rápidos da mesma pessoa
+  // podiam deixá-la com dois votos.
+  const voter = interaction.user.id;
+  const v = await collections.promotionVotes().findOneAndUpdate(
+    { _id: new ObjectId(id), status: 'open' },
+    [
+      {
+        $set: {
+          votes: {
+            $concatArrays: [
+              { $filter: { input: { $ifNull: ['$votes', []] }, cond: { $ne: ['$$this.voterDiscordId', voter] } } },
+              [{ voterDiscordId: voter, choice, at: new Date() }],
+            ],
+          },
+        },
+      },
+    ],
+    { returnDocument: 'after' },
+  );
+  if (!v) return interaction.reply({ content: 'Esta votação já foi encerrada.', ephemeral: true });
 
   const eligibleCount = await eligibleVoterCount(interaction.guild);
   await interaction.update({ embeds: [voteEmbed(v, eligibleCount)], components: [voteButtons(id)] });
-  await interaction.followUp({ content: `Voto registrado: **${labelFor(choice)}**.`, ephemeral: true });
+  await interaction.followUp({
+    content: `Voto registrado: **${labelFor(choice)}**. Ninguém vê o seu voto; clicar no outro botão troca.`,
+    ephemeral: true,
+  });
 
-  const { approve, reject, abstain } = tally(lista);
-  if (eligibleCount > 0 && approve + reject + abstain >= eligibleCount) {
+  const { approve, reject } = tally(v.votes);
+  if (eligibleCount > 0 && approve + reject >= eligibleCount) {
     await finalizePromotionVote(interaction.client, id, 'all-voted');
   }
 }
 
-/** Fecha as votações de promoção cujo prazo passou. */
+/** Código do Discord para "mensagem não existe" — foi apagada. */
+const UNKNOWN_MESSAGE = 10008;
+
+/**
+ * Reenvia a mensagem de toda votação ABERTA que foi apagada, com os votos que
+ * ela já tinha. Os votos vivem no banco, então apagar a mensagem não apaga a
+ * votação — só a tira da vista dos Chefes, e ela expiraria sem voto.
+ *
+ * Só reenvia quando o Discord confirma que a mensagem não existe: um erro de
+ * rede não pode virar votação duplicada no canal.
+ */
+async function ensureVoteMessages(client) {
+  const abertas = await collections.promotionVotes().find({ status: 'open' }).toArray();
+  for (const v of abertas) {
+    const canal = await client.channels.fetch(v.channelId ?? CH_CHEFES).catch(() => null);
+    if (!canal) continue;
+    const guild = await client.guilds.fetch(v.guildDiscordId).catch(() => null);
+    const eligibleCount = async () => (guild ? eligibleVoterCount(guild) : 0);
+
+    if (v.messageId) {
+      const achou = await canal.messages.fetch({ message: v.messageId, force: true }).then(
+        (msg) => ({ msg }),
+        (erro) => ({ erro }),
+      );
+      if (achou.msg) {
+        // Mensagem aberta antes de o Abster sair ainda tem três botões: troca
+        // pelos dois de agora, uma vez só.
+        if (achou.msg.components?.[0]?.components?.length !== CHOICES.length) {
+          const { embeds, components } = votePayload(v, await eligibleCount(), false);
+          await achou.msg.edit({ embeds, components }).catch(() => {});
+        }
+        continue;
+      }
+      if (achou.erro?.code !== UNKNOWN_MESSAGE) continue;
+    }
+
+    const msg = await canal.send(votePayload(v, await eligibleCount(), false)).catch((e) => {
+      log.error('Falha ao reenviar votação de promoção:', e);
+      return null;
+    });
+    if (!msg) continue;
+    await collections
+      .promotionVotes()
+      .updateOne({ _id: v._id }, { $set: { messageId: msg.id, channelId: canal.id } });
+    await audit(client, v.guildDiscordId, `🔁 A votação de promoção de **${v.username}** foi apagada e reenviada, com os votos que já tinha.`);
+  }
+}
+
+/**
+ * A cada minuto: fecha as votações vencidas e reenvia as abertas que tiveram a
+ * mensagem apagada.
+ */
 export async function runPromotionVoteExpiry(client) {
   const vencidas = await collections
     .promotionVotes()
     .find({ status: 'open', expiresAt: { $lte: new Date() } })
     .toArray();
   for (const v of vencidas) await finalizePromotionVote(client, v._id, 'deadline');
+  await ensureVoteMessages(client);
 }
