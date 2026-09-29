@@ -8,7 +8,6 @@ export default {
   data: new SlashCommandBuilder()
     .setName('season')
     .setDescription('Gerencia as temporadas (seasons) da guilda')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand((s) =>
       s
         .setName('start')

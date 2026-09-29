@@ -341,11 +341,19 @@ Após subir, configure ao menos os cargos de classificação e o canal de regist
 O cargo do bot precisa estar **acima** de todos os cargos que ele aplica
 (comunidade, membro, aliado, banido, Ocioso e os de ping).
 
-Os cargos de liderança (votam nas candidaturas e podem usar `/forcelink`):
+### Permissões
 
-```
-/config param key:voterRoles value:["<id_do_cargo>"]
-```
+Quem pode o quê é por **cargo**, fixo em `src/services/permissions.js`, em
+níveis que se incluem: **Fundador** → **Chefe (Staff)** → **Estrategista (Staff)**
+→ **Staff** (Capitão (Staff) e WnBR Guild Staff) → todos. O dono do servidor
+passa em tudo. Votam nas candidaturas só os **Chefes (Staff)**, e o **Ocioso**
+nunca vota.
+
+Os comandos só de staff são registrados **escondidos** (`/ban`, `/warn`,
+`/unlink`, `/forcelink`, `/reconciliar`, `/guilds`, `/config`, `/registro`,
+`/verificar`, `/fila`, `/loan`, `/aspects`, `/esmeraldas`): libere cada um por
+cargo em **Configurações do servidor → Integrações → Wynn Brasil**. Esconder só
+tira da lista — o bot confere o cargo em todo uso.
 
 ## Deploy no Easypanel (VPS própria)
 

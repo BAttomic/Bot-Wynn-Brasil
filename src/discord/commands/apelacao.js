@@ -10,6 +10,7 @@ import {
 } from 'discord.js';
 import { getConfig } from '../../config/guildConfig.js';
 import { audit } from '../../services/audit.js';
+import { LEVEL, hasLevel, deniedMessage } from '../../services/permissions.js';
 
 const BUTTON_NEW = 'appeal:new';
 const MODAL_ID = 'appeal:modal';
@@ -19,10 +20,7 @@ const SILENT = { allowedMentions: { parse: [] } };
 
 /** Mesmos cargos de liderança do /forcelink, ou Gerenciar Servidor. */
 async function isStaff(interaction) {
-  if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
-  const { params } = await getConfig(interaction.guildId);
-  const roles = Array.isArray(params?.voterRoles) ? params.voterRoles : [];
-  return roles.some((id) => interaction.member?.roles?.cache?.has(id));
+  return hasLevel(interaction.member, LEVEL.STAFF);
 }
 
 /** Nome de tópico do Discord: teto de 100 caracteres. */

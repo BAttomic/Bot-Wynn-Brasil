@@ -37,11 +37,13 @@ import {
   listBlocks,
   countBlocks,
 } from '../../services/eventBlacklist.js';
+import { LEVEL, hasLevel, deniedMessage } from '../../services/permissions.js';
 
 const unix = (d) => Math.floor(new Date(d).getTime() / 1000);
 
+/** Estrategista (Staff) ou acima (ver services/permissions.js). */
 function isStaff(interaction) {
-  return !!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
+  return hasLevel(interaction.member, LEVEL.ESTRATEGISTA);
 }
 
 /** Resolve o evento pedido; sem id, cai no ativo mais próximo do fim. */
@@ -228,7 +230,7 @@ async function listar(interaction) {
 }
 
 async function encerrar(interaction) {
-  if (!isStaff(interaction)) return interaction.editReply('Apenas staff pode encerrar eventos.');
+  if (!isStaff(interaction)) return interaction.editReply('Apenas Estrategista (Staff) ou acima pode encerrar eventos.');
 
   const event = await resolveEvent(interaction);
   if (!event) return interaction.editReply('Nenhum evento encontrado.');
@@ -251,7 +253,7 @@ async function encerrar(interaction) {
 }
 
 async function cancelar(interaction) {
-  if (!isStaff(interaction)) return interaction.editReply('Apenas staff pode cancelar eventos.');
+  if (!isStaff(interaction)) return interaction.editReply('Apenas Estrategista (Staff) ou acima pode cancelar eventos.');
 
   const event = await resolveEvent(interaction);
   if (!event) return interaction.editReply('Nenhum evento encontrado.');
@@ -263,7 +265,7 @@ async function cancelar(interaction) {
 }
 
 async function apurar(interaction) {
-  if (!isStaff(interaction)) return interaction.editReply('Apenas staff pode reapurar.');
+  if (!isStaff(interaction)) return interaction.editReply('Apenas Estrategista (Staff) ou acima pode reapurar.');
 
   const events = await activeEvents(interaction.guildId);
   if (!events.length) return interaction.editReply('Nenhum evento ativo.');
@@ -500,12 +502,12 @@ export default {
     await interaction.deferReply({ ephemeral: !publico });
 
     if (grupo === 'blacklist') {
-      if (!isStaff(interaction)) return interaction.editReply('Apenas staff pode mexer na lista negra.');
+      if (!isStaff(interaction)) return interaction.editReply('Apenas Estrategista (Staff) ou acima pode mexer na lista negra.');
       return blacklist(interaction, sub);
     }
 
     if (sub === 'criar') {
-      if (!isStaff(interaction)) return interaction.editReply('Apenas staff pode criar eventos.');
+      if (!isStaff(interaction)) return interaction.editReply('Apenas Estrategista (Staff) ou acima pode criar eventos.');
       return criar(interaction);
     }
     if (sub === 'ranking') return ranking(interaction);

@@ -7,25 +7,22 @@ import {
 import { sweepMembers } from '../../services/registration.js';
 import { getConfig } from '../../config/guildConfig.js';
 import { audit } from '../../services/audit.js';
+import { LEVEL, hasLevel, deniedMessage } from '../../services/permissions.js';
 
 const APPLY_SCOPES = new Set(['member', 'ally', 'neutral', 'banned', 'unregistered', 'all']);
 
 /**
- * Quem pode usar o painel: os mesmos cargos de liderança do /forcelink
- * (`params.voterRoles`), ou qualquer um com Gerenciar Servidor.
+ * Quem pode usar o painel: Chefe (Staff) ou acima (ver services/permissions.js).
  */
 async function isStaff(interaction) {
-  if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
-  const { params } = await getConfig(interaction.guildId);
-  const roles = Array.isArray(params?.voterRoles) ? params.voterRoles : [];
-  return roles.some((id) => interaction.member?.roles?.cache?.has(id));
+  return hasLevel(interaction.member, LEVEL.CHEFE);
 }
 
 export default {
   data: new SlashCommandBuilder()
     .setName('reconciliar')
     .setDescription('(Staff) Painel para conferir e corrigir os cargos e apelidos de todo o servidor')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDefaultMemberPermissions(0)
     .toJSON(),
 
   owns(interaction) {

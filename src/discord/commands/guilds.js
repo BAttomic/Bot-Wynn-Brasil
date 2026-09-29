@@ -6,6 +6,7 @@ import { getConfig } from '../../config/guildConfig.js';
 import { collections } from '../../db/mongo.js';
 import { brDateTime } from '../../util/format.js';
 import { audit } from '../../services/audit.js';
+import { LEVEL, hasLevel, deniedMessage } from '../../services/permissions.js';
 
 /**
  * Guildas que o bot rastreia, em dois papéis opostos.
@@ -27,10 +28,7 @@ import { audit } from '../../services/audit.js';
 const APLICAR_SCOPE = { [KIND_BLACKLIST]: 'banned', [KIND_ALLY]: 'ally' };
 
 async function isStaff(interaction) {
-  if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
-  const { params } = await getConfig(interaction.guildId);
-  const roles = Array.isArray(params?.voterRoles) ? params.voterRoles : [];
-  return roles.some((id) => interaction.member?.roles?.cache?.has(id));
+  return hasLevel(interaction.member, LEVEL.CHEFE);
 }
 
 const tagOption = (o) =>
@@ -49,7 +47,7 @@ export default {
   data: new SlashCommandBuilder()
     .setName('guilds')
     .setDescription('(Staff) Guildas rastreadas: black-list e aliadas')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDefaultMemberPermissions(0)
     .addSubcommandGroup((g) =>
       grupo(
         g,

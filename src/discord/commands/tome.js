@@ -13,6 +13,7 @@ import { recordDelivery } from '../../services/rewardLog.js';
 import { maxClassLevel, tomeMinLevel } from '../../services/eligibility.js';
 import { audit } from '../../services/audit.js';
 import { autoDismiss, DISMISS } from '../../util/ephemeral.js';
+import { LEVEL, hasLevel, deniedMessage } from '../../services/permissions.js';
 
 /**
  * Republica o painel de Tomes, que traz a fila e as últimas entregas.
@@ -70,9 +71,8 @@ function tomeSummary({ username, delivered, entitled, credits }) {
  * de usar `entregues`.
  */
 async function correctTomes(interaction) {
-  if (!(await isRewardManager(interaction))) {
-    return interaction.editReply('Apenas **Chief ou superior** pode corrigir Tomes.');
-  }
+  // Corrigir reescreve o contador: é de Chefe (Staff), não de quem só entrega.
+  if (!hasLevel(interaction.member, LEVEL.CHEFE)) return interaction.editReply(deniedMessage(LEVEL.CHEFE));
   const user = interaction.options.getUser('user', true);
   const ajustar = interaction.options.getInteger('ajustar');
   const corrigir = interaction.options.getInteger('entregues');
@@ -126,25 +126,17 @@ async function correctTomes(interaction) {
 /** @type {readonly string[]} */
 const BUTTON_ACTIONS = Object.freeze(['join', 'leave']);
 
-/**
- * Ranks DA GUILDA que podem entregar um Tome. "Chief ou superior".
- * @type {readonly string[]}
- */
-const MANAGER_GUILD_RANKS = Object.freeze(['chief', 'owner']);
-
 /** O menu de seleção do Discord aceita no máximo 25 opções. */
 const SELECT_LIMIT = 25;
 
 /**
  * Quem entrega recompensa: Tomes, aspects e esmeraldas (ver
- * discord/raidRewardCommand.js). Chief ou superior no jogo, ou Gerenciar Servidor.
+ * discord/raidRewardCommand.js). Qualquer cargo da Staff (ver services/permissions.js).
  * @param {import('discord.js').Interaction} interaction
  * @returns {Promise<boolean>}
  */
 export async function isRewardManager(interaction) {
-  if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
-  const linked = await collections.members().findOne({ discordId: interaction.user.id });
-  return MANAGER_GUILD_RANKS.includes(linked?.guildRank);
+  return hasLevel(interaction.member, LEVEL.STAFF);
 }
 
 /**
@@ -201,7 +193,7 @@ async function deliverTo(interaction, uuids) {
 /** Passo 1 do botão "Entregar Tome": escolher quem recebeu. */
 async function promptDelivery(interaction) {
   if (!(await isRewardManager(interaction))) {
-    return interaction.reply({ content: 'Apenas **Chief ou superior** pode entregar Tomes.', ephemeral: true });
+    return interaction.reply({ content: 'Apenas a **Staff** pode entregar Tomes.', ephemeral: true });
   }
 
   // Só quem cumpriu os dias de guilda E tem semanal de crédito pode receber —
@@ -432,9 +424,7 @@ export default {
     if (sub === 'corrigir') return correctTomes(interaction);
 
     // grant (staff)
-    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-      return interaction.editReply('Apenas staff pode conceder Tomes.');
-    }
+    if (!(await isRewardManager(interaction))) return interaction.editReply(deniedMessage(LEVEL.STAFF));
     const user = interaction.options.getUser('user');
     const { ready, minDays } = await queueView(interaction.guildId);
     let target;

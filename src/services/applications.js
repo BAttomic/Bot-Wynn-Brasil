@@ -3,11 +3,8 @@ import { ObjectId } from 'mongodb';
 import { collections } from '../db/mongo.js';
 import { getConfig } from '../config/guildConfig.js';
 import { audit } from './audit.js';
+import { canVote } from './permissions.js';
 import { log } from '../util/log.js';
-
-// Fallback: ranks DA GUILDA que podem votar, usado só se `voterRoles` não estiver
-// configurado. O caminho normal é por cargo do Discord.
-const FALLBACK_GUILD_RANKS = ['owner', 'chief'];
 
 // CICLO DE VIDA DE UMA CANDIDATURA
 //
@@ -174,53 +171,23 @@ export async function addToQueue({ uuid, username, discordId = null, decidedAt =
 }
 
 /**
- * Quem vota: os cargos que dão o direito, e o cargo que o tira.
- *
- * O OCIOSO tira. O cargo de liderança dele é resquício de quando estava na
- * guilda — rank é manual e ninguém o remove quando a pessoa sai —, e quem não
- * está na guilda não decide quem entra nela.
- *
- * Isso só faz diferença no caminho por CARGO. No fallback por rank do jogo o
- * ocioso já estava de fora sem ninguém fazer nada: `guildRank` vira null quando
- * a pessoa sai do roster, e null não está em FALLBACK_GUILD_RANKS.
+ * Quem vota: quem tem Chefe (Staff) — e nunca o Ocioso (ver canVote em
+ * services/permissions.js). O cargo de liderança do ocioso é resquício de
+ * quando estava na guilda, e quem não está na guilda não decide quem entra.
  */
-async function voterConfig(guildDiscordId) {
-  const cfg = await getConfig(guildDiscordId);
-  const raw = cfg.params?.voterRoles;
-  return {
-    ids: Array.isArray(raw) ? raw.filter(Boolean) : [],
-    idleId: cfg.roles?.idle ?? null,
-  };
-}
 
 // Quantos podem votar. Recebe a Guild do Discord porque contar cargo exige o
-// cache de membros — o rank do jogo vinha do banco, o cargo não.
+// cache de membros.
 export async function eligibleVoterCount(discordGuild) {
-  const { ids, idleId } = await voterConfig(discordGuild.id);
-  if (!ids.length) {
-    return collections.members().countDocuments({ guildRank: { $in: FALLBACK_GUILD_RANKS } });
-  }
   await discordGuild.members.fetch().catch(() => {});
-  return discordGuild.members.cache.filter(
-    (m) =>
-      !m.user.bot &&
-      ids.some((id) => m.roles.cache.has(id)) &&
-      // Fora da conta, e não só impedido de clicar: este número é o
-      // DENOMINADOR da votação. Com o ocioso somando aqui, a regra
-      // `effective` passaria a exigir um voto que nunca viria, e toda
-      // candidatura ficaria presa até estourar o prazo.
-      !(idleId && m.roles.cache.has(idleId)),
-  ).size;
+  // Fora da conta, e não só impedido de clicar: este número é o DENOMINADOR da
+  // votação. Com o ocioso somando aqui, a regra `effective` passaria a exigir um
+  // voto que nunca viria, e toda candidatura ficaria presa até estourar o prazo.
+  return discordGuild.members.cache.filter((m) => !m.user.bot && canVote(m)).size;
 }
 
 export async function isEligibleVoter(member) {
-  const { ids, idleId } = await voterConfig(member.guild.id);
-  // Antes de qualquer outra checagem: o ocioso não vota, tenha o cargo que tiver.
-  if (idleId && member.roles.cache.has(idleId)) return false;
-
-  if (ids.length) return ids.some((id) => member.roles.cache.has(id));
-  const m = await collections.members().findOne({ discordId: member.id });
-  return !!m && FALLBACK_GUILD_RANKS.includes(m.guildRank);
+  return canVote(member);
 }
 
 export function tally(votes = []) {

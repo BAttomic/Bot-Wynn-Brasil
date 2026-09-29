@@ -86,7 +86,7 @@ function loanPayload() {
 Reservamo-nos o direito de negar empréstimo a jogadores desconhecidos ou inativos. Não leve a mal se ninguém puder confiar em você ainda.
 
 ## Regras e Condições
-**Solicitação:** peça a qualquer **Chief** ou superior da guilda.
+**Solicitação:** peça a qualquer membro da <@&${STAFF_ROLE}>.
 
 **Responsabilidade:** roubar é passível de banimento no Wynncraft. Ao retirar um item, você se compromete a devolvê-lo no prazo ou pagar o valor acordado.
 

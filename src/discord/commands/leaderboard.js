@@ -98,9 +98,6 @@ export default {
 
     if (sub === 'atualizar') {
       await interaction.deferReply({ ephemeral: true });
-      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-        return interaction.editReply('Apenas staff pode forçar a apuração.');
-      }
       // Recalcula do livro-razão, remonta as tabelas e reedita o painel fixo.
       await reconcileGuildRaidLedger();
       const { members } = await recomputePoints();

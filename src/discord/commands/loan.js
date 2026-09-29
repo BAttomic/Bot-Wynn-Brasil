@@ -14,6 +14,7 @@ import { ObjectId } from 'mongodb';
 import { collections } from '../../db/mongo.js';
 import { getConfig } from '../../config/guildConfig.js';
 import { audit } from '../../services/audit.js';
+import { LEVEL, hasLevel, deniedMessage } from '../../services/permissions.js';
 
 /**
  * Ciclo de vida de um empréstimo:
@@ -31,12 +32,6 @@ export const ACTIVE_STATUSES = Object.freeze(['open', 'overdue']);
 /** Prazo padrão de todo empréstimo. Devolver antes é sempre permitido. */
 export const DEFAULT_LOAN_DAYS = 7;
 
-/**
- * Ranks DA GUILDA que podem abrir um empréstimo. "Chief ou superior" = chief e
- * owner, já que `guildRank` guarda o rank real do jogo.
- * @type {readonly string[]}
- */
-const MANAGER_GUILD_RANKS = Object.freeze(['chief', 'owner']);
 
 const STATUS_LABEL = {
   open: 'em aberto',
@@ -74,9 +69,7 @@ function toObjectId(raw) {
  * @returns {Promise<boolean>}
  */
 async function isLoanManager(interaction) {
-  if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
-  const linked = await collections.members().findOne({ discordId: interaction.user.id });
-  return MANAGER_GUILD_RANKS.includes(linked?.guildRank);
+  return hasLevel(interaction.member, LEVEL.STAFF);
 }
 
 const PLACEHOLDER_ITEMS = 'A definir';
@@ -162,7 +155,7 @@ function findLoan(id) {
 async function promptBorrower(interaction) {
   if (!(await isLoanManager(interaction))) {
     return interaction.reply({
-      content: 'Apenas **Chief ou superior** pode abrir um empréstimo.',
+      content: 'Apenas a **Staff** pode abrir um empréstimo.',
       ephemeral: true,
     });
   }
@@ -247,7 +240,7 @@ async function openLoanThread(interaction) {
 /** Só a staff mexe no acordo; o devedor só confirma. */
 async function requireManager(interaction) {
   if (await isLoanManager(interaction)) return true;
-  await interaction.reply({ content: 'Apenas **Chief ou superior** pode fazer isso.', ephemeral: true });
+  await interaction.reply({ content: 'Apenas a **Staff** pode fazer isso.', ephemeral: true });
   return false;
 }
 
@@ -391,7 +384,7 @@ export default {
   data: new SlashCommandBuilder()
     .setName('loan')
     .setDescription('Empréstimos da guilda (esmeraldas/itens)')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDefaultMemberPermissions(0)
     .addSubcommand((s) =>
       s
         .setName('new')

@@ -352,7 +352,7 @@ export async function handleEventAdmin(interaction, { isStaff }) {
 
   // O modal é o único que não pode ser deferido antes: showModal É a resposta.
   if (acao === 'bladd') {
-    if (!isStaff) return interaction.reply({ content: 'Apenas staff pode barrar.', ephemeral: true });
+    if (!isStaff) return interaction.reply({ content: 'Apenas Estrategista (Staff) ou acima pode barrar.', ephemeral: true });
     const [filtro = 'todos', eventId = ''] = resto;
     return interaction.showModal(
       new ModalBuilder()
@@ -379,7 +379,7 @@ export async function handleEventAdmin(interaction, { isStaff }) {
   }
 
   if (acao === 'blsave') {
-    if (!isStaff) return interaction.reply({ content: 'Apenas staff pode barrar.', ephemeral: true });
+    if (!isStaff) return interaction.reply({ content: 'Apenas Estrategista (Staff) ou acima pode barrar.', ephemeral: true });
     await interaction.deferUpdate();
     const [filtro = 'todos', eventId = ''] = resto;
     const termo = interaction.fields.getTextInputValue('alvo');
@@ -420,7 +420,7 @@ export async function handleEventAdmin(interaction, { isStaff }) {
   }
 
   if (acao === 'blrm') {
-    if (!isStaff) return interaction.followUp({ content: 'Apenas staff pode mexer na lista negra.', ephemeral: true });
+    if (!isStaff) return interaction.followUp({ content: 'Apenas Estrategista (Staff) ou acima pode mexer na lista negra.', ephemeral: true });
     const uuid = interaction.values?.[0];
     const saiu = await unblockMember({ uuid });
     if (saiu) {
@@ -430,7 +430,7 @@ export async function handleEventAdmin(interaction, { isStaff }) {
   }
 
   // Daqui para baixo é ação sobre um evento, e toda uma exige staff.
-  if (!isStaff) return interaction.followUp({ content: 'Apenas staff pode agir sobre eventos.', ephemeral: true });
+  if (!isStaff) return interaction.followUp({ content: 'Apenas Estrategista (Staff) ou acima pode agir sobre eventos.', ephemeral: true });
 
   const eventId = resto[0];
   const event = await getEvent(eventId);

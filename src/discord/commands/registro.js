@@ -12,7 +12,7 @@ export default {
   data: new SlashCommandBuilder()
     .setName('registro')
     .setDescription('Gestão do canal de registro')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDefaultMemberPermissions(0)
     .addSubcommand((s) =>
       s.setName('publicar').setDescription('Publica ou atualiza a mensagem do painel de registro'),
     )

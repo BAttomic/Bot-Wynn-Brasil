@@ -11,11 +11,13 @@ import {
   rerollGiveaway,
 } from '../../services/giveaways.js';
 import { audit } from '../../services/audit.js';
+import { LEVEL, hasLevel, deniedMessage } from '../../services/permissions.js';
 
 const unix = (d) => Math.floor(new Date(d).getTime() / 1000);
 
+/** Estrategista (Staff) ou acima (ver services/permissions.js). */
 function isStaff(interaction) {
-  return !!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
+  return hasLevel(interaction.member, LEVEL.ESTRATEGISTA);
 }
 
 async function criar(interaction) {
@@ -59,7 +61,7 @@ async function criar(interaction) {
 }
 
 async function encerrar(interaction) {
-  if (!isStaff(interaction)) return interaction.editReply('Apenas staff pode encerrar sorteios.');
+  if (!isStaff(interaction)) return interaction.editReply('Apenas Estrategista (Staff) ou acima pode encerrar sorteios.');
 
   const id = interaction.options.getString('id', true).trim();
   const gw = await getGiveaway(id);
@@ -76,7 +78,7 @@ async function encerrar(interaction) {
 }
 
 async function reroll(interaction) {
-  if (!isStaff(interaction)) return interaction.editReply('Apenas staff pode re-sortear.');
+  if (!isStaff(interaction)) return interaction.editReply('Apenas Estrategista (Staff) ou acima pode re-sortear.');
 
   const id = interaction.options.getString('id', true).trim();
   const gw = await getGiveaway(id);
@@ -184,7 +186,7 @@ export default {
     await interaction.deferReply({ ephemeral: sub !== 'listar' });
 
     if (sub === 'criar') {
-      if (!isStaff(interaction)) return interaction.editReply('Apenas staff pode criar sorteios.');
+      if (!isStaff(interaction)) return interaction.editReply('Apenas Estrategista (Staff) ou acima pode criar sorteios.');
       return criar(interaction);
     }
     if (sub === 'encerrar') return encerrar(interaction);

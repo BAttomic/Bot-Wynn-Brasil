@@ -25,6 +25,7 @@ import { minGuildDays } from '../services/eligibility.js';
 import { audit } from '../services/audit.js';
 import { autoDismiss, DISMISS } from '../util/ephemeral.js';
 import { isRewardManager } from './commands/tome.js';
+import { LEVEL, hasLevel, deniedMessage } from '../services/permissions.js';
 
 // `/aspects` e `/esmeraldas` são o MESMO comando para duas recompensas de guild
 // raid: a conta, a correção e a entrega só mudam de unidade (1 aspect, ou 1
@@ -40,12 +41,9 @@ const MODAL_FIELD_LIMIT = 5;
 
 const fmt = (n) => n.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
 
-/** Mesmos cargos de liderança do /forcelink, ou Gerenciar Servidor. */
+/** Qualquer cargo da Staff (ver services/permissions.js). */
 async function isStaff(interaction) {
-  if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
-  const { params } = await getConfig(interaction.guildId);
-  const roles = Array.isArray(params?.voterRoles) ? params.voterRoles : [];
-  return roles.some((id) => interaction.member?.roles?.cache?.has(id));
+  return hasLevel(interaction.member, LEVEL.STAFF);
 }
 
 /**
@@ -89,7 +87,7 @@ export function raidRewardCommand(kind, name, description) {
    */
   async function promptDelivery(interaction) {
     if (!(await isRewardManager(interaction))) {
-      return interaction.reply({ content: `Apenas **Chief ou superior** pode entregar ${k.title.toLowerCase()}.`, ephemeral: true });
+      return interaction.reply({ content: `Apenas a **Staff** pode entregar ${k.title.toLowerCase()}.`, ephemeral: true });
     }
     const pending = await pendingRewards(interaction.guildId, kind);
     if (!pending.length) {
@@ -327,7 +325,7 @@ export function raidRewardCommand(kind, name, description) {
     data: new SlashCommandBuilder()
       .setName(name)
       .setDescription(description)
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .setDefaultMemberPermissions(0)
       .addUserOption((o) => o.setName('user').setDescription(`Ver o saldo de um jogador específico`).setRequired(false))
       // Correção de entrega digitada errada. Vivem como OPÇÕES, e não como
       // subcomando, para o comando puro continuar listando todo mundo.

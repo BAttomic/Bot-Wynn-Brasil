@@ -11,6 +11,7 @@ import {
   voteEmbed,
   finalizeApplication,
 } from '../../services/applications.js';
+import { LEVEL, requireLevel } from '../../services/permissions.js';
 
 async function submitApplication(interaction) {
   const member = await collections.members().findOne({ discordId: interaction.user.id });
@@ -129,6 +130,9 @@ async function handleVote(interaction, appId, choice) {
 }
 
 async function handleInvited(interaction, appId) {
+  // Marcar convite é trabalho de recrutamento: sem isto, qualquer um que visse
+  // o card podia dá-lo como convidado e tirar a pessoa do radar da staff.
+  if (!(await requireLevel(interaction, LEVEL.STAFF))) return;
   const apps = collections.applications();
   const _id = new ObjectId(appId);
   const app = await apps.findOne({ _id });

@@ -1,24 +1,21 @@
 import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
 import { getConfig } from '../../config/guildConfig.js';
 import { QUEUE_PREFIX, buildQueuePanel, handleQueuePanel } from '../../services/recruitQueuePanel.js';
+import { LEVEL, hasLevel, deniedMessage } from '../../services/permissions.js';
 
 /**
- * Quem pode mexer na fila: os mesmos cargos de liderança que votam nas
- * candidaturas (`params.voterRoles`), ou qualquer um com Gerenciar Servidor.
+ * Quem pode mexer na fila: qualquer cargo da Staff (ver services/permissions.js).
  * Mesma regra do /reconciliar — quem decide entrada é a mesma gente.
  */
 async function isStaff(interaction) {
-  if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
-  const { params } = await getConfig(interaction.guildId);
-  const roles = Array.isArray(params?.voterRoles) ? params.voterRoles : [];
-  return roles.some((id) => interaction.member?.roles?.cache?.has(id));
+  return hasLevel(interaction.member, LEVEL.STAFF);
 }
 
 export default {
   data: new SlashCommandBuilder()
     .setName('fila')
     .setDescription('(Staff) Fila de entrada: quem foi aprovado e ainda não entrou na guilda')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDefaultMemberPermissions(0)
     .toJSON(),
 
   owns(interaction) {

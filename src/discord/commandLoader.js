@@ -1,6 +1,7 @@
 import { REST, Routes } from 'discord.js';
 import { required } from '../config/env.js';
 import { reportError } from '../services/errorReport.js';
+import { commandLevel, requireLevel } from '../services/permissions.js';
 import { log } from '../util/log.js';
 
 import link from './commands/link.js';
@@ -123,6 +124,9 @@ export function attachHandlers(client, ctx) {
 
     const cmd = byName.get(interaction.commandName);
     if (!cmd) return;
+    // Cargo antes de tudo. Esconder o comando no Discord (Integrações) só tira
+    // da lista: quem conhece o nome ainda consegue chamar, e é aqui que barra.
+    if (!(await requireLevel(interaction, commandLevel(interaction)))) return;
     try {
       await cmd.execute(interaction, ctx);
     } catch (e) {

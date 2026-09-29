@@ -64,9 +64,6 @@ export default {
     await interaction.deferReply({ ephemeral: sub !== 'show' && sub !== 'leaderboard' });
 
     if (sub === 'apurar') {
-      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-        return interaction.editReply('Apenas staff pode apurar.');
-      }
       // Snapshot + eventos + recompute + tabelas, exatamente o que o job diário faz.
       await runProgressSnapshot(interaction.client);
       await ensureLeaderboardPanel(interaction.client, interaction.guildId);
@@ -78,9 +75,6 @@ export default {
     }
 
     if (sub === 'recalcular') {
-      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-        return interaction.editReply('Apenas staff pode recalcular.');
-      }
       const { members } = await recomputePoints();
       await rebuildLeaderboards();
       await ensureLeaderboardPanel(interaction.client, interaction.guildId);
@@ -89,9 +83,6 @@ export default {
     }
 
     if (sub === 'add') {
-      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-        return interaction.editReply('Apenas staff pode conceder pontos.');
-      }
       const user = interaction.options.getUser('user', true);
       const amount = interaction.options.getInteger('amount', true);
       const reason = interaction.options.getString('reason', true);

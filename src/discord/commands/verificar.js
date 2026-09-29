@@ -5,7 +5,8 @@ import { BUTTON_PREFIX, handleInactivityButton } from '../../services/inactivity
 export default {
   data: new SlashCommandBuilder()
     .setName('verificar')
-    .setDescription('Relatório de verificação: quem está na guilda vs. vínculo no Discord')
+    .setDescription('(Staff) Relatório de verificação: quem está na guilda vs. vínculo no Discord')
+    .setDefaultMemberPermissions(0)
     .toJSON(),
 
   // Os botões do check-in de inatividade chegam pela DM, sem comando por trás. O
