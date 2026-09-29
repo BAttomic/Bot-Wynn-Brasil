@@ -5,6 +5,7 @@ import { registerCommands, attachHandlers } from './discord/commandLoader.js';
 import { everySeconds, everyMinutes, dailyAt, clearJobs } from './jobs/scheduler.js';
 import { runRoleSync } from './jobs/roleSync.js';
 import { runApplicationExpiry } from './jobs/applicationExpiry.js';
+import { runPromotionVoteExpiry } from './services/promotions.js';
 import { runProgressSnapshot } from './jobs/progressSnapshot.js';
 import { runLoanReminders } from './jobs/loanReminders.js';
 import { runLoanCleanup } from './jobs/loanCleanup.js';
@@ -182,6 +183,7 @@ async function main() {
     everyMinutes(360, 'modpackUpdate', () => runModpackUpdate(client, guildId), { runOnStart: true });
     everyMinutes(minutes, 'roleSync', () => runRoleSync(client), { runOnStart: true });
     everyMinutes(1, 'applicationExpiry', () => runApplicationExpiry(client));
+    everyMinutes(1, 'promotionVoteExpiry', () => runPromotionVoteExpiry(client));
     everyMinutes(1, 'boothReminders', () => runBoothReminders(client));
     // O prazo de um sorteio é curto e público — precisa fechar no minuto certo.
     everyMinutes(1, 'giveawayDraw', () => runGiveawayDraw(client));

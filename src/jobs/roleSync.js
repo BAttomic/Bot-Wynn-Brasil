@@ -25,6 +25,7 @@ import {
   exemptInIndex,
   BAN_REASON_BLACKLIST_GUILD,
 } from '../services/bans.js';
+import { syncTrailRoles } from '../services/promotions.js';
 import { optional } from '../config/env.js';
 import { log } from '../util/log.js';
 
@@ -168,9 +169,10 @@ async function refreshGuildTags(candidatos, freshPrefixes) {
  * Sincroniza a classificação de cada vínculo (membro / neutro / banido), o
  * apelido e o cargo mais alto já alcançado.
  *
- * Os cargos de RANK (Líder, Chefe, …) NÃO são automáticos: são gestão manual
- * da staff. O rank só é gravado no banco, para /verificar e para o peakRank —
- * e, desde o cargo de Ocioso, para marcar quem tem rank sem estar na guilda.
+ * Os cargos de RANK não copiam o rank do jogo. Capitão e Estrategista vêm das
+ * trilhas (guerras e pontos, em services/promotions.js), e o Chefe é manual. O
+ * rank do jogo só é gravado no banco, para /verificar e para o peakRank — e,
+ * desde o cargo de Ocioso, para marcar quem tem rank sem estar na guilda.
  *
  * Rodar isto de novo é o que pega quem entrou na guilda da black-list DEPOIS de
  * já ter se registrado.
@@ -273,6 +275,8 @@ export async function runRoleSync(client) {
   // Quem o roster confirma na guilda AGORA, por Discord. Alimenta o cargo de
   // Ocioso lá embaixo, e sai de graça deste laço que já roda de qualquer jeito.
   const naGuilda = new Set();
+  // Quem está na guilda E no Discord: são esses que as trilhas de cargo avaliam.
+  const naTrilha = [];
   for (const m of linked) {
     const rank = rankByUuid.get(m.uuid) || null;
     const inGuild = !!rank;
@@ -373,6 +377,7 @@ export async function runRoleSync(client) {
     if (!member) continue;
 
     await applyClassificationRoles(member, cfg, kind, allyRoleId);
+    if (kind === 'member') naTrilha.push({ member, uuid: m.uuid, nome: nomeAtual });
     // Pega quem trocou de nick no Minecraft depois de registrado, e mantém a TAG
     // da guilda na frente do apelido. A TAG vem da guilda REAL, não do `kind`:
     // quem está na guilda proibida carrega a TAG dela mesmo isento.
@@ -382,6 +387,9 @@ export async function runRoleSync(client) {
   // Só adiciona, então cache incompleto não faz estrago: quem não veio fica para
   // o próximo ciclo.
   await syncWarTeamRole(client, guild);
+  // Guerras e pontos viram cargo no Discord, com anúncio. O rank no jogo fica
+  // com a staff, e o /verificar aponta quem falta promover lá.
+  await syncTrailRoles(client, guild, naTrilha);
 
   log.info(
     `Role sync concluído (${linked.length} vínculos, ${res.members.length} membros na guilda, ` +

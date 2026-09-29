@@ -2,6 +2,7 @@ import { getConfig } from '../config/guildConfig.js';
 import { ensurePanel } from './panels.js';
 import { xpRate } from './points.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
+import { TRILHAS } from './promotions.js';
 
 /**
  * Diretrizes, uma por categoria do servidor, em HERANÇA:
@@ -22,15 +23,12 @@ import { logoAttachment, brandWithLogo } from '../util/assets.js';
  * da War Team. Cada painel diz como chegar ao próximo passo, nunca ao atual.
  *
  * Os números saem dos parâmetros do bot, para a regra escrita não divergir da
- * aplicada. Os limiares das trilhas (guerras e pontos) ainda não são parâmetro:
- * vivem em TRILHAS, logo abaixo.
+ * aplicada. Os limiares das trilhas (guerras e pontos) vêm de TRILHAS, em
+ * services/promotions.js — o mesmo número que o bot usa para promover.
  */
 
 const SILENT = { allowedMentions: { parse: [] } };
 const fmt = (n) => Number(n).toLocaleString('pt-BR');
-
-/** Limiares das trilhas War Team e Guild Staff. */
-const TRILHAS = Object.freeze({ capitaoWar: 50, estrategistaWar: 100, capitaoStaff: 2500, estrategistaStaff: 5000 });
 
 const ROLE = Object.freeze({
   allies: '1554204990451753122',

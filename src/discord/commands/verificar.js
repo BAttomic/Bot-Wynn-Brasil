@@ -22,7 +22,7 @@ export default {
 
   async execute(interaction) {
     await interaction.deferReply();
-    const data = await computeVerification();
+    const data = await computeVerification(interaction.client);
     if (!data) return interaction.editReply('Não consegui obter os dados da guilda.');
     return interaction.editReply({ embeds: [verificationEmbed(data)] });
   },

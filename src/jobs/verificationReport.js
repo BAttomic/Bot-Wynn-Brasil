@@ -11,7 +11,7 @@ export async function runVerificationReport(client) {
   if (!channelId) return;
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel) return;
-  const data = await computeVerification();
+  const data = await computeVerification(client);
   if (!data) return;
   await channel.send({ embeds: [verificationEmbed(data)] });
 }

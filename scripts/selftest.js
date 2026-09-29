@@ -293,6 +293,28 @@ async function main() {
   check('capitão > nenhum cargo', gd.isHigherRank('captain', undefined), true);
   check('capitão não > capitão', gd.isHigherRank('captain', 'captain'), false);
 
+  section('7b. Trilhas: um cargo por trilha, só sobe, e o rank do jogo que ele pede');
+  const { TRACKS, planTrack, expectedGameRank } = await import('../src/services/promotions.js');
+  const cargo = (t, k) => TRACKS[t].steps.find((s) => s.key === k).role;
+  const com = (...ids) => new Set(ids);
+  const war = TRACKS.war;
+  const staff = TRACKS.staff;
+  check('49 guerras: nada', planTrack(war, com(), 49), { give: null, remove: [], team: false, vote: null, top: null });
+  check('50 guerras: Capitão (War) + War Team', planTrack(war, com(), 50), { give: 'capitaoWar', remove: [], team: true, vote: null, top: 'capitaoWar' });
+  check('100 guerras com Capitão: troca por Estrategista', planTrack(war, com(cargo('war', 'capitaoWar'), war.team), 120), { give: 'estrategistaWar', remove: ['capitaoWar'], team: false, vote: null, top: 'estrategistaWar' });
+  check('150 direto do zero: Estrategista, não Capitão', planTrack(war, com(), 150).give, 'estrategistaWar');
+  check('Chefe (War) à mão não é tocado', planTrack(war, com(cargo('war', 'chefeWar'), war.team), 300), { give: null, remove: [], team: false, vote: null, top: 'chefeWar' });
+  check('dois cargos na trilha: sai o de baixo', planTrack(war, com(cargo('war', 'chefeWar'), cargo('war', 'capitaoWar'), war.team), 10).remove, ['capitaoWar']);
+  check('nunca rebaixa: Estrategista à mão com 0 guerras fica', planTrack(war, com(cargo('war', 'estrategistaWar'), war.team), 0).remove, []);
+  check('2.500 pontos: Capitão (Staff) + Guild Staff', planTrack(staff, com(), 2500), { give: 'capitaoStaff', remove: [], team: true, vote: null, top: 'capitaoStaff' });
+  check('5.000 pontos do zero: Capitão e já abre a votação', planTrack(staff, com(), 6000), { give: 'capitaoStaff', remove: [], team: true, vote: 'estrategistaStaff', top: 'capitaoStaff' });
+  check('5.000 com Capitão: só a votação', planTrack(staff, com(cargo('staff', 'capitaoStaff'), staff.team), 5000).vote, 'estrategistaStaff');
+  check('Estrategista (Staff) nunca vem sozinho', planTrack(staff, com(cargo('staff', 'capitaoStaff'), staff.team), 99999).give, null);
+  check('quem já é Estrategista (Staff) não tem votação', planTrack(staff, com(cargo('staff', 'estrategistaStaff'), staff.team), 9000).vote, null);
+  check('trilhas independentes: rank do jogo é o maior', expectedGameRank(com(cargo('war', 'estrategistaWar'), cargo('staff', 'capitaoStaff'))), 'strategist');
+  check('Chefe pede Chefe no jogo', expectedGameRank(com(cargo('staff', 'chefeStaff'))), 'chief');
+  check('sem cargo de trilha: nada', expectedGameRank(com(war.team, staff.team)), null);
+
   // -------------------------------------------------------- Livro-razão
   section('8. Pontos derivam do histórico (banco descartável)');
   const { connectMongo, closeMongo, collections, getDb } = await import('../src/db/mongo.js');

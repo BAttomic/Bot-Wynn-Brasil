@@ -1,10 +1,11 @@
 import { collections } from '../db/mongo.js';
-import { fetchGuildMembers, isHigherRank } from './guildData.js';
+import { fetchGuildMembers, isHigherRank, rankWeight, RANK_LABEL } from './guildData.js';
 import { membersLimit } from '../util/format.js';
 import { inactivityStatus, withObservedActivity } from './inactivityCheck.js';
 import { getConfig } from '../config/guildConfig.js';
 import { optional } from '../config/env.js';
 import { queueApplications } from './applications.js';
+import { expectedGameRank } from './promotions.js';
 
 // Cruza os membros da guilda (API) com os vínculos no banco (o "registro").
 //
@@ -12,15 +13,27 @@ import { queueApplications } from './applications.js';
 // Recruiter (rank acima de Recruit) ou é Recruit. A regra: quem está no Discord
 // pode ser Recruiter; quem não está deve ser Recruit.
 //
+// Depois vem quem falta PROMOVER NO JOGO: o cargo de trilha no Discord (dado
+// pelo bot por guerras e pontos, ou o Chefe à mão) pede um rank acima do que a
+// pessoa tem lá. O bot não mexe no jogo; a staff promove com esta lista.
+//
 // O relatório fecha com a lista de kick por inatividade: quem estourou a margem
 // E já teve a chance de responder ao check-in por DM (ver inactivityCheck.js).
-export async function computeVerification() {
+//
+// @param {import('discord.js').Client} [client]  sem ele, a lista de promoção fica vazia
+export async function computeVerification(client) {
   const prefix = optional('WYNN_GUILD_PREFIX');
   if (!prefix) return null;
   const res = await fetchGuildMembers(prefix);
   if (!res) return null;
 
   const linkByUuid = new Map((await collections.members().find({}).toArray()).map((m) => [m.uuid, m]));
+  const guildDiscordId = optional('DISCORD_GUILD_ID');
+
+  // Os cargos vêm do cache de membros. O fetch o completa; se falhar, vale o
+  // que o cache já tem (o roleSync o enche a cada ciclo).
+  const discordGuild = client && guildDiscordId ? await client.guilds.fetch(guildDiscordId).catch(() => null) : null;
+  if (discordGuild) await discordGuild.members.fetch().catch(() => {});
 
   // Nick entre crases: nome com `_` não vira itálico/negrito no Discord.
   const nick = (u) => `\`${u}\``;
@@ -29,6 +42,7 @@ export async function computeVerification() {
   const missingRecruiter = []; // registro + na guilda + ainda Recruit → falta promover
   const shouldBeRecruit = []; // sem registro + na guilda + Recruiter → deveria ser Recruit
   const recruitNoLink = []; // sem registro + na guilda + Recruit → certo
+  const promoteInGame = []; // cargo de trilha no Discord acima do rank no jogo
 
   for (const gm of res.members) {
     const link = linkByUuid.get(gm.uuid);
@@ -38,7 +52,15 @@ export async function computeVerification() {
 
     if (registered) (isRecruiter ? verified : missingRecruiter).push(nick(gm.username));
     else (isRecruiter ? shouldBeRecruit : recruitNoLink).push(nick(gm.username));
+
+    const member = link?.discordId ? discordGuild?.members.cache.get(link.discordId) : null;
+    const esperado = member ? expectedGameRank(member.roles.cache) : null;
+    if (esperado && isHigherRank(esperado, gm.rank)) {
+      promoteInGame.push({ username: gm.username, from: gm.rank, to: esperado });
+    }
   }
+  // Rank mais alto primeiro: é a promoção que mais pesa, e a staff a faz antes.
+  promoteInGame.sort((a, b) => rankWeight(b.to) - rankWeight(a.to) || a.username.localeCompare(b.username));
 
   // FILA DE ENTRADA: aprovados na votação que ainda não entraram no jogo, em
   // ordem de aprovação — que é a ordem em que a staff convida.
@@ -59,7 +81,6 @@ export async function computeVerification() {
   const limite = membersLimit(res.guild?.level);
   const slots = Math.max(0, limite - res.members.length);
 
-  const guildDiscordId = optional('DISCORD_GUILD_ID');
   let inactivity = { kick: [], waiting: [] };
   let recrutamento = null;
   if (guildDiscordId) {
@@ -82,6 +103,7 @@ export async function computeVerification() {
     missingRecruiter,
     shouldBeRecruit,
     recruitNoLink,
+    promoteInGame,
     inactivity,
     recrutamento,
     total: res.members.length,
@@ -148,6 +170,31 @@ function reasonSummary(kick) {
   const contagem = new Map();
   for (const k of kick) contagem.set(k.reason, (contagem.get(k.reason) ?? 0) + 1);
   return [...contagem].map(([motivo, n]) => `${n} ${motivo}`).join(' · ');
+}
+
+/**
+ * Quem subir no jogo, uma linha por pessoa: `Nick` Recrutador → **Capitão**.
+ * Corta pelo fim se não couber no campo, avisando quantos ficaram de fora.
+ * @param {Array<{username: string, from: string, to: string}>} lista
+ */
+function promoteField(lista) {
+  const desc = '> O cargo no Discord pede um rank acima do que a pessoa tem no jogo.\n';
+  if (!lista.length) {
+    return { name: '🎖️ Promover no jogo (0)', value: '> Ninguém para promover no jogo agora. 🎉' };
+  }
+  const linhas = [];
+  let len = desc.length;
+  for (const p of lista) {
+    const linha = `\`${p.username}\` ${RANK_LABEL[p.from] ?? p.from} → **${RANK_LABEL[p.to] ?? p.to}**`;
+    if (len + linha.length + 1 + RESTO_RESERVA > FIELD_LIMIT) break;
+    linhas.push(linha);
+    len += linha.length + 1;
+  }
+  const resto = lista.length - linhas.length;
+  return {
+    name: `🎖️ Promover no jogo (${lista.length})`,
+    value: `${desc}${linhas.join('\n')}${resto > 0 ? `\n-# … e mais ${resto}.` : ''}`,
+  };
 }
 
 /** @param {{kick: Array<object>, waiting: Array<object>}} inactivity */
@@ -238,6 +285,9 @@ export function verificationEmbed(data) {
       field('⬆️ No Discord', 'Na guilda e com registro — falta virar Recruiter.', data.missingRecruiter),
       field('⬇️ Na guilda', 'Recruiter sem registro — deveria ser Recruit.', data.shouldBeRecruit),
       field('🤙 Sem vínculo no Discord', 'Recruit sem registro — tá certo. Vale convidar para o Discord: com registro, vira Recruiter.', data.recruitNoLink),
+      // Depois das 4 listagens: o fitEmbed só encurta as 4 primeiras, e esta é
+      // uma lista que a staff executa, como a de kick.
+      promoteField(data.promoteInGame ?? []),
       ...inactivityFields(data.inactivity ?? { kick: [], waiting: [] }),
     ],
     footer: { text: 'Use /reconciliar para auditar cargos.' },
