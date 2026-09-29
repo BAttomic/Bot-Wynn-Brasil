@@ -13,6 +13,10 @@ import { logoAttachment, brandWithLogo } from '../util/assets.js';
  * repete a convivência da comunidade, a Staff não repete os pontos da guilda.
  * War Team e Guild Staff são ramos paralelos: um não herda do outro.
  *
+ * Como ENTRAR num nível fica no painel de ANTES dele: quem quer entrar na guilda
+ * ainda não vê as diretrizes da guilda, e quem quer entrar na War Team não vê as
+ * da War Team. Cada painel diz como chegar ao próximo passo, nunca ao atual.
+ *
  * Os números saem dos parâmetros do bot, para a regra escrita não divergir da
  * aplicada. Os limiares das trilhas (guerras e pontos) ainda não são parâmetro:
  * vivem em TRILHAS, logo abaixo.
@@ -30,6 +34,20 @@ const ROLE = Object.freeze({
   member: '1262796467488165908',
   warTeam: '1554163813387993208',
   staff: '1262574400587169863',
+  capitaoWar: '1554261272755699722',
+  estrategistaWar: '1554224233767239750',
+  chefeWar: '1268208318439096461',
+  capitaoStaff: '1268208319865159773',
+  estrategistaStaff: '1268208318946742312',
+  chefeStaff: '1554224233721372692',
+  mainDps: '1333249418945892422',
+  mainHealer: '1333249422137495664',
+  mainTank: '1333249407193448548',
+  mainSolo: '1332557073656975370',
+  ocioso: '1531488822708273152',
+  banido: '1340443882101538816',
+  fundador: '1268208310423781426',
+  bot: '1554204860138917918',
 });
 
 const CH = Object.freeze({
@@ -82,7 +100,7 @@ function embed(title, color, description) {
 
 function communityPayload() {
   return embed('📃 Diretrizes da Comunidade — Wynncraft Brasil', 0x5865f2,
-`Valem para todo mundo no servidor: ${r('community')} e ${r('allies')}. A guilda, a War Team e a Staff seguem estas e acrescentam as suas.
+`Valem para todo mundo no servidor: ${r('community')} e ${r('allies')}. ${r('member')}, ${r('warTeam')} e ${r('staff')} seguem estas e acrescentam as suas.
 
 ### 📋 Registro
 > Vincule sua conta do Wynncraft em ${c('registro')}: o bot confere na API oficial e te dá o cargo certo.
@@ -95,10 +113,13 @@ function communityPayload() {
 > Nada de conteúdo adulto, violento ou ilegal.
 > Golpe e calote são proibidos, dentro e fora do jogo. As regras oficiais do Wynncraft também valem aqui.
 
+### 🏰 Entrar na Wynn Brasil
+> Candidate-se em ${c('recrutamento')}. A candidatura é votada pelos ${r('chefeStaff')}; aprovado, você recebe o convite no jogo, e ao entrar o ${r('member')} e a TAG **[WnBR]** chegam sozinhos.
+
 ### 🔨 Advertências e banimentos
-> A moderação é feita pela staff, pelo bot, e tudo fica registrado. Advertência chega por DM.
+> A moderação é feita pela ${r('staff')}, pelo bot, e tudo fica registrado. Advertência chega por DM.
 > O banimento vale para a pessoa: todas as contas do jogo e todos os Discords dela.
-> Quem é banido passa a ver só ${c('banimentos')}, onde um tópico privado com a staff reúne a evidência — e é ali que se contesta.
+> Quem recebe ${r('banido')} passa a ver só ${c('banimentos')}, onde um tópico privado com a staff reúne a evidência — e é ali que se contesta.
 
 ### 📌 Canais
 > ${c('anunciosComunidade')} — novidades do servidor
@@ -106,11 +127,10 @@ function communityPayload() {
 > ${c('conversas')} — papo em português
 > ${c('englishGeneral')} — chat in English
 > ${c('forum')} — dúvidas, guias e builds
-> ${c('market')} — compra, venda e troca; a negociação é por sua conta, a staff não intermedeia
+> ${c('market')} — compra, venda e troca; a negociação é por sua conta, a ${r('staff')} não intermedeia
 > ${c('exibicao')} — mostre suas builds e drops
 > ${c('memes')} — memes
 > ${c('pings')} — reaja para escolher seus pings; cada ping é só para o assunto dele
-> ${c('recrutamento')} — quer entrar na Wynn Brasil? Candidate-se aqui e acompanhe a fila de entrada
 > ${c('gAllies')} — aliados (${r('allies')}) e a guilda conversam aqui
 > ${c('vozCallEterna')} e ${c('vozBatePapo')} — voz aberta`);
 }
@@ -123,29 +143,28 @@ function guildPayload(p) {
   return embed('📃 Diretrizes da Guilda — Wynn Brasil [WnBR]', 0x2ecc71,
 `Valem para ${r('member')}, junto com as ${c('diretrizes')} da comunidade.
 
-### 🎯 Entrada
-> A candidatura é votada pelos Chefes (Staff). Aprovado, você recebe o convite no jogo; ao entrar, o cargo e a TAG **[WnBR]** chegam sozinhos.
-
 ### ⭐ Contribuição
 > Tudo o que você faz pela guilda vira ponto:
 > 📈 **${fmt(xp.pts)}** a cada **${fmt(xp.xp)}** de Guild XP
 > 🛡️ **${fmt(w.guildRaid)}** por guild raid
 > ⚔️ **${fmt(w.war)}** por guerra, multiplicados pelo peso do território (até x${fmt(p.territoryMultiplierCap)})
 > 📅 **${fmt(w.weekly)}** por objetivo semanal, **+${streak}%** por semana seguida
-> Os pontos ordenam a fila de Tomes, compram margem de inatividade e abrem a trilha da Staff.
+> Os pontos ordenam a fila de Tomes, compram margem de inatividade e abrem a trilha da ${r('staff')}.
 
 ### 📜 Tomes e ✨ Aspects
 > Tomes: fila por pontos, **1 por objetivo semanal** cumprido. Precisa de **${p.rewardMinGuildDays} dias** de guilda e uma classe **nível ${p.tomeMinClassLevel}**.
-> Aspects: **${String(p.aspectsPerGuildRaid).replace('.', ',')}** por guild raid, entregues pela staff a partir de **${p.rewardMinGuildDays} dias** de guilda.
+> Aspects: **${String(p.aspectsPerGuildRaid).replace('.', ',')}** por guild raid, entregues pela ${r('staff')} a partir de **${p.rewardMinGuildDays} dias** de guilda.
 
 ### 💤 Inatividade
 > Margem de **${p.inactivityDays} dias** offline, mais **1 dia** a cada **${fmt(p.inactivityForgivenessPerPoints)}** pontos (até **+${p.inactivityForgivenessMaxDays}**).
 > Estourou a margem, chega uma DM: responda em **${p.inactivityCheckHours}h**. "Ainda quero jogar" te dá **${p.inactivityReturnDays} dias** para entrar no jogo.
 > O kick só libera a vaga para quem está jogando: não é punição, e a volta é livre.
 
-### 🎖️ Ranks e trilhas
-> Capitão, Estrategista e Chefe representam o rank no jogo, em duas trilhas independentes: **War Team** (${c('warDiretrizes')}) e **Guild Staff** (${c('staffDiretrizes')}). No máximo um cargo por trilha.
-> Quem tem rank e sai da guilda recebe **Ocioso**: mantém os cargos, perde o direito de voto, e o Ocioso sai sozinho na volta.
+### 🎖️ Trilhas
+> Capitão, Estrategista e Chefe representam o rank no jogo, em duas trilhas independentes. No máximo um cargo por trilha.
+> ⚔️ **${TRILHAS.capitaoWar} guerras** feitas pela WnBR → ${r('warTeam')} e ${r('capitaoWar')}. Os próximos passos ficam em ${c('warDiretrizes')}.
+> 🛡️ **${fmt(TRILHAS.capitaoStaff)} pontos** → ${r('staff')} e ${r('capitaoStaff')}. Os próximos passos ficam em ${c('staffDiretrizes')}.
+> Quem tem rank e sai da guilda recebe ${r('ocioso')}: mantém os cargos, perde o direito de voto, e o cargo sai sozinho na volta.
 
 ### 📌 Canais
 > ${c('anunciosWnbr')} — avisos da guilda
@@ -160,14 +179,12 @@ function warPayload() {
   return embed('📃 Diretrizes da WnBR War Team', 0xe74c3c,
 `Valem para ${r('warTeam')}, junto com as ${c('gDiretrizes')} da guilda.
 
-### ⚔️ Como subir
-> Contam só as guerras feitas **pela WnBR**:
-> **${TRILHAS.capitaoWar} guerras** → ${r('warTeam')} e Capitão (War)
-> **${TRILHAS.estrategistaWar} guerras** → Estrategista (War), no lugar do Capitão (War)
-> **Chefe (War)** → a critério do Líder de Guerra. Inclui mover o QG no jogo.
+### 🎖️ Próximas promoções
+> **${TRILHAS.estrategistaWar} guerras** pela WnBR → ${r('estrategistaWar')}, no lugar do ${r('capitaoWar')}
+> ${r('chefeWar')} → a critério do Líder de Guerra. Inclui mover o QG no jogo.
 
 ### 🏆 MAIN WAR
-> **DPS**, **HEALER**, **TANK** e **SOLO** são dados pelo Líder de Guerra, por confiança e avaliação da build. Quem tem MAIN WAR faz parte da War Team.
+> ${r('mainDps')}, ${r('mainHealer')}, ${r('mainTank')} e ${r('mainSolo')} são dados pelo Líder de Guerra, por confiança e avaliação da build. Quem tem qualquer um deles faz parte da ${r('warTeam')}.
 > Tenha uma classe dedicada à guerra, pronta a qualquer momento, com o mapa todo desbloqueado.
 
 ### 📡 Convocação
@@ -177,7 +194,7 @@ function warPayload() {
 > Builds, estratégias e consumíveis do time são privados. Vazamento resulta em banimento.
 
 ### ⚖️ Limites
-> A War Team não tem poder de kick, ban ou decisão sobre a guilda — isso é da Guild Staff.
+> A ${r('warTeam')} não tem poder de kick, ban ou decisão sobre a guilda — isso é da ${r('staff')}.
 
 ### 📌 Canais
 > ${c('warAnuncios')} — avisos do time
@@ -193,22 +210,21 @@ function staffPayload(p) {
   return embed('📃 Diretrizes da WnBR Guild Staff', 0xf1c40f,
 `Valem para ${r('staff')}, junto com as ${c('gDiretrizes')} da guilda.
 
-### 🎖️ Como subir
-> **${fmt(TRILHAS.capitaoStaff)} pontos** → ${r('staff')} e Capitão (Staff)
-> **${fmt(TRILHAS.estrategistaStaff)} pontos** → o bot avisa os Chefes (Staff); um Chefe abre a votação para Estrategista (Staff)
-> **Chefe (Staff)** → um Chefe sugere e abre a votação; aprovada, o Owner confirma
+### 🎖️ Próximas promoções
+> **${fmt(TRILHAS.estrategistaStaff)} pontos** → o bot avisa os ${r('chefeStaff')}; um deles abre a votação para ${r('estrategistaStaff')}
+> ${r('chefeStaff')} → um Chefe sugere e abre a votação; aprovada, o ${r('fundador')} confirma
 
 ### 🗳️ Votações
-> Candidaturas e promoções são votadas pelos **Chefes (Staff)**. Prazo de **${p.voteWindowHours}h**; vale a maioria dos votos dados (abstenção não conta), e empate reprova. Ocioso não vota.
+> Candidaturas e promoções são votadas pelos ${r('chefeStaff')}. Prazo de **${p.voteWindowHours}h**; vale a maioria dos votos dados (abstenção não conta), e empate reprova. ${r('ocioso')} não vota.
 
 ### 🔨 Moderação
 > Ninguém usa kick ou ban do Discord: tudo passa pelo bot e fica registrado.
-> **/warn** — Estrategista (Staff) ou acima. Registra e avisa por DM; não bane.
-> **/ban** — só Chefe (Staff). Bane a pessoa inteira e abre um tópico privado em ${c('banimentos')} com o banido, quem baniu e os Chefes. Quem baniu coloca a evidência ou o relato.
-> **Unban** e **promoção a Chefe** — só o Owner.
+> **/warn** — ${r('estrategistaStaff')} ou acima. Registra e avisa por DM; não bane.
+> **/ban** — só ${r('chefeStaff')}. Bane a pessoa inteira e abre um tópico privado em ${c('banimentos')} com o banido, quem baniu e os Chefes. Quem baniu coloca a evidência ou o relato.
+> **Unban** e **promoção a Chefe** — só o ${r('fundador')}.
 
 ### 🛡️ Hierarquia
-> Fundador no topo, Wynn Brasil BOT logo abaixo. Qualquer mudança nisso gera alerta para o Owner.
+> ${r('fundador')} no topo, ${r('bot')} logo abaixo. Qualquer mudança nisso gera alerta para o Fundador.
 
 ### 📌 Canais
 > ${c('staffAnuncios')} — avisos da staff
@@ -216,8 +232,8 @@ function staffPayload(p) {
 > ${c('vozStaff')} — call da staff
 > ${c('staffForum')} — discussões longas e casos
 > ${c('staffBot')} — auditoria, alertas de recrutamento e de hierarquia, relatório de verificação
-> ${c('staffChiefs')} — só Chefes (Staff)
-> ${c('vozMeeting')} — só Chefes (Staff)`);
+> ${c('staffChiefs')} — só ${r('chefeStaff')}
+> ${c('vozMeeting')} — só ${r('chefeStaff')}`);
 }
 
 /**
