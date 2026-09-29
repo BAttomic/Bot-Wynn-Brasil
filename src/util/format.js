@@ -95,3 +95,17 @@ export function diffPaths(oldObj, newObj, path = '') {
   }
   return changes;
 }
+
+/**
+ * `[GsW] Fulano` -> `Fulano`.
+ *
+ * Indispensável desde que o apelido passou a carregar a TAG: a identificação de
+ * quem NÃO tem vínculo é feita casando o apelido contra os rosters, e
+ * `[gsw] fulano` não casa com `fulano`. Sem descascar, o próprio bot marcaria
+ * como "sem registro" alguém que ele mesmo acabou de renomear.
+ */
+export function stripNickTag(nick) {
+  return String(nick ?? '')
+    .replace(/^\[[^\]]{1,8}\]\s*/, '')
+    .trim();
+}

@@ -1,5 +1,6 @@
 import { collections } from '../db/mongo.js';
 import { log } from '../util/log.js';
+import { stripNickTag } from '../util/format.js';
 
 // Lista de banimentos, indexada pelos DOIS lados da identidade: o UUID da conta
 // do WynnCraft e o ID do Discord. Basta um deles bater para o banimento pegar.
@@ -29,16 +30,83 @@ export const BAN_REASON_BLACKLIST_GUILD = 'Membro da guilda da black-list';
 /** Registros que ainda valem. Um isento continua no banco, mas não bane. */
 const ACTIVE = { exempt: { $ne: true } };
 
-/** Casa por qualquer um dos dois lados da identidade. @returns {object|null} */
-function identityFilter({ uuid = null, discordId = null }) {
+/**
+ * Casa por qualquer um dos dois lados da identidade. Aceita um de cada ou listas
+ * (`uuids`, `discordIds`), para quem já resolveu a pessoa inteira.
+ * @returns {object|null}
+ */
+function identityFilter({ uuid = null, discordId = null, uuids = [], discordIds = [] }) {
+  const us = [...new Set([uuid, ...uuids].filter(Boolean))];
+  const ds = [...new Set([discordId, ...discordIds].filter(Boolean))];
   const or = [];
-  if (uuid) or.push({ uuid });
-  if (discordId) or.push({ discordIds: discordId });
+  if (us.length) or.push({ uuid: { $in: us } });
+  if (ds.length) or.push({ discordIds: { $in: ds } });
   return or.length ? { $or: or } : null;
 }
 
-export async function findBan({ uuid = null, discordId = null } = {}) {
-  const id = identityFilter({ uuid, discordId });
+/**
+ * TUDO o que é da mesma pessoa, a partir de um Discord e/ou uma conta do jogo.
+ *
+ * Segue os vínculos até não achar nada novo: a conta leva ao Discord vinculado,
+ * o Discord leva às contas vinculadas a ele, e assim por diante. Hoje o vínculo
+ * é 1:1 e isso para na primeira volta; com várias contas por Discord, o mesmo
+ * laço já pega todas. É o que faz ban e unban valerem para a pessoa, e não para
+ * a única conta que a staff digitou.
+ *
+ * Com `viaBans`, os registros de ban que casarem também entram — para o unban
+ * desfazer a teia inteira, e para banir por um Discord sem vínculo que já
+ * apareceu num ban.
+ *
+ * @param {{uuid?: string|null, discordId?: string|null, username?: string|null, viaBans?: boolean}} seed
+ * @returns {Promise<{uuids: string[], discordIds: string[], nomes: Map<string, string>}>}
+ *   `nomes`: uuid -> nick do jogo (sem TAG)
+ */
+export async function resolveIdentity({ uuid = null, discordId = null, username = null, viaBans = false }) {
+  const uuids = new Set(uuid ? [uuid] : []);
+  const discordIds = new Set(discordId ? [discordId] : []);
+  const nomes = new Map();
+  if (uuid && username) nomes.set(uuid, stripNickTag(username));
+
+  for (let volta = 0; volta < 10; volta += 1) {
+    const antes = uuids.size + discordIds.size;
+    const or = [];
+    if (uuids.size) or.push({ uuid: { $in: [...uuids] } });
+    if (discordIds.size) or.push({ discordId: { $in: [...discordIds] } });
+    if (!or.length) break;
+
+    const links = await collections
+      .members()
+      .find({ $or: or }, { projection: { uuid: 1, discordId: 1, username: 1 } })
+      .toArray();
+    for (const l of links) {
+      if (l.uuid) uuids.add(l.uuid);
+      if (l.discordId) discordIds.add(l.discordId);
+      if (l.uuid && l.username && !nomes.has(l.uuid)) nomes.set(l.uuid, stripNickTag(l.username));
+    }
+
+    if (viaBans) {
+      const id = identityFilter({ uuids: [...uuids], discordIds: [...discordIds] });
+      const bans = await collections.bans().find(id, { projection: { uuid: 1, discordIds: 1, usernames: 1 } }).toArray();
+      for (const b of bans) {
+        if (b.uuid) uuids.add(b.uuid);
+        for (const d of b.discordIds || []) discordIds.add(d);
+        const nome = (b.usernames || []).map(stripNickTag).find(Boolean);
+        if (b.uuid && nome && !nomes.has(b.uuid)) nomes.set(b.uuid, nome);
+      }
+    }
+
+    if (uuids.size + discordIds.size === antes) break;
+  }
+  return { uuids: [...uuids], discordIds: [...discordIds], nomes };
+}
+
+/** Nicks do jogo de um registro, sem TAG e sem repetição, para exibir. */
+export function banNicks(ban) {
+  return [...new Set((ban?.usernames || []).map(stripNickTag).filter(Boolean))];
+}
+
+export async function findBan(ids = {}) {
+  const id = identityFilter(ids);
   if (!id) return null;
   return collections.bans().findOne({ ...id, ...ACTIVE });
 }
@@ -51,8 +119,8 @@ export async function isBanned(ids) {
  * Isenção concedida pela staff. Quem tem isso não pode ser banido de novo pela
  * regra automática da GsW.
  */
-export async function findExemption({ uuid = null, discordId = null } = {}) {
-  const id = identityFilter({ uuid, discordId });
+export async function findExemption(ids = {}) {
+  const id = identityFilter(ids);
   if (!id) return null;
   return collections.bans().findOne({ ...id, exempt: true });
 }
@@ -75,20 +143,25 @@ export async function recordBan({
   uuid,
   username = null,
   discordId = null,
+  discordIds = [],
   reason,
   by = null,
   override = false,
 }) {
   if (!uuid) return null;
+  const ds = [...new Set([discordId, ...discordIds].filter(Boolean))];
   // Chokepoint único: qualquer caminho automático (roleSync, reconciliação,
   // registro) passa por aqui, então a isenção não depende de cada um lembrar.
-  if (!override && (await findExemption({ uuid, discordId }))) return false;
+  if (!override && (await findExemption({ uuid, discordIds: ds }))) return false;
 
   const now = new Date();
 
+  // O nick do JOGO, nunca o apelido do Discord: `[GsW] Fulano` gravado ao lado
+  // de `Fulano` fazia a mesma pessoa aparecer duas vezes na lista de bans.
+  const nick = stripNickTag(username);
   const addToSet = {};
-  if (username) addToSet.usernames = username;
-  if (discordId) addToSet.discordIds = discordId;
+  if (nick) addToSet.usernames = nick;
+  if (ds.length) addToSet.discordIds = { $each: ds };
 
   const update = { $set: { lastSeenAt: now }, $setOnInsert: { uuid, firstBannedAt: now } };
   if (override) {
@@ -111,8 +184,8 @@ export async function recordBan({
  * Isenta por UUID ou por Discord. O registro NÃO é apagado: vira tombstone, para
  * a regra automática da GsW não recriá-lo. Devolve quantos foram isentados.
  */
-export async function removeBan({ uuid = null, discordId = null, by = null } = {}) {
-  const id = identityFilter({ uuid, discordId });
+export async function removeBan({ uuid = null, discordId = null, uuids = [], discordIds = [], by = null } = {}) {
+  const id = identityFilter({ uuid, discordId, uuids, discordIds });
   if (!id) return 0;
   const res = await collections
     .bans()
@@ -121,6 +194,35 @@ export async function removeBan({ uuid = null, discordId = null, by = null } = {
     log.info(`Banimento removido — isenção gravada (${res.modifiedCount} registro(s)).`);
   }
   return res.modifiedCount;
+}
+
+/**
+ * Bane a PESSOA: toda conta do jogo e todo Discord ligados ao alvo (ver
+ * resolveIdentity). Cada conta tem o próprio registro, todos com todos os
+ * Discords.
+ *
+ * @returns {Promise<{uuids: string[], discordIds: string[], nomes: Map<string,string>, hadExemption: boolean}|null>}
+ *   null = nenhuma conta do jogo achada (o ban é indexado por conta)
+ */
+export async function banPerson({ uuid = null, discordId = null, username = null, reason, by = null, override = false }) {
+  const pessoa = await resolveIdentity({ uuid, discordId, username, viaBans: !uuid });
+  if (!pessoa.uuids.length) return null;
+  const hadExemption = !!(await findExemption({ uuids: pessoa.uuids, discordIds: pessoa.discordIds }));
+  for (const u of pessoa.uuids) {
+    await recordBan({ uuid: u, username: pessoa.nomes.get(u) ?? null, discordIds: pessoa.discordIds, reason, by, override });
+  }
+  return { ...pessoa, hadExemption };
+}
+
+/**
+ * Isenta a PESSOA inteira: toda conta e todo Discord ligados ao alvo, e todo
+ * registro de ban que casar com qualquer um deles.
+ * @returns {Promise<{removed: number, uuids: string[], discordIds: string[], nomes: Map<string,string>}>}
+ */
+export async function unbanPerson({ uuid = null, discordId = null, username = null, by = null }) {
+  const pessoa = await resolveIdentity({ uuid, discordId, username, viaBans: true });
+  const removed = await removeBan({ uuids: pessoa.uuids, discordIds: pessoa.discordIds, by });
+  return { removed, ...pessoa };
 }
 
 export async function listBans(limit = 25) {

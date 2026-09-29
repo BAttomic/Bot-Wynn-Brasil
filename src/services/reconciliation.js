@@ -536,7 +536,8 @@ export async function applyReconciliation(guild, scope, only = null) {
     // discord). Assim, sair da guilda depois não devolve o acesso — a remoção só
     // vem de /ban remove.
     if (e.kind === 'banned' && e.uuid) {
-      await recordBan({ uuid: e.uuid, username: e.canonical ?? e.nick, discordId: e.discordId, reason: BAN_REASON_BLACKLIST_GUILD });
+      // O nick do jogo, sem a TAG que `canonical` (o apelido esperado) carrega.
+      await recordBan({ uuid: e.uuid, username: stripNickTag(e.canonical ?? e.nick), discordId: e.discordId, reason: BAN_REASON_BLACKLIST_GUILD });
     }
     // Mantém a coleção de vínculos coerente com /verificar (só se já houver
     // vínculo). Quem está como 'unregistered' não tem vínculo por definição —

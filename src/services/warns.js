@@ -1,29 +1,27 @@
 import { randomUUID } from 'node:crypto';
 import { collections } from '../db/mongo.js';
 import { getConfig } from '../config/guildConfig.js';
-import { recordBan } from './bans.js';
-import { log } from '../util/log.js';
 
 // Advertências.
 //
 // Ao contrário do ban — um registro por pessoa, que só cresce — cada warn é uma
 // LINHA própria. Precisa ser: o histórico é o produto aqui, e uma advertência
-// perdoada não pode sumir do registro, senão ninguém consegue reconstruir por
-// que alguém foi banido por acúmulo.
+// perdoada não pode sumir do registro.
 //
 // A identidade é indexada pelos dois lados, como em bans.js: quem adverte um
 // Discord acerta a pessoa mesmo que ela troque de conta do Minecraft, e vice-
 // versa. A diferença é que warn TOLERA uuid ausente — dá para advertir alguém
-// que nunca se registrou. O ban não tolera, e é o que limita a escalação
-// automática (ver escalate()).
+// que nunca se registrou.
+//
+// Warn NÃO bane. Já baniu, ao chegar em `warnsToBan` ativas, e foi assim que um
+// Chefe acabou banido sem ninguém da staff ter decidido isso. Ban é sempre uma
+// decisão de um Chefe (Staff), pelo /ban.
 //
 // A validade NÃO é congelada na criação. Igual ao livro-razão de pontos, o que
 // se guarda é o fato cru (quando aconteceu) e a regra é aplicada na hora de ler.
 // Baixar `warnExpiryDays` de 90 para 30 encolhe todo o histórico de uma vez, em
 // vez de valer só para os warns futuros — que seria uma regra invisível,
 // diferente para cada linha, impossível de explicar a quem foi advertido.
-
-export const BAN_REASON_WARN_ACCUMULATION = 'Acúmulo de advertências';
 
 /** Id curto e sorteável, para caber num `/warn remove id:`. */
 function newWarnId() {
@@ -85,10 +83,7 @@ export async function countActiveWarns(guildDiscordId, ids) {
 /**
  * Registra uma advertência e devolve o estado resultante.
  *
- * Não bane: quem decide isso é `escalate`, chamado logo depois pelo comando. A
- * separação é de propósito — gravar o warn não pode falhar por causa do ban.
- *
- * @returns {Promise<{warn: object, active: number, threshold: number}>}
+ * @returns {Promise<{warn: object, active: number}>}
  */
 export async function recordWarn(guildDiscordId, { uuid = null, username = null, discordId = null, reason, by }) {
   const warn = {
@@ -104,35 +99,8 @@ export async function recordWarn(guildDiscordId, { uuid = null, username = null,
   };
   await collections.warns().insertOne(warn);
 
-  const p = await params(guildDiscordId);
   const active = await countActiveWarns(guildDiscordId, { uuid, discordId });
-  return { warn, active, threshold: Number(p.warnsToBan) || 0 };
-}
-
-/**
- * Bane por acúmulo, se for o caso.
- *
- * O ban é indexado por uuid (ver bans.js), então advertir alguém que nunca se
- * registrou não pode virar ban sozinho. Devolver `noUuid` é o que permite ao
- * comando dizer isso à staff, em vez de a escalação falhar em silêncio.
- *
- * @returns {Promise<{banned: boolean, reason?: string}>}
- */
-export async function escalate(guildDiscordId, { uuid, username, discordId, active, threshold }) {
-  if (!threshold || active < threshold) return { banned: false };
-  if (!uuid) return { banned: false, reason: 'noUuid' };
-
-  const ok = await recordBan({
-    uuid,
-    username,
-    discordId,
-    reason: `${BAN_REASON_WARN_ACCUMULATION} (${active})`,
-  });
-  // `false` = a pessoa está isenta por decisão anterior da staff. A isenção vence
-  // a regra automática, e o acúmulo é uma regra automática.
-  if (ok === false) return { banned: false, reason: 'exempt' };
-  log.info(`Ban por acúmulo de advertências: ${username ?? uuid} (${active}/${threshold}).`);
-  return { banned: true };
+  return { warn, active };
 }
 
 /** Perdoa uma advertência específica. O registro fica, marcado. */

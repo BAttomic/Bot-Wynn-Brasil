@@ -19,6 +19,9 @@ import { ensurePanel } from './panels.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { log } from '../util/log.js';
 import { pick } from '../util/i18n.js';
+import { stripNickTag } from '../util/format.js';
+
+export { stripNickTag };
 
 export const BUTTON_ID = 'registro:verificar';
 export const MODAL_ID = 'registro:modal';
@@ -242,20 +245,6 @@ export async function applyClassificationRoles(member, cfg, kind, allyRoleId = n
 
 /** Limite do Discord para apelido de membro. */
 const NICK_MAX = 32;
-
-/**
- * `[GsW] Fulano` -> `Fulano`.
- *
- * Indispensável desde que o apelido passou a carregar a TAG: a identificação de
- * quem NÃO tem vínculo é feita casando o apelido contra os rosters, e
- * `[gsw] fulano` não casa com `fulano`. Sem descascar, o próprio bot marcaria
- * como "sem registro" alguém que ele mesmo acabou de renomear.
- */
-export function stripNickTag(nick) {
-  return String(nick ?? '')
-    .replace(/^\[[^\]]{1,8}\]\s*/, '')
-    .trim();
-}
 
 /**
  * O apelido que a pessoa DEVE ter no Discord: `[TAG] Fulano`, com a TAG da
