@@ -100,9 +100,7 @@ function embed(title, color, description) {
 
 function communityPayload() {
   return embed('📃 Diretrizes da Comunidade — Wynncraft Brasil', 0x5865f2,
-`Valem para todo mundo no servidor: ${r('community')} e ${r('allies')}. ${r('member')}, ${r('warTeam')} e ${r('staff')} seguem estas e acrescentam as suas.
-
-### 📋 Registro
+`### 📋 Registro
 > Vincule sua conta do Wynncraft em ${c('registro')}: o bot confere na API oficial e te dá o cargo certo.
 > Seu apelido vira **[TAG] Nick**, com a TAG da sua guilda, e se atualiza sozinho. Não troque à mão.
 > Registre só contas que são suas.
