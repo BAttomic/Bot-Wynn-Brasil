@@ -9,6 +9,7 @@ import { captureValue, recordCapture, attributeCaptures, captureId } from './ter
 // escreve no livro-razão de guerra — só o snapshot escreve.
 import { recordWeeklyCompletion, recordEvent, recomputePoints } from './points.js';
 import { creditGuildRaidParty } from './events.js';
+import { creditRaidRewards, ensureRaidRewardPanel } from './raidRewards.js';
 import { blockedUuids } from './eventBlacklist.js';
 import { communityRow, downloadsRow, downloadsField } from './leaderboardPanel.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
@@ -359,6 +360,14 @@ export async function runGuildWatch(client) {
       const at = new Date();
       for (const p of raids) {
         await creditGuildRaidParty({ members: p.members, at });
+        // Aspects e esmeraldas dependem do TAMANHO do grupo, e só aqui ele é
+        // conhecido — o contador da API diz quantas raids, não com quantos.
+        await creditRaidRewards(p.members, at);
+      }
+      // Os painéis de recompensa mostram o saldo novo na hora, sem esperar o
+      // ciclo de 5 min. Falha aqui não pode travar o watcher.
+      for (const kind of ['aspect', 'emerald']) {
+        await ensureRaidRewardPanel(client, guildDiscordId, kind).catch((e) => log.error(`Painel de ${kind}:`, e));
       }
       await announceGuildRaids(client, cfg, guild, raids);
     }

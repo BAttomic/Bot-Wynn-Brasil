@@ -4,8 +4,9 @@ import { fetchGuildMembers } from './guildData.js';
 import { wynn } from '../wynn/api.js';
 import { optional } from '../config/env.js';
 
-// Elegibilidade por tempo de guilda, compartilhada por Tomes e Aspects: o jogo
-// exige ~1 semana na guilda para receber Tomes, e aplicamos o mesmo aos aspects.
+// Elegibilidade por tempo de guilda, compartilhada por Tomes, aspects e
+// esmeraldas: o jogo exige ~1 semana na guilda para receber Tomes, e aplicamos o
+// mesmo às recompensas de guild raid.
 
 /** Dias inteiros desde uma data; null se não houver data. */
 export function daysSince(date) {

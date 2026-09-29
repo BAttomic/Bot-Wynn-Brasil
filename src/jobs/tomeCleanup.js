@@ -1,6 +1,6 @@
 import { getConfig } from '../config/guildConfig.js';
 import { panelMessageId } from '../services/panels.js';
-import { TOME_PANEL_STATE_IDS } from '../services/tomes.js';
+import { REWARD_PANEL_STATE_IDS } from '../services/tomes.js';
 import { optional } from '../config/env.js';
 import { log } from '../util/log.js';
 
@@ -11,10 +11,9 @@ const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const BULK_LIMIT_MS = 14 * 24 * 60 * 60 * 1000;
 
 /**
- * Limpa o canal de Tomes: os anúncios de entrega (Tomes e aspects) somem 24h
- * depois. É um canal de fila, não de histórico — o registro permanente é a
- * auditoria e os acumulados em `guildStats` (`tomesDelivered`,
- * `aspectsDelivered`), que a própria mensagem de entrega mostra.
+ * Limpa o canal de recompensas: mensagem solta do bot some 24h depois. É um
+ * canal de painéis, não de histórico — o registro permanente é a auditoria, os
+ * acumulados em `guildStats` e o log de entregas de cada painel.
  *
  * Agendado (e não um setTimeout na hora do envio) porque um timer de 24h não
  * sobreviveria ao restart do bot. O job roda de hora em hora, então na prática
@@ -32,12 +31,11 @@ export async function runTomeCleanup(client) {
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel) return;
 
-  // Os DOIS painéis fixos (fila ao vivo e histórico de entregas) são mensagens
-  // do bot e envelhecem como qualquer outra. Sem esta exclusão a limpeza apagaria
-  // a própria fila — e, desde que o histórico existe, apagaria o histórico
-  // inteiro 24h depois de publicado.
+  // Os painéis fixos (Tomes, Aspects, Esmeraldas) são mensagens do bot e
+  // envelhecem como qualquer outra. Sem esta exclusão a limpeza apagaria os
+  // próprios painéis 24h depois de publicados.
   const panelIds = new Set(
-    (await Promise.all(TOME_PANEL_STATE_IDS.map((id) => panelMessageId(id)))).filter(Boolean),
+    (await Promise.all(REWARD_PANEL_STATE_IDS.map((id) => panelMessageId(id)))).filter(Boolean),
   );
   const cutoff = Date.now() - MAX_AGE_MS;
 
@@ -56,5 +54,5 @@ export async function runTomeCleanup(client) {
   if (bulk.size) await channel.bulkDelete(bulk, true).catch(() => {});
   for (const m of old.values()) await m.delete().catch(() => {});
 
-  log.info(`Canal de tomes: ${expired.size} anúncio(s) com mais de 24h apagado(s).`);
+  log.info(`Canal de recompensas: ${expired.size} mensagem(ns) com mais de 24h apagada(s).`);
 }

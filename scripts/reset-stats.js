@@ -15,9 +15,8 @@
 //   • Tomes, aspects entregues, vínculos, empréstimos, eventos e sorteios.
 //   • guildStats.guildRaids — é o `currentGuildRaids` ABSOLUTO da API (a vida
 //     inteira do membro nesta guilda), não um acumulador nosso. Zerá-lo seria
-//     inútil (o próximo snapshot o reescreve com o mesmo valor) e quebraria os
-//     aspects, que contam do zero por `guildRaids − aspectBaseRaids`. A coluna
-//     🛡️ do painel segue mostrando o total da API.
+//     inútil (o próximo snapshot o reescreve com o mesmo valor). A coluna 🛡️
+//     do painel segue mostrando o total da API.
 //   • Os eventos de GUILD RAID. Raid contada na coluna 🛡️ vale ponto, sempre —
 //     apagar os eventos deixava gente com 900 raids e 0 pontos. E nem adiantaria:
 //     o boot completa o livro-razão até o contador (reconcileGuildRaidLedger em
@@ -253,9 +252,9 @@ async function main() {
       `e ${zPart.modifiedCount} linha(s) de season (${SEASON_FIELDS.join(', ')}).`,
   );
 
-  // `aspectBaseRaids` e `aspectsDelivered` NÃO são tocados. Aspect é dívida da
-  // guilda com o membro, não pontuação: quem já fez as raids continua com o que
-  // tem a receber, independente de a apuração de pontos ter sido zerada.
+  // Aspects e esmeraldas (`*Earned`, `*Delivered`) NÃO são tocados. São dívida
+  // da guilda com o membro, não pontuação: quem já fez as raids continua com o
+  // que tem a receber, independente de a apuração de pontos ter sido zerada.
   if (LIMPAR_CAPTURAS) {
     const delCaps = await caps.deleteMany({});
     console.log(`${delCaps.deletedCount} captura(s) de território apagada(s).`);

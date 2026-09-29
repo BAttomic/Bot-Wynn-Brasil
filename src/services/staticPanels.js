@@ -68,8 +68,8 @@ Dúvidas? Mencione um <@&${STAFF_ROLE}>. Estamos prontos para ajudar.`,
   };
 }
 
-// O painel de Tomes é AO VIVO (fila + aspects a entregar) e vive em services/
-// tomes.js — não entra na lista de painéis estáticos abaixo.
+// Os painéis de recompensa são AO VIVO e vivem em services/tomes.js e
+// services/raidRewards.js — não entram na lista de painéis estáticos abaixo.
 
 function loanPayload() {
   return {

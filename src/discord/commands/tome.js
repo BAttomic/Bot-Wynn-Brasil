@@ -1,43 +1,30 @@
-import {
-  SlashCommandBuilder,
-  PermissionFlagsBits,
-  ActionRowBuilder,
-  StringSelectMenuBuilder,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
-} from 'discord.js';
+import { SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, StringSelectMenuBuilder } from 'discord.js';
 import { collections } from '../../db/mongo.js';
 import {
   queueView,
   deliverTome,
   tomeCredits,
   ensureTomePanel,
-  ensureDeliveryLogPanel,
-  recordDelivery,
   adjustTomesDelivered,
   setTomesDelivered,
   tomeStatus,
 } from '../../services/tomes.js';
-import { pendingAspects, deliverAspects, aspectStatus } from '../../services/aspects.js';
+import { recordDelivery } from '../../services/rewardLog.js';
 import { maxClassLevel, tomeMinLevel } from '../../services/eligibility.js';
 import { audit } from '../../services/audit.js';
 import { autoDismiss, DISMISS } from '../../util/ephemeral.js';
 
-const fmtAsp = (n) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
-
 /**
- * Republica os dois painéis do canal: a fila ao vivo e o histórico.
+ * Republica o painel de Tomes, que traz a fila e as últimas entregas.
  *
- * Substituiu o anúncio por entrega. Antes, cada Tome ou aspect virava uma
- * mensagem nova no canal — para o premiado (com ping) e à vista de todos —, e
- * 24h depois a limpeza apagava tudo, sem deixar registro de quem recebeu o quê.
- * Agora a entrega vira uma linha no painel de histórico, que é EDITADO: não
- * pinga ninguém, não empurra o canal para baixo, e o extrato fica.
+ * Substituiu o anúncio por entrega. Antes, cada Tome virava uma mensagem nova
+ * no canal — para o premiado (com ping) e à vista de todos —, e 24h depois a
+ * limpeza apagava tudo, sem deixar registro de quem recebeu o quê. Agora a
+ * entrega vira uma linha no log do painel, que é EDITADO: não pinga ninguém,
+ * não empurra o canal para baixo, e o extrato fica.
  */
 async function refreshPanels(interaction) {
   await ensureTomePanel(interaction.client, interaction.guildId);
-  await ensureDeliveryLogPanel(interaction.client, interaction.guildId);
 }
 
 /**
@@ -83,7 +70,7 @@ function tomeSummary({ username, delivered, entitled, credits }) {
  * de usar `entregues`.
  */
 async function correctTomes(interaction) {
-  if (!(await isTomeManager(interaction))) {
+  if (!(await isRewardManager(interaction))) {
     return interaction.editReply('Apenas **Chief ou superior** pode corrigir Tomes.');
   }
   const user = interaction.options.getUser('user', true);
@@ -132,28 +119,6 @@ async function correctTomes(interaction) {
   );
 }
 
-/**
- * Como está o saldo da pessoa DEPOIS da entrega. São três estados de verdade
- * diferentes, e confundi-los é o que faz a staff entregar duas vezes:
- *
- *  - ainda tem unidade inteira a receber;
- *  - só sobrou fração, que não dá para entregar e fica acumulando;
- *  - ficou devendo, porque recebeu a mais.
- */
-function saldoLabel(status) {
-  if (!status) return 'saldo desconhecido';
-  if (status.pending < 0) return `⚠️ recebeu ${fmtAsp(-status.pending)} a mais — as próximas raids quitam`;
-  if (status.deliverable >= 1) return `ainda faltam **${status.deliverable}**`;
-  if (status.pending > 0) return `sobrou ${fmtAsp(status.pending)} acumulando`;
-  return 'nada pendente';
-}
-
-/** O acumulado de vida da pessoa em aspects, para a confirmação da staff. */
-function aspectSummary(status) {
-  if (!status) return null;
-  return `> **${status.username}** já recebeu **${fmtAsp(status.delivered)}** aspect(s) · ${saldoLabel(status)}.`;
-}
-
 // Ações abertas a qualquer membro. `queue` saiu daqui junto com o botão "Ver
 // fila": a fila já está no painel, e o botão só produzia uma cópia efêmera dela.
 // O `/tome queue` continua existindo — quem digita o comando está pedindo, não
@@ -170,16 +135,13 @@ const MANAGER_GUILD_RANKS = Object.freeze(['chief', 'owner']);
 /** O menu de seleção do Discord aceita no máximo 25 opções. */
 const SELECT_LIMIT = 25;
 
-// O modal do Discord aceita no máximo 5 campos de texto. Como a entrega de
-// aspects exige a staff informar quanto entregou a CADA um, o lote de aspects
-// para em 5 — não é escolha nossa, é o teto da plataforma.
-const MODAL_FIELD_LIMIT = 5;
-
 /**
+ * Quem entrega recompensa: Tomes, aspects e esmeraldas (ver
+ * discord/raidRewardCommand.js). Chief ou superior no jogo, ou Gerenciar Servidor.
  * @param {import('discord.js').Interaction} interaction
  * @returns {Promise<boolean>}
  */
-async function isTomeManager(interaction) {
+export async function isRewardManager(interaction) {
   if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
   const linked = await collections.members().findOne({ discordId: interaction.user.id });
   return MANAGER_GUILD_RANKS.includes(linked?.guildRank);
@@ -236,166 +198,9 @@ async function deliverTo(interaction, uuids) {
   });
 }
 
-// --- Entrega de aspects (recompensa de guild raid, ao lado dos tomes) ---
-
-/**
- * Passo 1: escolher quem recebeu, entre os que têm unidade inteira a receber.
- *
- * O teto de 5 não é escolha nossa: o modal do Discord aceita no máximo 5 campos,
- * e cada pessoa precisa do seu — a staff informa quanto entregou DE VERDADE, que
- * pode ser mais do que o saldo (no jogo se passa a mais, e isso vira saldo
- * negativo que as próximas raids quitam).
- */
-async function promptAspectDelivery(interaction) {
-  if (!(await isTomeManager(interaction))) {
-    return interaction.reply({ content: 'Apenas **Chief ou superior** pode entregar aspects.', ephemeral: true });
-  }
-  const pending = await pendingAspects(interaction.guildId);
-  if (!pending.length) {
-    return interaction.reply({
-      content: 'Ninguém tem aspect inteiro a receber.\n-# Quem tem só meio acumulado aparece no `/aspects`, mas não dá para entregar meio aspect.',
-      ephemeral: true,
-    });
-  }
-
-  const opcoes = pending.slice(0, MODAL_FIELD_LIMIT);
-  const menu = new StringSelectMenuBuilder()
-    .setCustomId('tome:aspectPick')
-    .setPlaceholder(`Quem recebeu aspects? (até ${MODAL_FIELD_LIMIT})`)
-    .setMinValues(1)
-    .setMaxValues(opcoes.length)
-    .addOptions(
-      opcoes.map((a) => ({
-        label: a.username,
-        value: a.uuid,
-        description: `${a.deliverable} a entregar`,
-      })),
-    );
-  const sobra = pending.length - opcoes.length;
-  return interaction.reply({
-    content:
-      `Selecione quem recebeu — até **${MODAL_FIELD_LIMIT}** por vez. Em seguida você informa quanto entregou a cada um.` +
-      (sobra ? `\n-# Mais ${sobra} na fila; entregue em rodadas.` : ''),
-    components: [new ActionRowBuilder().addComponents(menu)],
-    ephemeral: true,
-  });
-}
-
-/**
- * Passo 2: um campo por pessoa selecionada, já preenchido com o que ela tem a
- * receber. A staff edita quem precisar — inclusive para MAIS, e deixar em branco
- * (ou zero) pula aquela pessoa.
- *
- * O customId do modal é FIXO. Quem carrega o uuid é o campo de cada pessoa
- * (`amt:<uuid>`), e é de lá que a aplicação relê a lista. Serializar os uuids
- * aqui estourava o teto de 100 caracteres do customId a partir do terceiro
- * destinatário: dois cabiam, o terceiro derrubava a entrega inteira.
- */
-async function promptAspectAmount(interaction) {
-  if (!(await isTomeManager(interaction))) {
-    return interaction.update({ content: 'Sem permissão.', components: [] });
-  }
-
-  const escolhidos = interaction.values.slice(0, MODAL_FIELD_LIMIT);
-  const pending = await pendingAspects(interaction.guildId);
-  const alvos = escolhidos.map((uuid) => pending.find((a) => a.uuid === uuid)).filter(Boolean);
-  if (!alvos.length) {
-    return interaction.update({ content: 'Ninguém da seleção tem aspect inteiro a receber agora.', components: [] });
-  }
-
-  const modal = new ModalBuilder()
-    .setCustomId('tome:aspectAmount')
-    .setTitle('Entregar aspects')
-    .addComponents(
-      ...alvos.map((a) =>
-        new ActionRowBuilder().addComponents(
-          new TextInputBuilder()
-            .setCustomId(`amt:${a.uuid}`)
-            // O label do Discord vai a 45 caracteres; nick vai a 20, então cabe.
-            .setLabel(`${a.username} (a receber: ${a.deliverable})`.slice(0, 45))
-            .setValue(String(a.deliverable))
-            .setPlaceholder('Unidades inteiras. 0 ou vazio = pular')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(false),
-        ),
-      ),
-    );
-  return interaction.showModal(modal);
-}
-
-/**
- * Passo 3: aplica o que a staff digitou, um campo por pessoa.
- *
- * Aceita MAIS do que o saldo de propósito: no jogo se entrega a mais, e o
- * excedente vira saldo negativo que as próximas raids quitam (ver a nota no topo
- * de services/aspects.js). O que NÃO se aceita é fração — aspect é item inteiro.
- */
-async function applyAspectDelivery(interaction) {
-  if (!(await isTomeManager(interaction))) {
-    return interaction.reply({ content: 'Sem permissão.', ephemeral: true });
-  }
-  await interaction.deferReply({ ephemeral: true });
-
-  // Os campos são `amt:<uuid>`, na ordem em que o modal foi montado: a própria
-  // submissão diz a quem entregar, sem estado no customId.
-  const uuids = [...interaction.fields.fields.keys()]
-    .filter((k) => k.startsWith('amt:'))
-    .map((k) => k.slice('amt:'.length));
-
-  const entregues = [];
-  const invalidos = [];
-  let total = 0;
-
-  for (const uuid of uuids) {
-    const bruto = (interaction.fields.getTextInputValue(`amt:${uuid}`) ?? '').trim();
-    const status = await aspectStatus(interaction.guildId, uuid);
-    const nome = status?.username ?? uuid;
-
-    // Vazio ou zero = a staff decidiu não entregar a essa pessoa agora.
-    if (!bruto || bruto === '0') continue;
-
-    const valor = Number(bruto.replace(',', '.'));
-    if (!Number.isInteger(valor) || valor <= 0) {
-      invalidos.push(`**${nome}**: \`${bruto}\``);
-      continue;
-    }
-
-    await deliverAspects(uuid, valor);
-    const link = await collections.members().findOne({ uuid }, { projection: { discordId: 1 } });
-    await recordDelivery({
-      kind: 'aspect',
-      uuid,
-      username: nome,
-      discordId: link?.discordId ?? null,
-      amount: valor,
-      byDiscordId: interaction.user.id,
-    });
-    total += valor;
-    // Relê DEPOIS da entrega: o resumo tem de refletir o estado novo.
-    entregues.push({ valor, status: await aspectStatus(interaction.guildId, uuid) });
-  }
-
-  await refreshPanels(interaction);
-
-  const aviso = invalidos.length
-    ? `\n⚠️ Ignorado (não é unidade inteira): ${invalidos.join(', ')}.`
-    : '';
-
-  if (!entregues.length) {
-    return replyAndDismiss(interaction, `Nada entregue.${aviso}`, DISMISS.member);
-  }
-
-  const linhas = entregues.map((e) => `> **${e.status?.username ?? '?'}** — ${e.valor} entregue(s) · ${saldoLabel(e.status)}`);
-  return replyAndDismiss(
-    interaction,
-    `✨ **${total}** aspect(s) entregue(s) a **${entregues.length}** pessoa(s).\n${linhas.join('\n')}${aviso}`,
-    aviso ? DISMISS.member : DISMISS.delivery,
-  );
-}
-
 /** Passo 1 do botão "Entregar Tome": escolher quem recebeu. */
 async function promptDelivery(interaction) {
-  if (!(await isTomeManager(interaction))) {
+  if (!(await isRewardManager(interaction))) {
     return interaction.reply({ content: 'Apenas **Chief ou superior** pode entregar Tomes.', ephemeral: true });
   }
 
@@ -590,17 +395,12 @@ export default {
 
     if (action === 'deliver') return promptDelivery(interaction);
     if (action === 'delivered') {
-      if (!(await isTomeManager(interaction))) {
+      if (!(await isRewardManager(interaction))) {
         return interaction.update({ content: 'Sem permissão.', components: [] });
       }
       await interaction.deferUpdate();
       return deliverTo(interaction, interaction.values);
     }
-
-    // Entrega de aspects: botão → select → modal.
-    if (action === 'deliverAspect') return promptAspectDelivery(interaction);
-    if (action === 'aspectPick') return promptAspectAmount(interaction);
-    if (action === 'aspectAmount') return applyAspectDelivery(interaction);
 
     if (!BUTTON_ACTIONS.includes(action)) return;
     await interaction.deferReply({ ephemeral: true });

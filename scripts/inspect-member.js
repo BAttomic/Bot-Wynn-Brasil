@@ -48,7 +48,8 @@ async function main() {
   console.log(`  guildRaids         ${n(stats.guildRaids)}      <- coluna 🛡️, ABSOLUTO da API`);
   console.log(`  raidsInGuild       ${n(stats.raidsInGuild)}`);
   console.log(`  contributed        ${n(stats.contributed)}`);
-  console.log(`  aspectBaseRaids    ${n(stats.aspectBaseRaids)}`);
+  console.log(`  aspects            ${n(stats.aspectsEarned)} gerados · ${n(stats.aspectsDelivered)} entregues`);
+  console.log(`  esmeraldas         ${n(stats.emeraldsEarned)} geradas · ${n(stats.emeraldsDelivered)} entregues (Es)`);
 
   console.log('\n[3] seasonParticipation (contadores por season)');
   const rows = await collections.seasonParticipation().find({ uuid }).sort({ seasonId: 1 }).toArray();

@@ -545,7 +545,7 @@ function scoringPanelPayload(params, view = DEFAULT_VIEW) {
             name: `${CATEGORIES.guildraid.emoji} ${CATEGORIES.guildraid.label} — ${n(w.guildRaid)} pts`,
             value:
               `> ${n(w.guildRaid)} pontos para **cada** membro nosso no grupo, no instante em que a raid fecha.` +
-              `\n> E ainda rende **${n(params?.aspectsPerGuildRaid)}** aspect a cada um que participou, em qualquer tamanho de party — sozinho também vale.`,
+              `\n> E ainda rende **aspects e esmeraldas**, divididos igualmente entre o grupo — as regras estão no canal de recompensas.`,
           },
           {
             name: `${CATEGORIES.war.emoji} ${CATEGORIES.war.label} — ${n(w.war)} pts`,
@@ -570,7 +570,7 @@ function scoringPanelPayload(params, view = DEFAULT_VIEW) {
               ` ${n(params?.inactivityForgivenessPerPoints)} pontos (teto de ${n(params?.inactivityForgivenessMaxDays)}).` +
               ` Quem contribui tem mais folga para sumir sem perder o slot.` +
               `\n> **Recompensas:** com ${n(params?.rewardMinGuildDays)} dias de guilda você entra na fila de Tomes` +
-              ` e recebe os aspects que as suas guild raids geraram.`,
+              ` e recebe os aspects e esmeraldas que as suas guild raids geraram.`,
           },
         ],
       },

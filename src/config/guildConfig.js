@@ -16,7 +16,7 @@ export const CHANNEL_KEYS = Object.freeze([
   'recruiters', // painel de recrutamento e anúncio de recruta aprovado
   'recruitAlerts', // privado: avisa a staff quando um neutro se registra
   'war', // convocação de guerra e alerta de território
-  'tome', // painel e fila de tomes
+  'tome', // 🏆・recompensas: painéis de Tomes, aspects e esmeraldas
   'loans', // painel de empréstimos e lembretes de vencimento
   'rules', // painel de regras
   'pings', // painel de auto-role; mensagens de membro são apagadas em 48h
@@ -80,7 +80,6 @@ export const PARAM_KEYS = Object.freeze([
   'inactivityReturnDays',
   'verifyHourUTC',
   'territoryDigestMinutes',
-  'aspectsPerGuildRaid',
   'rewardMinGuildDays',
   'tomeMinClassLevel',
   'warnsToBan',
@@ -128,8 +127,7 @@ export const PARAM_KEYS = Object.freeze([
  * @property {number}         inactivityReturnDays  prazo para LOGAR depois de dizer "ainda quero jogar"
  * @property {number}         verifyHourUTC         hora do relatório de verificação
  * @property {number}         territoryDigestMinutes intervalo do resumo de território (anti-spam)
- * @property {number}         aspectsPerGuildRaid   aspects que cada membro nosso rende por guild raid
- * @property {number}         rewardMinGuildDays    dias mínimos na guilda p/ fila de Tomes e receber aspects
+ * @property {number}         rewardMinGuildDays    dias mínimos na guilda p/ fila de Tomes e receber aspects/esmeraldas
  * @property {number}         tomeMinClassLevel     nível mínimo de uma classe p/ entrar na fila de Tomes
  * @property {number}         warnsToBan            advertências ativas que disparam o ban automático
  * @property {number}         warnExpiryDays        dias até uma advertência parar de contar
@@ -215,14 +213,12 @@ const DEFAULT_PARAMS = Object.freeze({
   // cada X minutos. Além do anti-spam, a espera deixa o contador de guerra
   // (cacheado) alcançar, então a atribuição de guerreiros fica correta.
   territoryDigestMinutes: 60,
-  // Isto de aspect por guild raid para CADA membro nosso que participou, seja qual
-  // for o tamanho da party (solo inclusive): uma party de 4 membros nossos rende 2
-  // aspects, 0,5 para cada um. Com aliados, cada guilda
-  // ganha proporcional aos seus. currentGuildRaids já é escopado à guilda, então
-  // aspects do player = aspectsPerGuildRaid × guild raids dele.
-  aspectsPerGuildRaid: 0.5,
+  // Aspects e esmeraldas por guild raid NÃO são parâmetro: seguem a tabela do
+  // jogo pelo tamanho do grupo (ver raidPayout em services/raidRewards.js).
+  //
   // Requisito do jogo para Tomes de guilda; aplicamos o mesmo à entrega de
-  // aspects. Quem tem menos que isto de guilda não entra na fila nem recebe.
+  // aspects e esmeraldas. Quem tem menos que isto de guilda não entra na fila
+  // nem recebe.
   rewardMinGuildDays: 7,
   // Requisito do jogo para USAR um Tome: ter pelo menos uma classe neste nível.
   tomeMinClassLevel: 100,

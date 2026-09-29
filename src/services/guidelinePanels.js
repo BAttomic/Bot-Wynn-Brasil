@@ -73,7 +73,7 @@ const CH = Object.freeze({
   gAllies: '1554176772688322570',
   recrutamento: '1309848293278486578',
   status: '1524920847637155861',
-  tomesAspects: '1263562192389673154',
+  recompensas: '1263562192389673154',
   eventos: '1532443328514097202',
   warDiretrizes: '1554170478179131403',
   warAnuncios: '1554170883432517675',
@@ -228,20 +228,20 @@ function guildPayload(p) {
 Tudo que você faz pela guilda vira ponto, e ponto vira três coisas: **prioridade na fila de Tomes**, **margem de inatividade** e o caminho para a ${r('staff')}. A contagem é automática — ninguém precisa avisar nada.
 
 > **Objetivo Semanal** — \`${fmt(w.weekly)} pontos\`, +${streak}% por semana seguida (até o dobro). É o que mais rende por tempo gasto.
-> **Guild Raid** — \`${fmt(w.guildRaid)} pontos\` para **cada** membro nosso no grupo. Ainda rende aspects (abaixo).
+> **Guild Raid** — \`${fmt(w.guildRaid)} pontos\` para **cada** membro nosso no grupo. Ainda rende aspects e esmeraldas (abaixo).
 > **Guerra** — \`${fmt(w.war)} pontos\` por guerra do **seu** contador, multiplicados pelo **peso do território** que a guilda tomou: fronteiras e QG do defensor, vezes a **dificuldade** que o jogo dá àquela torre (teto de x${fmt(p.territoryMultiplierCap)}).
 > **Guild XP** (\`/guild xp 100\`) — \`${fmt(xp.pts)} ponto\` a cada \`${fmt(xp.xp)}\`. Sobe o nível da guilda, o que libera mais slots de membro e de baú.
 > **Farm em grupo** — não pontua, mas rende amizade, dicas e progresso mais rápido.
 
 Em ${c('status')}, o botão **Meus pontos** mostra os seus, sua posição em cada categoria e quantos dias de tolerância eles te dão.
 
-## 2. Tomes e Aspects
-São as duas recompensas que a guilda distribui, e as duas saem por fila automática em ${c('tomesAspects')}. Não precisa pedir nem cobrar.
+## 2. Recompensas: Tomes, Aspects e Esmeraldas
+São as três recompensas que a guilda distribui, e todas saem sem precisar pedir em ${c('recompensas')} — cada uma com seu painel, suas regras e as últimas entregas.
 
 Os Tomes nascem do **objetivo semanal**: quanto mais membros completam o seu, mais Tomes a guilda ganha na semana — **2** com 5 objetivos, mais **4** com 15 e mais **8** com 30. São até **14 Tomes por semana** se cada um fizer a sua parte.
 
 > **Tomes** — a fila é por **pontos**: quem mais contribuiu recebe primeiro, **1 Tome por objetivo semanal** cumprido. Requisitos do próprio jogo: alguma classe no nível **${p.tomeMinClassLevel}** e **${p.rewardMinGuildDays} dias** de guilda.
-> **Aspects** — saem das **guild raids**: cada raid rende \`${fmt(p.aspectsPerGuildRaid)}\` aspect a **cada** membro nosso que participou, inclusive quem fechou **sozinho**. Também exige **${p.rewardMinGuildDays} dias** de guilda. Aspect é item inteiro: meio aspect fica no seu saldo e vira unidade na próxima raid.
+> **Aspects e Esmeraldas** — saem das **guild raids**. Com **1 ou 2** membros nossos no grupo a guilda recebe **1 aspect + 2.048 Es**; com **3 ou 4**, **2 aspects + 4.096 Es** — tudo **dividido igualmente** entre quem participou. A parte quebrada fica no seu saldo e soma com as próximas raids; a entrega é em unidades inteiras (1 aspect, ou lotes de 1.024 Es). Também exige **${p.rewardMinGuildDays} dias** de guilda.
 
 ## 3. Inatividade e Expulsão
 > Membros que ficarem **${base} dias offline** podem ser removidos.
@@ -340,7 +340,7 @@ function staffPayload(p) {
       description:
 `### 🤝 O papel da Staff
 > A Staff é quem mantém a guilda de pé no dia a dia. Contamos com você em três frentes — **moderação**, **recrutamento** e **contribuição** — e em especial com:
-> 🛡️ **Guild Raids** — movem a guilda e rendem aspects para todos. A Staff puxa o ritmo.
+> 🛡️ **Guild Raids** — movem a guilda e rendem aspects e esmeraldas para todos. A Staff puxa o ritmo.
 > 🌱 **Novatos** — quem chega precisa de um norte: informação, e quando der, ajuda direta, como os sets de XP do Guild Bank emprestados em ${c('emprestimos')} e os XP grinds em grupo.
 > 📚 **Confiança** — a palavra da Staff é referência. Na dúvida, confira antes de responder.
 

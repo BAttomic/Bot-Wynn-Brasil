@@ -21,8 +21,8 @@ import { ensureGuidelinePanels } from './services/guidelinePanels.js';
 import { ensurePingRolePanels, attachPingRoleHandler } from './services/pingRoles.js';
 import { attachHierarchyGuard } from './services/hierarchyGuard.js';
 import { retireDownloadsPanel, ensureScoringPanel, ensureLeaderboardPanel } from './services/leaderboardPanel.js';
-import { ensureTomePanel, ensureDeliveryLogPanel } from './services/tomes.js';
-import { ensureAspectBaselines } from './services/aspects.js';
+import { ensureTomePanel } from './services/tomes.js';
+import { migrateRaidRewards, adoptLegacyLogPanel, ensureRaidRewardPanel } from './services/raidRewards.js';
 import { warnIfEmpty } from './services/guildList.js';
 import { runPingsCleanup } from './jobs/pingsCleanup.js';
 import { runTomeCleanup } from './jobs/tomeCleanup.js';
@@ -70,9 +70,12 @@ async function main() {
   startHealthServer(() => ready);
 
   await connectMongo();
-  // Fixa a baseline dos aspects no valor atual de guild raids: todo mundo passa
-  // a contar do ZERO a partir de agora. Idempotente (só mexe em quem falta).
-  await ensureAspectBaselines();
+  // Aspects da regra antiga (0,5 por raid) viram o saldo inicial do livro-razão
+  // novo, que o watcher credita raid a raid. Tem de rodar ANTES do watcher
+  // creditar a primeira raid; no-op depois da primeira vez.
+  await migrateRaidRewards(guildId);
+  // O antigo painel de histórico vira o de Aspects, mantendo a ordem do canal.
+  await adoptLegacyLogPanel();
   // Peso novo reescreve o passado: o livro-razão guarda quantidades, e os pontos
   // saem dos pesos atuais. Reapura na hora para o ranking não esperar a apuração.
   const revisoes = await applyWeightRevisions(guildId);
@@ -136,9 +139,10 @@ async function main() {
         ['estáticos', () => ensureStaticPanels(client, guildId)],
         ['diretrizes', () => ensureGuidelinePanels(client, guildId)],
         ['pings', () => ensurePingRolePanels(client, guildId)],
-        // Ordem no canal de tomes: fila ao vivo primeiro, histórico logo abaixo.
+        // Ordem no canal de recompensas: Tomes, Aspects, Esmeraldas.
         ['tomes', () => ensureTomePanel(client, guildId)],
-        ['log de entregas', () => ensureDeliveryLogPanel(client, guildId)],
+        ['aspects', () => ensureRaidRewardPanel(client, guildId, 'aspect')],
+        ['esmeraldas', () => ensureRaidRewardPanel(client, guildId, 'emerald')],
         // Ordem no canal de status: info (ao vivo, com os downloads dentro) →
         // como pontuar → leaderboard. As duas últimas são o bloco de
         // contribuição: a regra em cima, o ranking embaixo.
@@ -159,7 +163,7 @@ async function main() {
       }
     }, { runOnStart: true });
     everyMinutes(60, 'pingsCleanup', () => runPingsCleanup(client), { runOnStart: true });
-    // Anúncios de entrega de tome/aspect somem 3 dias depois (o painel fica).
+    // Mensagens soltas no canal de recompensas somem em 24h (os painéis ficam).
     everyMinutes(60, 'tomeCleanup', () => runTomeCleanup(client), { runOnStart: true });
     everyMinutes(30, 'recruitCleanup', () => runRecruitCleanup(client), { runOnStart: true });
     // Cobranças de empréstimo somem do canal 48h depois de o acordo fechar; o

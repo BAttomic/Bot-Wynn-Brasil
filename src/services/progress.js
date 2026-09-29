@@ -193,8 +193,8 @@ async function runSnapshots() {
         $set: {
           username: m.username,
           // As marcas d'água, não o valor cru desta resposta. Quando a API
-          // devolve o campo zerado, o cru faria a coluna 🛡️ do painel e a conta
-          // de aspects caírem para 0 até a próxima apuração; a marca não desce.
+          // devolve o campo zerado, o cru faria a coluna 🛡️ do painel cair para
+          // 0 até a próxima apuração; a marca não desce.
           ...marcas,
           lastWars: marcas.warsHigh,
           lastRaids: marcas.raidsHigh,
@@ -204,15 +204,15 @@ async function runSnapshots() {
           guildRaids: marcas.guildRaidsHigh,
           weeklyStreak: metrics.weeklyStreak,
           // Data REAL de entrada na guilda (API), usada na regra dos 7 dias de
-          // Tomes/aspects. Só grava quando a API traz a data.
+          // Tomes, aspects e esmeraldas. Só grava quando a API traz a data.
           ...(m.joined && { joinedGuildAt: m.joined }),
           updatedAt: now,
         },
         // weeklyObjectives não entra: é derivado do livro-razão pelo recompute.
         $inc: { guildWars: dWars, raidsInGuild: dRaids },
-        // Aspects contam do ZERO: a baseline de um membro novo é o guildRaids que
-        // ele já tinha ao aparecer, então só os raids futuros geram aspect.
-        $setOnInsert: { firstSeenAt: now, aspectBaseRaids: metrics.guildRaids },
+        // Aspects e esmeraldas NÃO saem daqui: o watcher os credita no fim de
+        // cada raid, pelo tamanho do grupo (ver services/raidRewards.js).
+        $setOnInsert: { firstSeenAt: now },
       },
       { upsert: true },
     );

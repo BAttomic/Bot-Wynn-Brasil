@@ -61,11 +61,11 @@ async function ensureIndexes() {
     .createIndex({ seasonId: 1, uuid: 1 }, { unique: true });
   await collections.seasons().createIndex({ active: 1 });
   await collections.tomeQueue().createIndex({ uuid: 1 }, { unique: true });
-  // Histórico de entregas (Tomes e aspects). Substituiu o anúncio por entrega no
-  // canal: o painel de log lê as últimas daqui, e a leitura é sempre "as N mais
-  // recentes". Guarda 90 dias — o acumulado por pessoa vive em guildStats, aqui
-  // é só o extrato recente.
-  await collections.rewardLog().createIndex({ at: -1 });
+  // Histórico de entregas (Tomes, aspects e esmeraldas). Substituiu o anúncio
+  // por entrega no canal: cada painel lê as últimas do próprio tipo, e a leitura
+  // é sempre "as N mais recentes". Guarda 90 dias — o acumulado por pessoa vive
+  // em guildStats, aqui é só o extrato recente.
+  await collections.rewardLog().createIndex({ kind: 1, at: -1 });
   await collections.rewardLog().createIndex({ at: 1 }, { expireAfterSeconds: 90 * 86_400 });
   await collections.loans().createIndex({ borrowerDiscordId: 1, status: 1 });
   await collections.warCalls().createIndex({ messageId: 1 }, { unique: true });

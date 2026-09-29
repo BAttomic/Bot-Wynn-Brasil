@@ -29,7 +29,7 @@ function roteiro(canais) {
     ['rules', '📜', 'as regras da comunidade e da guilda — vale a leitura'],
     ['pings', '🔔', 'escolha seus cargos de notificação (guerra, raid, evento)'],
     ['panel', '📊', 'status da guilda ao vivo, ranking e os **seus pontos**'],
-    ['tome', '📕', 'fila de tomes e aspects, por ordem de pontuação'],
+    ['tome', '🏆', 'recompensas da guilda: Tomes, aspects e esmeraldas'],
     ['events', '🏆', 'eventos de competição e sorteios'],
     ['loans', '💰', 'empréstimos do baú da guilda'],
     ['forum', '💬', 'fórum da comunidade — dúvidas, builds, conversa'],

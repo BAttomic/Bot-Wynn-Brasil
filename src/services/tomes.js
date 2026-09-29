@@ -2,15 +2,13 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { collections } from '../db/mongo.js';
 import { getConfig } from '../config/guildConfig.js';
 import { ensurePanel } from './panels.js';
-import { listAspects } from './aspects.js';
+import { RAID_REWARD_KINDS } from './raidRewards.js';
+import { deliveryLogField, fieldValue } from './rewardLog.js';
 import { daysSince, minGuildDays } from './eligibility.js';
 import { brandWithLogo, logoAttachment } from '../util/assets.js';
-import { brDateTime } from '../util/format.js';
 
 const STATE_ID = 'tomePanel';
-const LOG_STATE_ID = 'tomeLogPanel';
-const TOP = 10; // linhas de cada seção no painel ao vivo
-const LOG_SIZE = 30; // entregas mostradas no painel de histórico
+const TOP = 10; // pessoas mostradas na fila do painel
 
 /**
  * Quantos Tomes a pessoa ainda tem DIREITO a receber: cada objetivo semanal da
@@ -177,78 +175,18 @@ export async function tomeStatus(uuid) {
   return { delivered, entitled, credits: tomeCredits(stat), excess: Math.max(0, delivered - entitled) };
 }
 
-function fmtAsp(n) {
-  return n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
-}
-
-/**
- * Registra uma entrega no histórico.
- *
- * Antes disto, cada entrega virava uma MENSAGEM no canal, apagada 24h depois: o
- * canal virava um mural de avisos repetidos e, passado um dia, não sobrava
- * registro nenhum de quem recebeu o quê. Agora a entrega é uma LINHA, e o painel
- * de log a mostra junto das outras 29.
- *
- * @param {{kind:'tome'|'aspect', uuid:string, username:string, discordId?:string|null, amount?:number, byDiscordId:string}} p
- */
-export async function recordDelivery({ kind, uuid, username, discordId = null, amount = 1, byDiscordId }) {
-  await collections.rewardLog().insertOne({
-    at: new Date(),
-    kind,
-    uuid,
-    username,
-    discordId,
-    amount,
-    byDiscordId,
-  });
-}
-
-/**
- * As últimas entregas, da mais recente para a mais antiga.
- *
- * O `_id` desempata: duas entregas no mesmo milissegundo empatam no `at`, e o
- * Mongo não promete ordem entre empates — o painel mostraria as duas em ordem
- * arbitrária, trocando de posição a cada atualização. ObjectId é monotônico,
- * então ele resolve o empate na ordem real de inserção.
- */
-export async function recentDeliveries(limit = LOG_SIZE) {
-  return collections.rewardLog().find({}).sort({ at: -1, _id: -1 }).limit(limit).toArray();
-}
-
 function btn(id, label, emoji, style) {
   return new ButtonBuilder().setCustomId(id).setLabel(label).setEmoji(emoji).setStyle(style);
 }
 
-/**
- * Junta as linhas respeitando o teto de 1024 do campo de embed, cortando por
- * LINHA inteira. Estourar o limite faz a edição do painel falhar por completo —
- * o painel congela e só o log denuncia.
- */
-function fieldValue(linhas, max = 1024) {
-  const out = [];
-  let tamanho = 0;
-  for (const linha of linhas) {
-    if (tamanho + linha.length + 1 > max) break;
-    out.push(linha);
-    tamanho += linha.length + 1;
-  }
-  return out.join('\n');
-}
-
-// Painel AO VIVO do canal de tomes/aspects: fila de Tomes (por pontos) + aspects
-// gerados em guild raids ainda a entregar. Republicado pelo job de painéis e
-// logo após cada ação (entrar/sair da fila, entregar tome/aspect).
+// Painel AO VIVO de Tomes: regras, fila (por pontos) e as últimas entregas.
+// Republicado pelo job de painéis e logo após cada ação (entrar/sair da fila,
+// entregar). Aspects e esmeraldas têm painel próprio (services/raidRewards.js).
 export async function buildTomePanel(guildId) {
   const { params } = await getConfig(guildId);
   const minDays = Number(params?.rewardMinGuildDays) || 7;
   const minLvl = Number(params?.tomeMinClassLevel) || 100;
   const { ready: queue, waiting: queueWaiting } = await queueView(guildId);
-  const aspects = await listAspects(guildId);
-  // Só quem tem unidade INTEIRA a receber: aspect não se parte, e meio acumulado
-  // não é entregável.
-  const pending = aspects.filter((a) => a.eligible && a.deliverable >= 1).sort((a, b) => b.deliverable - a.deliverable);
-  // Já têm aspect acumulado, mas ainda não completaram os 7 dias de guilda.
-  const waiting = aspects.filter((a) => !a.eligible && a.deliverable >= 1).length;
 
   // Duas linhas por pessoa: a posição e, logo abaixo, o acumulado de vida. Quem
   // olha a fila quer saber "quanto essa pessoa já levou?" antes de entregar, e
@@ -270,19 +208,17 @@ export async function buildTomePanel(guildId) {
       .join(' · ');
     queueLines.push(`-# +${queueWaiting.length} em espera (${motivos})`);
   }
-  // Só o que a staff precisa fazer: quantas unidades INTEIRAS entregar. A meia
-  // unidade que sobra fica no saldo e não é acionável agora.
-  const aspectLines = pending
-    .slice(0, TOP)
-    .map((a) => `**${a.username}** — **${a.deliverable}** a entregar${a.pending % 1 ? ` (+${fmtAsp(a.pending % 1)} acumulando)` : ''}`);
-  if (waiting) aspectLines.push(`-# +${waiting} aguardando completar ${minDays} dias na guilda`);
 
   const embed = {
-    title: '📜 Tomes & ✨ Aspects — Wynn Brasil',
+    title: '📜 Tomes — Objetivo Semanal',
     color: 0x9b59b6,
-    description:
-      'Entre na **fila de Tomes** (ordenada por pontos de contribuição) e acompanhe os **aspects** que você gerou em guild raids, a serem entregues pela staff.\n' +
-      `-# Fila de Tomes: uma classe **nível ${minLvl}** e **1 Tome por missão semanal** cumprida (acumula). Você pode entrar antes, mas só passa a valer na fila com **${minDays} dias** de guilda.`,
+    description: [
+      'Os Tomes nascem do **objetivo semanal** da guilda e saem por fila — não precisa pedir.',
+      '> **1 Tome por objetivo semanal** que você cumprir. Acumula: 3 semanais = direito a 3 Tomes.',
+      '> A fila é por **pontos de contribuição**: quem mais contribuiu recebe primeiro.',
+      `> Requisitos do jogo: uma classe **nível ${minLvl}** e **${minDays} dias** de guilda. Dá para entrar antes; você só aparece na fila quando cumprir os dois.`,
+      '> A fila vale por **1 Tome**: recebeu, sai. Tem direito a mais? Entre de novo, sem espera.',
+    ].join('\n'),
     fields: [
       {
         name: `📜 Fila de Tomes (${queue.length})`,
@@ -290,27 +226,23 @@ export async function buildTomePanel(guildId) {
         // melhor que o painel inteiro falhar ao editar.
         value: fieldValue(queueLines),
       },
-      {
-        name: `✨ Aspects a entregar (${pending.length})`,
-        value: fieldValue(aspectLines) || 'Nada pendente 🎉',
-      },
+      await deliveryLogField('tome', () => '📜 Tome'),
     ],
-    footer: { text: 'Fila por pontos · 1 tome por missão semanal · aspects: 0,5 por guild raid · apurado de hora em hora' },
+    footer: { text: 'Fila por pontos · 1 Tome por objetivo semanal · horário de Brasília' },
     timestamp: new Date().toISOString(),
   };
 
   return brandWithLogo({
     embeds: [embed],
+    // Sem menções: o log é um extrato, não um aviso.
+    allowedMentions: { parse: [] },
+    // Sem "Ver fila": a fila já está no embed acima, e o botão só gerava uma
+    // cópia efêmera dela para quem clicasse.
     components: [
-      // Sem "Ver fila": a fila já está no embed acima, e o botão só gerava uma
-      // cópia efêmera dela para quem clicasse.
       new ActionRowBuilder().addComponents(
         btn('tome:join', 'Entrar na fila', '📜', ButtonStyle.Success),
         btn('tome:leave', 'Sair da fila', '🚪', ButtonStyle.Danger),
-      ),
-      new ActionRowBuilder().addComponents(
         btn('tome:deliver', 'Entregar Tome', '🎁', ButtonStyle.Primary),
-        btn('tome:deliverAspect', 'Entregar Aspect', '✨', ButtonStyle.Primary),
       ),
     ],
   });
@@ -321,45 +253,13 @@ export async function ensureTomePanel(client, guildId) {
   return ensurePanel(client, cfg.channels?.tome, STATE_ID, await buildTomePanel(guildId), 'tomes', [logoAttachment()]);
 }
 
-/** Uma linha do histórico: quem recebeu o quê, de quem, e quando. */
-function logLine(d) {
-  const quem = d.discordId ? `<@${d.discordId}>` : `**${d.username}**`;
-  const oque = d.kind === 'tome' ? '📜 Tome' : `✨ ${fmtAsp(d.amount)} aspect(s)`;
-  return `${brDateTime(d.at)} — ${oque} → ${quem} · por <@${d.byDiscordId}>`;
-}
-
 /**
- * Painel de HISTÓRICO: as últimas 30 entregas, numa mensagem só que se atualiza.
- *
- * É a substituição do anúncio por entrega. Uma mensagem editada não pinga
- * ninguém, e é isso que tira o spam: quem recebeu já sabe (recebeu o item em
- * jogo), e quem quer conferir o que foi entregue olha aqui em vez de rolar o
- * canal.
+ * Os painéis fixos do canal de recompensas — a limpeza não pode apagá-los. O
+ * `tomeLogPanel` fica na lista até o boot adotá-lo como painel de Aspects
+ * (ver adoptLegacyLogPanel).
  */
-export async function buildDeliveryLogPanel() {
-  const linhas = (await recentDeliveries(LOG_SIZE)).map(logLine);
-  return {
-    embeds: [
-      {
-        title: '🧾 Últimas entregas',
-        color: 0x2ecc71,
-        description: linhas.length
-          ? linhas.join('\n').slice(0, 4000)
-          : 'Nenhuma entrega registrada ainda.',
-        footer: { text: `Últimas ${LOG_SIZE} entregas de Tomes e aspects · horário de Brasília` },
-        timestamp: new Date().toISOString(),
-      },
-    ],
-    // Sem menções: o painel é um extrato, não um aviso. Os <@id> continuam
-    // clicáveis, mas ninguém é notificado a cada entrega.
-    allowedMentions: { parse: [] },
-  };
-}
-
-export async function ensureDeliveryLogPanel(client, guildId) {
-  const cfg = await getConfig(guildId);
-  return ensurePanel(client, cfg.channels?.tome, LOG_STATE_ID, await buildDeliveryLogPanel(), 'log de entregas');
-}
-
-/** Os dois painéis fixos do canal de tomes — a limpeza não pode apagá-los. */
-export const TOME_PANEL_STATE_IDS = Object.freeze([STATE_ID, LOG_STATE_ID]);
+export const REWARD_PANEL_STATE_IDS = Object.freeze([
+  STATE_ID,
+  ...Object.values(RAID_REWARD_KINDS).map((k) => k.stateId),
+  'tomeLogPanel',
+]);
