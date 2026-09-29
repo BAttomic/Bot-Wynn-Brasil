@@ -238,6 +238,8 @@ Em ${c('status')}, o botão **Meus pontos** mostra os seus, sua posição em cad
 ## 2. Tomes e Aspects
 São as duas recompensas que a guilda distribui, e as duas saem por fila automática em ${c('tomesAspects')}. Não precisa pedir nem cobrar.
 
+Os Tomes nascem do **objetivo semanal**: quanto mais membros completam o seu, mais Tomes a guilda ganha na semana — **2** com 5 objetivos, mais **4** com 15 e mais **8** com 30. São até **14 Tomes por semana** se cada um fizer a sua parte.
+
 > **Tomes** — a fila é por **pontos**: quem mais contribuiu recebe primeiro, **1 Tome por objetivo semanal** cumprido. Requisitos do próprio jogo: alguma classe no nível **${p.tomeMinClassLevel}** e **${p.rewardMinGuildDays} dias** de guilda.
 > **Aspects** — saem das **guild raids**: cada raid rende \`${fmt(p.aspectsPerGuildRaid)}\` aspect a **cada** membro nosso que participou, inclusive quem fechou **sozinho**. Também exige **${p.rewardMinGuildDays} dias** de guilda. Aspect é item inteiro: meio aspect fica no seu saldo e vira unidade na próxima raid.
 
