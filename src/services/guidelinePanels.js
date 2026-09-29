@@ -179,6 +179,12 @@ function warPayload() {
   return embed('📃 Diretrizes da WnBR War Team', 0xe74c3c,
 `Valem para ${r('warTeam')}, junto com as ${c('gDiretrizes')} da guilda.
 
+### ⚔️ O papel da War Team
+> A War Team é quem defende e conquista o território da Wynn Brasil. O coração do time é **estar nas guerras**, e cada um soma do jeito que pode:
+> 🧪 **Recursos** — consumíveis, ingredientes e materiais deixam o time sempre pronto. Toda ajuda conta.
+> 🧠 **Conhecimento** — evoluir as builds, descobrir auraspots e propor estratégias é o que faz o time crescer.
+> 🔒 **Sigilo** — o que é da guerra fica no time: builds, estratégias e consumíveis não saem dele. Vazamento resulta em banimento.
+
 ### 🎖️ Próximas promoções
 > **${TRILHAS.estrategistaWar} guerras** pela WnBR → ${r('estrategistaWar')}, no lugar do ${r('capitaoWar')}
 > ${r('chefeWar')} → a critério do Líder de Guerra. Inclui mover o QG no jogo.
@@ -189,9 +195,6 @@ function warPayload() {
 
 ### 📡 Convocação
 > Guerras são convocadas por ping manual.
-
-### 🔒 Sigilo
-> Builds, estratégias e consumíveis do time são privados. Vazamento resulta em banimento.
 
 ### ⚖️ Limites
 > A ${r('warTeam')} não tem poder de kick, ban ou decisão sobre a guilda — isso é da ${r('staff')}.
@@ -209,6 +212,12 @@ function warPayload() {
 function staffPayload(p) {
   return embed('📃 Diretrizes da WnBR Guild Staff', 0xf1c40f,
 `Valem para ${r('staff')}, junto com as ${c('gDiretrizes')} da guilda.
+
+### 🤝 O papel da Staff
+> A Staff é quem mantém a guilda de pé no dia a dia. Contamos com você em três frentes — **moderação**, **recrutamento** e **contribuição** — e em especial com:
+> 🛡️ **Guild Raids** — movem a guilda e rendem aspects para todos. A Staff puxa o ritmo.
+> 🌱 **Novatos** — quem chega precisa de um norte: informação, e quando der, ajuda direta, como os sets de XP do Guild Bank emprestados em ${c('emprestimos')} e os XP grinds em grupo.
+> 📚 **Confiança** — a palavra da Staff é referência. Na dúvida, confira antes de responder.
 
 ### 🎖️ Próximas promoções
 > **${fmt(TRILHAS.estrategistaStaff)} pontos** → o bot avisa os ${r('chefeStaff')}; um deles abre a votação para ${r('estrategistaStaff')}
