@@ -1,4 +1,5 @@
 import { AuditLogEvent, PermissionFlagsBits } from 'discord.js';
+import { plainMentions } from '../util/plainMentions.js';
 import { log } from '../util/log.js';
 
 /**
@@ -65,7 +66,8 @@ async function alertar(client, guild, titulo, linhas, color = 0xe74c3c) {
     embeds: [
       {
         title: titulo,
-        description: linhas.join('\n'),
+        // Texto puro: o staff-bot não tem ping nenhum, nem menção clicável.
+        description: await plainMentions(client, guild, linhas.join('\n')),
         color,
         footer: { text: 'Fundador no topo, Wynn Brasil BOT logo abaixo, mais ninguém acima do bot.' },
         timestamp: new Date().toISOString(),

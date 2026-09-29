@@ -20,6 +20,7 @@ import { logoAttachment, brandWithLogo } from '../util/assets.js';
 import { log } from '../util/log.js';
 import { pick } from '../util/i18n.js';
 import { stripNickTag } from '../util/format.js';
+import { plainMentions } from '../util/plainMentions.js';
 
 export { stripNickTag };
 
@@ -305,6 +306,8 @@ async function notifyRecruitAlert(client, cfg, { player, kind, discordId }) {
   const guildLine = player.guild
     ? `[${player.guild.prefix}] ${player.guild.name} — ${player.guild.rank}`
     : 'Sem guilda';
+  // Canal de staff: sem ping nenhum, nem menção clicável (ver util/plainMentions.js).
+  const quem = await plainMentions(client, channel.guild, `<@${discordId}>`);
 
   await channel
     .send({
@@ -313,7 +316,7 @@ async function notifyRecruitAlert(client, cfg, { player, kind, discordId }) {
           title: kind === 'ally' ? '🤝 Aliado registrado' : '🆕 Possível novo membro',
           color: kind === 'ally' ? 0x1abc9c : 0x95a5a6,
           description:
-`**Discord:** <@${discordId}>
+`**Discord:** ${quem}
 **Nick:** \`${player.username}\`
 **Guilda atual:** \`${guildLine}\`
 **Guerras (conta inteira):** \`${player.globalData?.wars ?? 0}\`
