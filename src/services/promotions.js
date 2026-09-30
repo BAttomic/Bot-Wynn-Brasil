@@ -3,9 +3,10 @@ import { ObjectId } from 'mongodb';
 import { collections } from '../db/mongo.js';
 import { getConfig } from '../config/guildConfig.js';
 import { audit } from './audit.js';
-import { canVote } from './permissions.js';
+import { canVote, hasLevel, LEVEL } from './permissions.js';
 import { eligibleVoterCount, tally, decide, labelFor } from './applications.js';
 import { rankWeight } from './guildData.js';
+import { plainMentions } from '../util/plainMentions.js';
 import { log } from '../util/log.js';
 
 /**
@@ -30,6 +31,7 @@ const ROLE = Object.freeze({
   capitaoStaff: '1268208319865159773',
   estrategistaStaff: '1268208318946742312',
   chefeStaff: '1554224233721372692',
+  fundador: '1268208310423781426',
 });
 
 const CH_CHEFES = '1332548770940063776'; // canal dos Chefes (Staff)
@@ -40,6 +42,8 @@ const fmt = (n) => Number(n).toLocaleString('pt-BR');
  * Cada trilha, do cargo mais alto para o mais baixo. `auto`: o bot dá sozinho
  * ao chegar lá. `vote`: o bot abre a votação dos Chefes (Staff). Sem nenhum dos
  * dois, o cargo é manual. `rank` é o rank do jogo que o cargo representa.
+ * `confirm: 'fundador'`: aprovado na votação, só vale depois do clique do
+ * Fundador (ver pedirFundador).
  *
  * A promoção é anunciada no canal de anúncios da PRÓPRIA trilha — nunca nos
  * anúncios gerais da WnBR.
@@ -66,7 +70,7 @@ export const TRACKS = Object.freeze({
     team: ROLE.guildStaff,
     anuncios: '1554169631231451276', // anúncios da Staff
     steps: Object.freeze([
-      { key: 'chefeStaff', role: ROLE.chefeStaff, label: 'Chefe (Staff)', rank: 'chief' },
+      { key: 'chefeStaff', role: ROLE.chefeStaff, label: 'Chefe (Staff)', rank: 'chief', confirm: 'fundador' },
       { key: 'estrategistaStaff', role: ROLE.estrategistaStaff, label: 'Estrategista (Staff)', rank: 'strategist', vote: TRILHAS.estrategistaStaff },
       { key: 'capitaoStaff', role: ROLE.capitaoStaff, label: 'Capitão (Staff)', rank: 'captain', auto: TRILHAS.capitaoStaff },
     ]),
@@ -182,6 +186,95 @@ async function anunciar(client, track, linhas) {
 }
 
 /**
+ * Dá e tira cargos UM POR VEZ, e anota a mudança em `held`.
+ *
+ * Nunca em lista: `roles.add([...])` e `roles.remove([...])` do discord.js
+ * regravam a lista INTEIRA de cargos a partir do cache, que só se atualiza
+ * quando o evento do gateway chega. Um `add` seguido de `remove` em lista
+ * desfazia o `add` — foi assim que um Estrategista (Staff) recém-aprovado ficou
+ * sem cargo e ganhou Capitão de novo no ciclo seguinte. Um por vez, cada chamada
+ * mexe só no próprio cargo.
+ *
+ * `held` é a visão local dos cargos do membro: o cache está atrasado, e o que
+ * vem depois no mesmo ciclo precisa ver o que acabou de mudar.
+ *
+ * @param {import('discord.js').GuildMember} member
+ * @param {Set<string>} held
+ * @param {string[]} dar
+ * @param {string[]} tirar
+ * @param {string} motivo
+ * @returns {Promise<boolean>} se todos os cargos de `dar` entraram
+ */
+async function trocarCargos(member, held, dar, tirar, motivo) {
+  for (const id of dar) {
+    if (held.has(id)) continue;
+    const ok = await member.roles.add(id, motivo).then(() => true, () => false);
+    if (!ok) return false;
+    held.add(id);
+  }
+  for (const id of tirar) {
+    if (!held.has(id)) continue;
+    await member.roles.remove(id, motivo).catch(() => {});
+    held.delete(id);
+  }
+  return true;
+}
+
+/**
+ * Põe o cargo de uma votação aprovada: o cargo (e o de time, se faltar) entra,
+ * e os de baixo da mesma trilha saem. Quem já tem um cargo acima fica como está.
+ * @returns {Promise<'aplicado'|'ja-tinha'|'falhou'>}
+ */
+async function aplicarVotado(member, held, step, motivo) {
+  const track = trackOf(step);
+  const comVotado = { has: (rid) => rid === step.role || held.has(rid) };
+  const plano = planTrack(track, comVotado, 0);
+  if (plano.top !== step.key) return 'ja-tinha';
+  if (held.has(step.role) && !plano.remove.length && !plano.team) return 'ja-tinha';
+  const dar = [step.role, plano.team && track.team].filter(Boolean);
+  const tirar = plano.remove.map((k) => STEP_BY_KEY.get(k).role);
+  return (await trocarCargos(member, held, dar, tirar, motivo)) ? 'aplicado' : 'falhou';
+}
+
+/** Folga antes de o reparo mexer numa votação: quem a decidiu ainda pode estar aplicando. */
+const REPARO_FOLGA_MS = 5 * 60_000;
+
+/**
+ * Votações aprovadas cujo cargo não ficou: a aplicação falhou (cargo do bot
+ * abaixo, Discord fora) ou é de antes da correção de `trocarCargos`. O cargo é
+ * devido, então entra aqui, sem anúncio — a aprovação já foi anunciada.
+ *
+ * `settledAt` é quando o cargo passou a ser devido: o fim da votação, ou o
+ * clique do Fundador. Votação antiga não tem o campo e vale pelo `decidedAt`.
+ */
+async function repararVotados(client, guild, alvos, heldOf) {
+  const limite = new Date(Date.now() - REPARO_FOLGA_MS);
+  const pendentes = await collections
+    .promotionVotes()
+    .find({
+      discordId: { $in: alvos.map((a) => a.member.id) },
+      status: 'approved',
+      appliedAt: { $exists: false },
+      $or: [
+        { settledAt: { $lte: limite } },
+        { settledAt: { $exists: false }, owner: { $exists: false }, decidedAt: { $lte: limite } },
+      ],
+    })
+    .toArray();
+
+  for (const v of pendentes) {
+    const alvo = alvos.find((a) => a.member.id === v.discordId);
+    const step = STEP_BY_KEY.get(v.role);
+    const res = await aplicarVotado(alvo.member, heldOf.get(alvo.member.id), step, 'Votação aprovada (reparo)');
+    if (res === 'falhou') continue;
+    await collections.promotionVotes().updateOne({ _id: v._id }, { $set: { appliedAt: new Date() } });
+    if (res === 'aplicado') {
+      await audit(client, guild.id, `🔧 <@${v.discordId}> recebeu <@&${step.role}>, aprovado em votação — o cargo não tinha ficado.`);
+    }
+  }
+}
+
+/**
  * Aplica as trilhas a quem está na guilda: dá o cargo que a pessoa alcançou,
  * tira os de baixo da mesma trilha, garante o cargo de time e abre a votação
  * quando o próximo passo é votado. Chamado pelo roleSync a cada ciclo.
@@ -203,20 +296,23 @@ export async function syncTrailRoles(client, guild, alvos) {
     .find({ uuid: { $in: alvos.map((a) => a.uuid) } }, { projection: { uuid: 1, points: 1, guildWars: 1 } })
     .toArray();
   const statsByUuid = new Map(stats.map((s) => [s.uuid, s]));
+  const heldOf = new Map(alvos.map((a) => [a.member.id, new Set(a.member.roles.cache.keys())]));
+
+  // Antes das trilhas: o cargo votado muda o que a trilha enxerga.
+  await repararVotados(client, guild, alvos, heldOf);
 
   const anuncios = new Map(Object.values(TRACKS).map((t) => [t, []]));
   const ajustes = [];
   for (const { member, uuid, nome } of alvos) {
     const s = statsByUuid.get(uuid) ?? {};
+    const held = heldOf.get(member.id);
     for (const track of Object.values(TRACKS)) {
       const valor = Number(s[track.stat] ?? 0);
-      const plano = planTrack(track, member.roles.cache, valor);
+      const plano = planTrack(track, held, valor);
 
       const dar = [plano.give && STEP_BY_KEY.get(plano.give).role, plano.team && track.team].filter(Boolean);
       const tirar = plano.remove.map((k) => STEP_BY_KEY.get(k).role);
-      let ok = true;
-      if (dar.length) ok = await member.roles.add(dar, 'Trilha de cargo').then(() => true, () => false);
-      if (ok && tirar.length) await member.roles.remove(tirar, 'Um cargo por trilha').catch(() => {});
+      const ok = await trocarCargos(member, held, dar, tirar, 'Trilha de cargo');
 
       if (!ok) {
         ajustes.push(`⚠️ Não consegui dar ${dar.map((id) => `<@&${id}>`).join(' e ')} a <@${member.id}> — o cargo do bot está abaixo?`);
@@ -235,7 +331,11 @@ export async function syncTrailRoles(client, guild, alvos) {
         ajustes.push(`🧹 <@${member.id}> ${partes.join(' e ')} — já tem <@&${STEP_BY_KEY.get(plano.top).role}>.`);
       }
 
-      if (plano.vote) await openPromotionVote(client, guild, { member, uuid, nome, step: STEP_BY_KEY.get(plano.vote), valor, track });
+      // A votação automática abre UMA vez por pessoa e cargo: reprovada, só um
+      // Chefe a reabre, com /promocao abrir.
+      if (plano.vote && !(await collections.promotionVotes().findOne({ discordId: member.id, role: plano.vote }))) {
+        await openVote(client, guild, { member, uuid, nome, step: STEP_BY_KEY.get(plano.vote), valor });
+      }
     }
   }
 
@@ -250,7 +350,7 @@ export async function syncTrailRoles(client, guild, alvos) {
 
 // ───────────────────────────────────────────────────── Votação de promoção
 
-/** Prefixo dos botões. O /apply os adota: é ele quem cuida de votação. */
+/** Prefixo dos botões. O /promocao os adota, inclusive os da DM do Fundador. */
 export const PROMO_PREFIX = 'promo:';
 
 /**
@@ -276,9 +376,11 @@ function voteButtons(id, disabled = false) {
 function voteEmbed(v, eligibleCount) {
   const { approve, reject } = tally(v.votes);
   const step = STEP_BY_KEY.get(v.role);
+  const aberta = v.openedBy ? `Aberta por <@${v.openedBy}>. ` : '';
+  const fundador = step.confirm === 'fundador' ? '\nAprovada, ainda precisa da confirmação do Fundador.' : '';
   return {
     title: `Promoção — ${v.username}`,
-    description: `<@${v.discordId}> chegou a **${trackOf(step).unidade(v.reached)}** e pode subir a <@&${step.role}>.`,
+    description: `${aberta}<@${v.discordId}> tem **${trackOf(step).unidade(v.reached)}** e pode subir a <@&${step.role}>.${fundador}`,
     color: 0xf1c40f,
     fields: [
       { name: 'Aprovar', value: String(approve), inline: true },
@@ -304,29 +406,26 @@ function votePayload(v, eligibleCount, ping) {
 }
 
 /**
- * Abre a votação dos Chefes (Staff) para o próximo cargo da trilha.
+ * Abre a votação dos Chefes (Staff) no canal deles. Serve à automática (5.000
+ * pontos) e à aberta por um Chefe (`openedBy`).
  *
- * Uma votação por pessoa e cargo, para sempre: reprovada, o bot não reabre
- * sozinho a cada ciclo. Se a mensagem não sair, nada é gravado e o próximo
- * ciclo tenta de novo — votação sem mensagem expiraria sem voto e reprovaria a
- * pessoa sem ninguém ter visto.
+ * A mensagem sai ANTES do registro, com o id gerado aqui: votação aberta sem
+ * mensagem seria reenviada pelo job de reenvio, que roda em paralelo, e o canal
+ * ganharia duas. Se a mensagem não sair, nada é gravado.
+ *
+ * @returns {Promise<boolean>} se abriu
  */
-async function openPromotionVote(client, guild, { member, uuid, nome, step, valor, track }) {
-  const votes = collections.promotionVotes();
-  if (await votes.findOne({ discordId: member.id, role: step.key })) return;
-
+async function openVote(client, guild, { member, uuid, nome, step, valor, openedBy = null }) {
   const canal = await client.channels.fetch(CH_CHEFES).catch(() => null);
   if (!canal) {
-    log.warn('Canal dos Chefes indisponível; votação de promoção fica para o próximo ciclo.');
-    return;
+    log.warn('Canal dos Chefes indisponível; votação de promoção não aberta.');
+    return false;
   }
 
   const cfg = await getConfig(guild.id);
   const hours = Number(cfg.params?.voteWindowHours) || 24;
   const now = new Date();
-  // O id nasce aqui porque os botões precisam dele, e a mensagem sai ANTES do
-  // registro: votação aberta sem mensagem seria reenviada pelo job de reenvio,
-  // que roda em paralelo, e o canal ganharia duas.
+  const track = trackOf(step);
   const doc = {
     _id: new ObjectId(),
     guildDiscordId: guild.id,
@@ -336,6 +435,7 @@ async function openPromotionVote(client, guild, { member, uuid, nome, step, valo
     role: step.key,
     stat: track.stat,
     reached: valor,
+    openedBy,
     status: 'open',
     votes: [],
     createdAt: now,
@@ -344,27 +444,127 @@ async function openPromotionVote(client, guild, { member, uuid, nome, step, valo
   };
 
   const eligibleCount = await eligibleVoterCount(guild);
-  const msg = await canal
-    .send(votePayload(doc, eligibleCount, true))
-    .catch((e) => {
-      log.error('Falha ao abrir votação de promoção:', e);
-      return null;
-    });
-  if (!msg) return; // nada gravado: o próximo ciclo tenta de novo
-  const gravou = await votes.insertOne({ ...doc, messageId: msg.id }).then(() => true, (e) => {
-    log.error('Falha ao gravar votação de promoção:', e);
-    return false;
+  const msg = await canal.send(votePayload(doc, eligibleCount, true)).catch((e) => {
+    log.error('Falha ao abrir votação de promoção:', e);
+    return null;
   });
+  if (!msg) return false;
+  const gravou = await collections
+    .promotionVotes()
+    .insertOne({ ...doc, messageId: msg.id })
+    .then(
+      () => true,
+      (e) => {
+        log.error('Falha ao gravar votação de promoção:', e);
+        return false;
+      },
+    );
   // Sem registro, os botões não achariam votação nenhuma.
   if (!gravou) {
     await msg.delete().catch(() => {});
-    return;
+    return false;
   }
-  await audit(client, guild.id, `🗳️ Votação aberta: <@${member.id}> (**${nome}**) para <@&${step.role}> — ${track.unidade(valor)}.`);
+  const quem = openedBy ? ` por <@${openedBy}>` : '';
+  await audit(client, guild.id, `🗳️ Votação aberta${quem}: <@${member.id}> (**${nome}**) para <@&${step.role}> — ${track.unidade(valor)}.`);
+  return true;
 }
 
 /**
- * Encerra a votação e, aprovada, troca o cargo.
+ * Para que cargo um Chefe pode abrir votação com /promocao, e para quem.
+ * `abaixo`: o cargo que a pessoa tem que ter hoje (um degrau por vez).
+ * `minimo`: a meta da trilha, quando o cargo tem uma.
+ */
+export const MANUAL_VOTE = Object.freeze({
+  estrategistaStaff: Object.freeze({ abaixo: 'capitaoStaff', minimo: TRILHAS.estrategistaStaff }),
+  chefeStaff: Object.freeze({ abaixo: 'estrategistaStaff' }),
+});
+
+/**
+ * /promocao abrir: um Chefe (Staff) abre a votação. Serve para Chefe (Staff), e
+ * para REABRIR Estrategista (Staff) de quem já tem a meta — a votação
+ * automática só abre uma vez.
+ *
+ * @param {import('discord.js').Client} client
+ * @param {import('discord.js').Guild} guild
+ * @param {{alvoId: string, cargo: string, por: import('discord.js').GuildMember}} args
+ * @returns {Promise<string>} a resposta para quem abriu
+ */
+export async function openManualVote(client, guild, { alvoId, cargo, por }) {
+  const step = STEP_BY_KEY.get(cargo);
+  const regra = MANUAL_VOTE[cargo];
+  if (!step || !regra) return 'Cargo inválido.';
+  // O nível do comando já exige Chefe; aqui sai quem está Ocioso.
+  if (!hasLevel(por, LEVEL.FUNDADOR) && !canVote(por)) return 'Chefe Ocioso não abre votação.';
+
+  const link = await collections.members().findOne({ discordId: alvoId });
+  if (!link) return 'Essa pessoa não tem registro.';
+  if (!link.inGuild) return 'Essa pessoa não está na guilda.';
+  const member = await guild.members.fetch({ user: alvoId, force: true }).catch(() => null);
+  if (!member) return 'Essa pessoa não está no Discord.';
+
+  const track = trackOf(step);
+  const topo = track.steps.find((s) => member.roles.cache.has(s.role));
+  const abaixo = STEP_BY_KEY.get(regra.abaixo);
+  if (topo?.key !== abaixo.key) return `Só abre para quem é **${abaixo.label}** hoje, um degrau por vez.`;
+
+  const stats = await collections.guildStats().findOne({ uuid: link.uuid });
+  const valor = Number(stats?.[track.stat] ?? 0);
+  if (regra.minimo != null && valor < regra.minimo) {
+    return `Precisa de **${track.unidade(regra.minimo)}**, e tem ${fmt(valor)}.`;
+  }
+
+  const votes = collections.promotionVotes();
+  if (await votes.findOne({ discordId: alvoId, role: cargo, status: 'open' })) {
+    return 'Já tem uma votação aberta para isso.';
+  }
+  if (await votes.findOne({ discordId: alvoId, role: cargo, status: 'approved', owner: 'pending' })) {
+    return 'Já foi aprovada e está esperando a confirmação do Fundador.';
+  }
+
+  const abriu = await openVote(client, guild, { member, uuid: link.uuid, nome: link.username, step, valor, openedBy: por.id });
+  return abriu ? `Votação aberta em <#${CH_CHEFES}>.` : 'Não consegui abrir a votação: o canal dos Chefes está acessível?';
+}
+
+/** Troca o resultado mostrado na mensagem da votação. Some calado se ela sumiu. */
+async function mostrarResultado(client, v, texto, cor) {
+  try {
+    const canal = await client.channels.fetch(v.channelId);
+    const msg = await canal.messages.fetch(v.messageId);
+    const guild = await client.guilds.fetch(v.guildDiscordId).catch(() => null);
+    const embed = voteEmbed(v, guild ? await eligibleVoterCount(guild) : 0);
+    embed.color = cor;
+    embed.fields.push({ name: 'Resultado', value: texto });
+    await msg.edit({ embeds: [embed], components: [voteButtons(v._id.toString(), true)] });
+  } catch (e) {
+    log.error('Falha ao editar mensagem da votação de promoção:', e);
+  }
+}
+
+/**
+ * Aplica o cargo votado a quem está no Discord e anuncia. Sem conseguir, deixa
+ * sem `appliedAt`, e o reparo do roleSync tenta de novo.
+ */
+async function concluirPromocao(client, guild, v, anuncio) {
+  const step = STEP_BY_KEY.get(v.role);
+  const track = trackOf(step);
+  // `force`: o cache pode estar atrasado, e é dele que sai o que tirar.
+  const member = guild ? await guild.members.fetch({ user: v.discordId, force: true }).catch(() => null) : null;
+  if (!member) {
+    await audit(client, v.guildDiscordId, `⚠️ **${v.username}** não está no Discord — <@&${step.role}> fica para quando voltar.`);
+    return;
+  }
+  const res = await aplicarVotado(member, new Set(member.roles.cache.keys()), step, 'Promoção aprovada');
+  if (res === 'falhou') {
+    await audit(client, v.guildDiscordId, `⚠️ Não consegui dar <@&${step.role}> a <@${member.id}> — o cargo do bot está abaixo?`);
+    return;
+  }
+  await collections.promotionVotes().updateOne({ _id: v._id }, { $set: { appliedAt: new Date() } });
+  if (res === 'aplicado') await anunciar(client, track, [{ userId: member.id, texto: anuncio(member, step, track) }]);
+}
+
+/**
+ * Encerra a votação e, aprovada, troca o cargo — ou, para Chefe (Staff), pede a
+ * confirmação do Fundador.
  *
  * O status muda num update condicional ANTES de qualquer efeito: o último voto
  * e o job de prazo podem chegar juntos, e só um deles deve aplicar e anunciar.
@@ -379,27 +579,18 @@ export async function finalizePromotionVote(client, id, cause = 'deadline') {
   const guild = await client.guilds.fetch(v.guildDiscordId).catch(() => null);
   const eligibleCount = guild ? await eligibleVoterCount(guild) : 0;
   const result = decide(v.votes, cfg.params?.voteRule || 'effective', eligibleCount);
-
-  const { modifiedCount } = await votes.updateOne(
-    { _id, status: 'open' },
-    { $set: { status: result, decidedAt: new Date(), decidedBy: cause } },
-  );
-  if (!modifiedCount) return null;
-  v.status = result;
-
-  try {
-    const canal = await client.channels.fetch(v.channelId);
-    const msg = await canal.messages.fetch(v.messageId);
-    const embed = voteEmbed(v, eligibleCount);
-    embed.color = result === 'approved' ? 0x2ecc71 : 0xe74c3c;
-    embed.fields.push({ name: 'Resultado', value: result === 'approved' ? '✅ Aprovada' : '❌ Reprovada' });
-    await msg.edit({ embeds: [embed], components: [voteButtons(_id.toString(), true)] });
-  } catch (e) {
-    log.error('Falha ao editar mensagem da votação de promoção:', e);
-  }
-
   const step = STEP_BY_KEY.get(v.role);
-  const track = trackOf(step);
+  const doFundador = result === 'approved' && step.confirm === 'fundador';
+
+  const $set = { status: result, decidedAt: new Date(), decidedBy: cause };
+  if (doFundador) $set.owner = 'pending';
+  else if (result === 'approved') $set.settledAt = new Date();
+  const { modifiedCount } = await votes.updateOne({ _id, status: 'open' }, { $set });
+  if (!modifiedCount) return null;
+  Object.assign(v, $set);
+
+  const texto = result !== 'approved' ? '❌ Reprovada' : doFundador ? '✅ Aprovada — aguardando o Fundador' : '✅ Aprovada';
+  await mostrarResultado(client, v, texto, result === 'approved' ? 0x2ecc71 : 0xe74c3c);
   await audit(
     client,
     v.guildDiscordId,
@@ -407,35 +598,141 @@ export async function finalizePromotionVote(client, id, cause = 'deadline') {
   );
   if (result !== 'approved') return result;
 
-  const member = guild ? await guild.members.fetch(v.discordId).catch(() => null) : null;
-  if (!member) {
-    await audit(client, v.guildDiscordId, `⚠️ **${v.username}** não está mais no Discord — o cargo <@&${step.role}> não foi aplicado.`);
+  if (doFundador) {
+    await pedirFundador(client, guild, v);
     return result;
   }
-  // Recalcula o plano como se a pessoa tivesse o cargo votado: o que estiver
-  // abaixo dele na trilha sai, e o cargo de time vem junto se faltar.
-  const comVotado = { has: (rid) => rid === step.role || member.roles.cache.has(rid) };
-  const plano = planTrack(track, comVotado, 0);
-  if (plano.top !== step.key) return result; // já tem um cargo acima: nada a fazer
-
-  const dar = [step.role, plano.team && track.team].filter((rid) => rid && !member.roles.cache.has(rid));
-  const ok = await member.roles.add(dar, 'Promoção aprovada pelos Chefes (Staff)').then(() => true, () => false);
-  if (!ok) {
-    await audit(client, v.guildDiscordId, `⚠️ Não consegui dar <@&${step.role}> a <@${member.id}> — o cargo do bot está abaixo?`);
-    return result;
-  }
-  const tirar = plano.remove.map((k) => STEP_BY_KEY.get(k).role);
-  if (tirar.length) await member.roles.remove(tirar, 'Um cargo por trilha').catch(() => {});
-  await anunciar(client, track, [
-    { userId: member.id, texto: `${track.emoji} <@${member.id}> foi aprovado pelos <@&${ROLE.chefeStaff}> → <@&${step.role}>` },
-  ]);
+  await concluirPromocao(
+    client,
+    guild,
+    v,
+    (member, s, track) => `${track.emoji} <@${member.id}> foi aprovado pelos <@&${ROLE.chefeStaff}> → <@&${s.role}>`,
+  );
   return result;
 }
 
-/** Botões `promo:vote:<id>:<escolha>`. */
-export async function handlePromotionVoteButton(interaction) {
+// ─────────────────────────────────────────── Confirmação do Fundador (Chefe)
+
+function ownerButtons(id, disabled = false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${PROMO_PREFIX}owner:${id}:confirm`)
+      .setLabel('Confirmar')
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(disabled),
+    new ButtonBuilder()
+      .setCustomId(`${PROMO_PREFIX}owner:${id}:decline`)
+      .setLabel('Recusar')
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(disabled),
+  );
+}
+
+/**
+ * O pedido de confirmação. Vai por DM, onde menção de cargo não resolve: nomes
+ * em texto puro.
+ */
+async function ownerPayload(client, guild, v, decisao = null) {
+  const step = STEP_BY_KEY.get(v.role);
+  const { approve, reject } = tally(v.votes);
+  const texto = await plainMentions(
+    client,
+    guild,
+    `<@${v.discordId}> (**${v.username}**) foi aprovado pelos Chefes (Staff) para **${step.label}**, ${approve} a ${reject}. ` +
+      'Só vale depois da sua confirmação.',
+  );
+  const fim = decisao === 'confirm' ? '✅ Confirmada' : decisao === 'decline' ? '❌ Recusada' : null;
+  return {
+    embeds: [
+      {
+        title: `🛡️ Promoção a ${step.label}`,
+        description: fim ? `${texto}\n\n**${fim}.**` : texto,
+        color: fim ? (decisao === 'confirm' ? 0x2ecc71 : 0xe74c3c) : 0xf1c40f,
+        footer: { text: `ID: ${v._id}` },
+      },
+    ],
+    components: [ownerButtons(v._id.toString(), !!fim)],
+    allowedMentions: { parse: [] },
+  };
+}
+
+/**
+ * Chefe (Staff) aprovado só vale com o clique do Fundador: DM a cada um. Se
+ * nenhuma DM passar, o pedido vai para o canal dos Chefes — só o Fundador
+ * consegue clicar.
+ */
+async function pedirFundador(client, guild, v) {
+  if (!guild) return;
+  const payload = await ownerPayload(client, guild, v);
+  await guild.members.fetch().catch(() => {});
+  const fundadores = guild.roles.cache.get(ROLE.fundador)?.members ?? new Map();
+  let entregues = 0;
+  for (const m of fundadores.values()) {
+    if (m.user.bot) continue;
+    if (await m.send(payload).then(() => true, () => false)) entregues += 1;
+  }
+  if (!entregues) {
+    const canal = await client.channels.fetch(CH_CHEFES).catch(() => null);
+    await canal?.send(payload).catch(() => {});
+  }
+  await audit(
+    client,
+    guild.id,
+    `📨 Promoção de **${v.username}** a <@&${STEP_BY_KEY.get(v.role).role}> aguardando o Fundador` +
+      (entregues ? ' (DM enviada).' : ' — DM fechada, o pedido foi para o canal dos Chefes.'),
+  );
+}
+
+/** Botões `promo:owner:<id>:confirm|decline`, na DM do Fundador. */
+async function handleOwnerButton(interaction, id, decisao) {
+  const client = interaction.client;
+  const v0 = await collections.promotionVotes().findOne({ _id: new ObjectId(id) });
+  if (!v0) return interaction.reply({ content: 'Votação não encontrada.', ephemeral: true });
+  const guild = await client.guilds.fetch(v0.guildDiscordId).catch(() => null);
+  const quem = guild ? await guild.members.fetch(interaction.user.id).catch(() => null) : null;
+  const fundador = guild?.ownerId === interaction.user.id || !!quem?.roles.cache.has(ROLE.fundador);
+  if (!fundador) return interaction.reply({ content: 'Só o Fundador confirma promoção a Chefe (Staff).', ephemeral: true });
+
+  const agora = new Date();
+  const $set = { owner: decisao === 'confirm' ? 'confirmed' : 'declined', ownerBy: interaction.user.id, ownerAt: agora };
+  if (decisao === 'confirm') $set.settledAt = agora;
+  // Condicional: com mais de um Fundador, vale o primeiro clique.
+  const v = await collections
+    .promotionVotes()
+    .findOneAndUpdate({ _id: v0._id, status: 'approved', owner: 'pending' }, { $set }, { returnDocument: 'after' });
+  if (!v) return interaction.reply({ content: 'Esta promoção já foi decidida.', ephemeral: true });
+
+  await interaction.update(await ownerPayload(client, guild, v, decisao));
+  const step = STEP_BY_KEY.get(v.role);
+  await mostrarResultado(
+    client,
+    v,
+    decisao === 'confirm' ? '✅ Aprovada e confirmada pelo Fundador' : '❌ Aprovada, mas recusada pelo Fundador',
+    decisao === 'confirm' ? 0x2ecc71 : 0xe74c3c,
+  );
+  await audit(
+    client,
+    v.guildDiscordId,
+    `${decisao === 'confirm' ? '✅' : '❌'} <@${interaction.user.id}> ${decisao === 'confirm' ? 'confirmou' : 'recusou'} a promoção de **${v.username}** a <@&${step.role}>.`,
+  );
+  if (decisao !== 'confirm') return;
+  await concluirPromocao(
+    client,
+    guild,
+    v,
+    (member, s, track) =>
+      `${track.emoji} <@${member.id}> foi aprovado pelos <@&${ROLE.chefeStaff}> e confirmado pelo Fundador → <@&${s.role}>`,
+  );
+}
+
+// ─────────────────────────────────────────────────────────── Botões e jobs
+
+/** Todo botão `promo:*`: voto dos Chefes e confirmação do Fundador. */
+export async function handlePromotionButton(interaction) {
   const [, action, id, choice] = interaction.customId.split(':');
-  if (action !== 'vote' || !ObjectId.isValid(id)) return;
+  if (!ObjectId.isValid(id)) return;
+  if (action === 'owner' && ['confirm', 'decline'].includes(choice)) return handleOwnerButton(interaction, id, choice);
+  if (action !== 'vote') return;
   // Botão de abstenção de uma mensagem antiga, de antes de ele sair.
   if (!CHOICES.includes(choice)) {
     return interaction.reply({ content: 'Para se abster, é só não votar.', ephemeral: true });

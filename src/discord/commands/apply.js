@@ -12,7 +12,6 @@ import {
   finalizeApplication,
 } from '../../services/applications.js';
 import { LEVEL, requireLevel } from '../../services/permissions.js';
-import { PROMO_PREFIX, handlePromotionVoteButton } from '../../services/promotions.js';
 
 async function submitApplication(interaction) {
   const member = await collections.members().findOne({ discordId: interaction.user.id });
@@ -176,17 +175,12 @@ export default {
     .addSubcommand((s) => s.setName('status').setDescription('Vê o status da sua candidatura aberta'))
     .toJSON(),
 
-  // Botões: apply:vote:*, apply:invited:*, os do painel de recrutamento, e os
-  // da votação de promoção (promo:vote:*) — os Chefes votam as duas coisas.
+  // Botões: apply:vote:*, apply:invited:*, e os do painel de recrutamento.
   owns(interaction) {
-    return (
-      interaction.isButton?.() &&
-      (interaction.customId.startsWith('apply:') || interaction.customId.startsWith(PROMO_PREFIX))
-    );
+    return interaction.isButton?.() && interaction.customId.startsWith('apply:');
   },
 
   async handleComponent(interaction) {
-    if (interaction.customId.startsWith(PROMO_PREFIX)) return handlePromotionVoteButton(interaction);
     const [, action, appId, choice] = interaction.customId.split(':');
     if (action === 'vote') return handleVote(interaction, appId, choice);
     if (action === 'invited') return handleInvited(interaction, appId);

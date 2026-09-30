@@ -344,10 +344,13 @@ function staffPayload(p) {
 
 ### 🎖️ Próximas promoções
 > **${fmt(TRILHAS.estrategistaStaff)} pontos** → o bot abre sozinho a votação dos ${r('chefeStaff')} para ${r('estrategistaStaff')}
-> ${r('chefeStaff')} → um Chefe sugere e abre a votação; aprovada, o ${r('fundador')} confirma
+> ${r('chefeStaff')} → um Chefe abre a votação para quem é ${r('estrategistaStaff')}; aprovada, o ${r('fundador')} confirma
 
 ### 🗳️ Votações
-> Candidaturas e promoções são votadas pelos ${r('chefeStaff')}. Prazo de **${p.voteWindowHours}h**; vale a maioria dos votos dados (abstenção não conta), e empate reprova.
+> **Como abrir:** um ${r('chefeStaff')} usa \`/promocao abrir\` e escolhe o membro e o cargo:
+> • **Chefe (Staff)** — para quem é ${r('estrategistaStaff')}
+> • **Estrategista (Staff)** — para reabrir a votação de quem é ${r('capitaoStaff')} e já tem **${fmt(TRILHAS.estrategistaStaff)} pontos**: a automática só abre uma vez
+> A votação sai no canal dos ${r('chefeStaff')}, que votam candidaturas e promoções. Prazo de **${p.voteWindowHours}h**; o voto é anônimo e um por Chefe; vale a maioria dos votos dados — quem não vota se abstém —, e empate reprova.
 
 ### 🛡️ Hierarquia
 > ${r('fundador')} no topo, ${r('bot')} logo abaixo. Qualquer mudança nisso gera alerta para o Fundador.

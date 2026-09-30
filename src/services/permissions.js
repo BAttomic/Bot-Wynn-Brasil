@@ -131,6 +131,7 @@ const COMMAND_ACCESS = Object.freeze({
   evento: { criar: ESTRATEGISTA, encerrar: ESTRATEGISTA, cancelar: ESTRATEGISTA, apurar: ESTRATEGISTA, blacklist: ESTRATEGISTA },
   giveaway: { criar: ESTRATEGISTA, encerrar: ESTRATEGISTA, reroll: ESTRATEGISTA },
   leaderboard: { atualizar: STAFF },
+  promocao: CHEFE,
 });
 
 /** O nível exigido por um comando de barra, já com o subcomando resolvido. */
