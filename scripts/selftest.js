@@ -183,15 +183,12 @@ async function main() {
   check('primeiro poll não anuncia nada', detectGuildRaids(null, curr).length, 0);
   check('sem mudança não anuncia nada', detectGuildRaids(prev, clone(wnbr)).length, 0);
 
-  // A tabela do jogo: 1 lote (1 aspect + 2.048 Es) a cada dois membros nossos,
-  // dividido igualmente. A fração soma sem perder unidade no ponto flutuante.
+  // Valor fixo por membro: 0,5 aspect + 1 entrega de 1.024 Es a cada raid,
+  // qualquer que seja o grupo. A fração soma sem perder unidade no ponto flutuante.
   const RR = await import('../src/services/raidRewards.js');
-  check(
-    'guild raid de 1/2/3/4 membros paga 1/1/2/2 aspects e 2048/2048/4096/4096 Es',
-    [1, 2, 3, 4].map((n) => [RR.raidPayout(n).aspects, RR.raidPayout(n).emeralds]),
-    [[1, 2048], [1, 2048], [2, 4096], [2, 4096]],
-  );
-  check('três raids de trio somam 2 aspects inteiros', RR.wholeUnits(2 / 3 + 2 / 3 + 2 / 3), 2);
+  check('guild raid paga 0,5 aspect + 1.024 Es a cada membro', [RR.PER_RAID.aspects, RR.PER_RAID.emeralds], [0.5, 1024]);
+  check('duas raids somam 1 aspect inteiro', RR.wholeUnits(RR.PER_RAID.aspects * 2), 1);
+  check('frações somam sem perder unidade (3 × 2/3 = 2)', RR.wholeUnits(2 / 3 + 2 / 3 + 2 / 3), 2);
   check('saldo negativo não vira entrega', RR.wholeUnits(-2), 0);
 
   section('6. Perdão de inatividade pela contribuição');

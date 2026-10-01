@@ -11,24 +11,17 @@ import { log } from '../util/log.js';
 
 // Recompensas de GUILD RAID: aspects e esmeraldas.
 //
-// O jogo paga a GUILDA por raid, conforme quantos membros nossos estavam no
-// grupo, e a guilda repassa em partes IGUAIS a quem participou:
+// Valor FIXO por membro, a cada guild raid que ele fizer: 0,5 aspect + 1.024 Es
+// (1 entrega). O tamanho do grupo não importa — regra de out/2026, que trocou a
+// tabela do jogo (a guilda recebia 1 lote a cada 2 membros e dividia).
 //
-//   membros no grupo | a guilda recebe      | cada um fica com
-//   1                | 1 aspect + 2.048 Es  | 1     aspect + 2.048    Es
-//   2                | 1 aspect + 2.048 Es  | 0,5   aspect + 1.024    Es
-//   3                | 2 aspects + 4.096 Es | 0,667 aspect + 1.365,33 Es
-//   4                | 2 aspects + 4.096 Es | 0,5   aspect + 1.024    Es
+// O meio aspect é SALDO de verdade, não se arredonda: fica acumulando e vira
+// unidade entregável na raid seguinte. O que se entrega é sempre inteiro —
+// 1 aspect, ou 1 lote de 1.024 Es, o mínimo de uma operação de entrega no jogo.
 //
-// A parte quebrada é SALDO de verdade, não se arredonda: fica acumulando e vira
-// unidade entregável quando as próximas raids completarem. O que se entrega é
-// sempre inteiro — 1 aspect, ou 1 lote de 1.024 Es, o mínimo de uma operação
-// de entrega no jogo.
-//
-// O crédito é feito NO FIM DE CADA RAID, pelo watcher (ver creditRaidRewards).
-// É o único lugar que sabe o tamanho do grupo; o contador `currentGuildRaids`
-// da API diz quantas raids a pessoa fez, mas não com quantos. Por isso raid
-// feita com o bot fora do ar não rende recompensa — a mesma regra dos eventos.
+// O crédito é feito NO FIM DE CADA RAID, pelo watcher (ver creditRaidRewards),
+// o mesmo gatilho dos eventos. Por isso raid feita com o bot fora do ar não
+// rende recompensa.
 //
 //   gerado   = guildStats.aspectsEarned  / emeraldsEarned   (acumulado, fracionário)
 //   entregue = guildStats.aspectsDelivered / emeraldsDelivered
@@ -43,27 +36,13 @@ import { log } from '../util/log.js';
 export const EMERALD_LOT = 1024;
 
 /**
- * Folga para somas de frações. Três raids de três membros dão 3 × 2/3 de
- * aspect, e em ponto flutuante isso pode sair 1,9999999999999998 — o `floor`
- * puro entregaria 1 onde a pessoa tem 2.
+ * Folga para somas de frações: em ponto flutuante 3 × 2/3 pode sair
+ * 1,9999999999999998, e o `floor` puro entregaria 1 onde a pessoa tem 2.
  */
 const EPS = 1e-6;
 
-/**
- * O que a GUILDA recebe por uma guild raid com `n` membros nossos no grupo: um
- * lote (1 aspect + 2.048 Es) a cada dois membros, arredondando para cima.
- *
- * Grupo maior que 4 não existe no jogo; aparece só se dois grupos terminarem a
- * mesma raid no mesmo mundo e no mesmo minuto (ver detectGuildRaids). A fórmula
- * continua valendo aí, e erra no máximo por um lote.
- *
- * @param {number} n
- * @returns {{aspects:number, emeralds:number}}
- */
-export function raidPayout(n) {
-  const lotes = Math.ceil(Math.max(0, n) / 2);
-  return { aspects: lotes, emeralds: 2 * EMERALD_LOT * lotes };
-}
+/** O que CADA membro do grupo ganha por guild raid, na unidade natural. */
+export const PER_RAID = Object.freeze({ aspects: 0.5, emeralds: EMERALD_LOT });
 
 /**
  * Quantas unidades INTEIRAS cabem num saldo. Negativo não vira dívida a entregar.
@@ -117,8 +96,8 @@ function kindOf(kind) {
 }
 
 /**
- * Credita UMA guild raid: cada membro nosso do grupo recebe a sua parte do que a
- * guilda ganhou. Chamado pelo watcher assim que a raid termina.
+ * Credita UMA guild raid: cada membro nosso do grupo recebe `PER_RAID` inteiro.
+ * Chamado pelo watcher assim que a raid termina.
  *
  * Upsert porque membro recém-chegado pode fechar uma raid antes da primeira
  * apuração criar a linha dele; o `firstSeenAt` é o mesmo que a apuração gravaria.
@@ -129,20 +108,19 @@ function kindOf(kind) {
 export async function creditRaidRewards(members, at = new Date()) {
   const n = members?.length ?? 0;
   if (!n) return null;
-  const { aspects, emeralds } = raidPayout(n);
   for (const { uuid, username } of members) {
     await collections.guildStats().updateOne(
       { uuid },
       {
-        $inc: { aspectsEarned: aspects / n, emeraldsEarned: emeralds / n },
+        $inc: { aspectsEarned: PER_RAID.aspects, emeraldsEarned: PER_RAID.emeralds },
         $set: { username },
         $setOnInsert: { firstSeenAt: at },
       },
       { upsert: true },
     );
   }
-  log.info(`Guild raid de ${n} membro(s): ${aspects} aspect(s) + ${emeralds} Es divididos.`);
-  return { aspects, emeralds, n };
+  log.info(`Guild raid de ${n} membro(s): ${PER_RAID.aspects} aspect + ${PER_RAID.emeralds} Es para cada.`);
+  return { ...PER_RAID, n };
 }
 
 const MIGRATION_ID = 'raidRewardsV2';
@@ -205,6 +183,43 @@ export async function migrateRaidRewards(guildId) {
   await state.insertOne({ _id: MIGRATION_ID, at: new Date(), membros: ops.length, taxaAntiga });
   log.info(`Recompensas de raid: aspects de ${ops.length} membro(s) passados para o livro-razão novo.`);
   return ops.length;
+}
+
+const RESET_MIGRATION_ID = 'raidRewardsV3';
+
+/**
+ * Zera o livro-razão de aspects e esmeraldas de TODO mundo: a regra fixa por
+ * raid (`PER_RAID`) começa do zero, sem herdar nada da tabela antiga (out/2026,
+ * pedido do usuário). Vale também para quem tinha saldo negativo.
+ *
+ * Gerado E entregue vão a 0 — o histórico de entregas (rewardLog) fica. É `$set`
+ * e não `$unset` de propósito: campo ausente faria a migração V2 rederivar os
+ * aspects dos contadores antigos. Os valores de antes ficam no watcherState,
+ * para poder ser desfeito. Roda no boot, antes de o watcher creditar qualquer
+ * raid; no-op depois da primeira vez.
+ */
+export async function resetRaidRewards() {
+  const state = collections.watcherState();
+  if (await state.findOne({ _id: RESET_MIGRATION_ID })) return null;
+
+  const campos = Object.values(RAID_REWARD_KINDS).flatMap((k) => [k.earned, k.delivered]);
+  const rows = await collections
+    .guildStats()
+    .find(
+      { $or: campos.map((c) => ({ [c]: { $exists: true, $ne: 0 } })) },
+      { projection: { _id: 0, uuid: 1, username: 1, ...Object.fromEntries(campos.map((c) => [c, 1])) } },
+    )
+    .toArray();
+
+  if (rows.length) {
+    await collections
+      .guildStats()
+      .updateMany({ uuid: { $in: rows.map((r) => r.uuid) } }, { $set: Object.fromEntries(campos.map((c) => [c, 0])) });
+  }
+
+  await state.insertOne({ _id: RESET_MIGRATION_ID, at: new Date(), antes: rows });
+  log.info(`Recompensas de raid: aspects e esmeraldas de ${rows.length} membro(s) zerados para a regra nova.`);
+  return rows.length;
 }
 
 /**
@@ -335,28 +350,20 @@ export async function setRewardsDelivered(kind, uuid, total) {
   return { antes: (antes[k.delivered] ?? 0) / k.unit, agora: total };
 }
 
-/**
- * A tabela de regras do painel, montada de `raidPayout`: o texto não pode
- * divergir da conta que o bot faz.
- */
-function rulesTable(k) {
-  return [1, 2, 3, 4].map((n) => {
-    const p = raidPayout(n);
-    const guilda = k.kind === 'aspect' ? `${p.aspects} ${p.aspects === 1 ? 'aspect' : 'aspects'}` : `${fmtNum(p.emeralds)} Es`;
-    const cada = k.kind === 'aspect' ? `${fmtNum(p.aspects / n)} aspect` : `${fmtNum(p.emeralds / n)} Es`;
-    return `> **${n}** ${n === 1 ? 'membro' : 'membros'} → a guilda recebe ${guilda} · **${cada}** ${n === 1 ? 'para ele' : 'para cada'}`;
-  });
-}
-
+/** As regras do painel, montadas de `PER_RAID`: o texto não pode divergir da conta que o bot faz. */
 function rulesText(k, minDays) {
-  const entrega =
+  const regra =
     k.kind === 'aspect'
-      ? 'A staff entrega em **unidades inteiras** (mínimo **1 aspect**).'
-      : `A staff entrega em **lotes de ${fmtNum(EMERALD_LOT)} Es** — **1 entrega = ${fmtNum(EMERALD_LOT)} Es**, o mínimo por operação.`;
+      ? [
+          `Cada **guild raid** que você fizer rende **${fmtNum(PER_RAID.aspects)} aspect** — não importa quantos membros nossos estavam no grupo.`,
+          `A staff entrega em **unidades inteiras**: a cada **${fmtNum(1 / PER_RAID.aspects)} raids**, **1 aspect**. O meio aspect fica no seu saldo e fecha na raid seguinte — nada se perde.`,
+        ]
+      : [
+          `Cada **guild raid** que você fizer rende **${fmtNum(PER_RAID.emeralds)} Es** — **1 entrega** por raid, não importa quantos membros nossos estavam no grupo.`,
+          `A staff entrega em **lotes de ${fmtNum(EMERALD_LOT)} Es**, o mínimo por operação.`,
+        ];
   return [
-    `Toda **guild raid** rende ${k.kind === 'aspect' ? 'aspects' : 'esmeraldas'} à guilda conforme quantos membros **nossos** estavam no grupo, e o total é **dividido igualmente** entre eles:`,
-    ...rulesTable(k),
-    `${entrega} A parte quebrada fica no seu saldo e soma com as próximas raids — nada se perde.`,
+    ...regra,
     `-# Recebe quem tem **${minDays} dias** de guilda; antes disso o saldo acumula e espera. Não precisa pedir: a lista abaixo é a fila de entrega.`,
   ].join('\n');
 }

@@ -23,7 +23,7 @@ import { ensurePingRolePanels, attachPingRoleHandler } from './services/pingRole
 import { attachHierarchyGuard } from './services/hierarchyGuard.js';
 import { retireDownloadsPanel, ensureScoringPanel, ensureLeaderboardPanel } from './services/leaderboardPanel.js';
 import { ensureTomePanel } from './services/tomes.js';
-import { migrateRaidRewards, adoptLegacyLogPanel, ensureRaidRewardPanel } from './services/raidRewards.js';
+import { migrateRaidRewards, resetRaidRewards, adoptLegacyLogPanel, ensureRaidRewardPanel } from './services/raidRewards.js';
 import { warnIfEmpty } from './services/guildList.js';
 import { runPingsCleanup } from './jobs/pingsCleanup.js';
 import { runTomeCleanup } from './jobs/tomeCleanup.js';
@@ -75,6 +75,9 @@ async function main() {
   // novo, que o watcher credita raid a raid. Tem de rodar ANTES do watcher
   // creditar a primeira raid; no-op depois da primeira vez.
   await migrateRaidRewards(guildId);
+  // A regra fixa por raid (0,5 aspect + 1.024 Es) começa com todo mundo zerado.
+  // Também antes do watcher; no-op depois da primeira vez.
+  await resetRaidRewards();
   // O antigo painel de histórico vira o de Aspects, mantendo a ordem do canal.
   await adoptLegacyLogPanel();
   // Peso novo reescreve o passado: o livro-razão guarda quantidades, e os pontos

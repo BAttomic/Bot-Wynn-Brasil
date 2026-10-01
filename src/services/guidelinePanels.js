@@ -239,7 +239,7 @@ São as três recompensas que a guilda distribui, e todas saem sem precisar pedi
 Os Tomes nascem do **objetivo semanal**: quanto mais membros completam o seu, mais Tomes a guilda ganha na semana — **2** com 5 objetivos, mais **4** com 15 e mais **8** com 30. São até **14 Tomes por semana** se cada um fizer a sua parte.
 
 > **Tomes** — a fila é por **pontos**: quem mais contribuiu recebe primeiro, **1 Tome por objetivo semanal** cumprido. Requisitos do próprio jogo: alguma classe no nível **${p.tomeMinClassLevel}** e **${p.rewardMinGuildDays} dias** de guilda.
-> **Aspects e Esmeraldas** — saem das **guild raids**. Com **1 ou 2** membros nossos no grupo a guilda recebe **1 aspect + 2.048 Es**; com **3 ou 4**, **2 aspects + 4.096 Es** — tudo **dividido igualmente** entre quem participou. A parte quebrada fica no seu saldo e soma com as próximas raids; a entrega é em unidades inteiras (1 aspect, ou lotes de 1.024 Es). Também exige **${p.rewardMinGuildDays} dias** de guilda.
+> **Aspects e Esmeraldas** — saem das **guild raids**. **Cada raid** que você fizer rende **0,5 aspect + 1.024 Es** (1 entrega), não importa quantos membros nossos estavam no grupo. O aspect é entregue inteiro, então o meio fica no seu saldo e fecha na raid seguinte. Também exige **${p.rewardMinGuildDays} dias** de guilda.
 
 ## 3. Inatividade e Expulsão
 > Membros que ficarem **${base} dias offline** podem ser removidos.

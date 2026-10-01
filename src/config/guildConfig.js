@@ -213,8 +213,8 @@ const DEFAULT_PARAMS = Object.freeze({
   // cada X minutos. Além do anti-spam, a espera deixa o contador de guerra
   // (cacheado) alcançar, então a atribuição de guerreiros fica correta.
   territoryDigestMinutes: 60,
-  // Aspects e esmeraldas por guild raid NÃO são parâmetro: seguem a tabela do
-  // jogo pelo tamanho do grupo (ver raidPayout em services/raidRewards.js).
+  // Aspects e esmeraldas por guild raid NÃO são parâmetro: valor fixo por
+  // membro (ver PER_RAID em services/raidRewards.js).
   //
   // Requisito do jogo para Tomes de guilda; aplicamos o mesmo à entrega de
   // aspects e esmeraldas. Quem tem menos que isto de guilda não entra na fila

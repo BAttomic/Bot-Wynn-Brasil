@@ -360,8 +360,7 @@ export async function runGuildWatch(client) {
       const at = new Date();
       for (const p of raids) {
         await creditGuildRaidParty({ members: p.members, at });
-        // Aspects e esmeraldas dependem do TAMANHO do grupo, e só aqui ele é
-        // conhecido — o contador da API diz quantas raids, não com quantos.
+        // Aspects e esmeraldas: valor fixo para cada membro do grupo.
         await creditRaidRewards(p.members, at);
       }
       // Os painéis de recompensa mostram o saldo novo na hora, sem esperar o
