@@ -49,7 +49,6 @@ export default {
   data: new SlashCommandBuilder()
     .setName('config')
     .setDescription('Configuração do bot da guilda')
-    .setDefaultMemberPermissions(0)
     .addSubcommand((s) =>
       s
         .setName('channel')

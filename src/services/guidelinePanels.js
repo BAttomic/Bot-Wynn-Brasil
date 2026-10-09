@@ -344,12 +344,13 @@ function staffPayload(p) {
 
 ### 🎖️ Próximas promoções
 > **${fmt(TRILHAS.estrategistaStaff)} pontos** → o bot abre sozinho a votação dos ${r('chefeStaff')} para ${r('estrategistaStaff')}
-> ${r('chefeStaff')} → um Chefe abre a votação para quem é ${r('estrategistaStaff')}; aprovada, o ${r('fundador')} confirma
+> Qualquer cargo, a qualquer hora → por votação dos ${r('chefeStaff')} (abaixo)
 
 ### 🗳️ Votações
-> **Como abrir:** um ${r('chefeStaff')} usa \`/promocao abrir\` e escolhe o membro e o cargo:
-> • **Chefe (Staff)** — para quem é ${r('estrategistaStaff')}
-> • **Estrategista (Staff)** — para reabrir a votação de quem é ${r('capitaoStaff')} e já tem **${fmt(TRILHAS.estrategistaStaff)} pontos**: a automática só abre uma vez
+> **Como abrir:** um ${r('chefeStaff')} escolhe o membro, o cargo e, se quiser, o motivo — qualquer cargo, sem meta de pontos; decide a maioria.
+> • **Subir:** \`/promover\` — ${r('capitaoStaff')}, ${r('estrategistaStaff')} ou ${r('chefeStaff')}
+> • **Descer:** \`/rebaixar\` — ${r('estrategistaStaff')}, ${r('capitaoStaff')} ou Recrutador (sai da Staff). O que a pessoa perde não volta sozinho pelos pontos.
+> Pôr ou tirar ${r('chefeStaff')} ainda precisa da confirmação do ${r('fundador')}. Ninguém vota na votação sobre si.
 > A votação sai no canal dos ${r('chefeStaff')}, que votam candidaturas e promoções. Prazo de **${p.voteWindowHours}h**; o voto é anônimo e um por Chefe; vale a maioria dos votos dados — quem não vota se abstém —, e empate reprova.
 
 ### 🛡️ Hierarquia

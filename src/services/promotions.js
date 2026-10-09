@@ -5,7 +5,7 @@ import { getConfig } from '../config/guildConfig.js';
 import { audit } from './audit.js';
 import { canVote, hasLevel, LEVEL } from './permissions.js';
 import { eligibleVoterCount, tally, decide, labelFor } from './applications.js';
-import { rankWeight } from './guildData.js';
+import { rankWeight, RANK_LABEL } from './guildData.js';
 import { plainMentions } from '../util/plainMentions.js';
 import { log } from '../util/log.js';
 
@@ -17,8 +17,9 @@ import { log } from '../util/log.js';
  * cargo daqui com o rank de lá (ver expectedGameRank).
  *
  * No máximo um cargo por trilha, sempre o mais alto; as duas trilhas são
- * independentes. Nada aqui rebaixa: pontos all-time e o contador de guerras só
- * sobem, e um cargo dado à mão acima do limiar é decisão da staff.
+ * independentes. A trilha nunca rebaixa sozinha: pontos all-time e o contador
+ * de guerras só sobem, e um cargo dado à mão acima do limiar é decisão da staff.
+ * Rebaixar é só por votação dos Chefes (/rebaixar, ver openDemoteVote).
  */
 export const TRILHAS = Object.freeze({ capitaoWar: 50, estrategistaWar: 100, capitaoStaff: 2500, estrategistaStaff: 5000 });
 
@@ -86,21 +87,24 @@ const trackOf = (step) => Object.values(TRACKS).find((t) => t.steps.includes(ste
  * @param {object} track       um de TRACKS
  * @param {{has(id: string): boolean}} held  cargos do membro (Set, Collection…)
  * @param {number} valor       guerras ou pontos, conforme a trilha
+ * @param {Set<string>} [travados]  chaves de `steps` que a pessoa perdeu em
+ *   rebaixamento: o bot não as devolve sozinho, só a staff, à mão
  * @returns {{give: string|null, remove: string[], team: boolean, vote: string|null, top: string|null}}
  *   chaves de `steps`; `team` = falta o cargo de time (War Team / Guild Staff)
  */
-export function planTrack(track, held, valor) {
+export function planTrack(track, held, valor, travados = new Set()) {
   const tem = track.steps.filter((s) => held.has(s.role));
   const topo = tem[0] ?? null;
   // `find` pega o mais alto: os passos vêm de cima para baixo.
-  const alvo = track.steps.find((s) => s.auto != null && valor >= s.auto) ?? null;
+  const alvo = track.steps.find((s) => s.auto != null && valor >= s.auto && !travados.has(s.key)) ?? null;
   const sobe = !!alvo && (!topo || track.steps.indexOf(alvo) < track.steps.indexOf(topo));
   const fica = sobe ? alvo : topo;
 
   // A votação só abre para quem está ABAIXO do cargo votado: quem já o tem, ou
-  // tem um acima, não tem o que votar.
-  const iFica = fica ? track.steps.indexOf(fica) : Infinity;
-  const votado = track.steps.find((s, i) => s.vote != null && valor >= s.vote && i < iFica) ?? null;
+  // tem um acima, não tem o que votar. E só para quem tem cargo na trilha: o
+  // rebaixado a Recrutador, com os pontos, não pula direto para a votação.
+  const iFica = fica ? track.steps.indexOf(fica) : -1;
+  const votado = track.steps.find((s, i) => s.vote != null && valor >= s.vote && i < iFica && !travados.has(s.key)) ?? null;
 
   return {
     give: sobe ? alvo.key : null,
@@ -236,6 +240,77 @@ async function aplicarVotado(member, held, step, motivo) {
   return (await trocarCargos(member, held, dar, tirar, motivo)) ? 'aplicado' : 'falhou';
 }
 
+/**
+ * Tira os cargos da trilha acima de `para` e põe `para`. `para` nulo é
+ * Recrutador: sai da trilha inteira, e o cargo de time (WnBR Guild Staff) sai
+ * junto. Quem já não tem o que tirar fica como está: alguém o tirou à mão antes.
+ *
+ * O de baixo entra PRIMEIRO. Se tirar falhar, a pessoa fica com os dois, e o
+ * reparo tenta de novo; na ordem inversa, uma falha ao dar deixaria a pessoa
+ * sem cargo nenhum, e o reparo não teria mais o que tirar.
+ * @returns {Promise<'aplicado'|'ja-tinha'|'falhou'>}
+ */
+async function aplicarRebaixamento(member, held, de, para, motivo) {
+  const track = trackOf(de);
+  const acima = para ? track.steps.slice(0, track.steps.indexOf(para)) : track.steps;
+  const tirar = [...acima.map((s) => s.role), !para && track.team].filter(Boolean);
+  if (!tirar.some((id) => held.has(id))) return 'ja-tinha';
+  if (para && !(await trocarCargos(member, held, [para.role], [], motivo))) return 'falhou';
+  for (const id of tirar) {
+    if (!held.has(id)) continue;
+    const tirou = await member.roles.remove(id, motivo).then(() => true, () => false);
+    if (!tirou) return 'falhou';
+    held.delete(id);
+  }
+  return 'aplicado';
+}
+
+/** Aplica o resultado de uma votação aprovada, de promoção ou de rebaixamento. */
+function aplicarDecisao(member, held, v, motivo) {
+  const step = STEP_BY_KEY.get(v.role);
+  return v.kind === DEMOTE
+    ? aplicarRebaixamento(member, held, step, v.to ? STEP_BY_KEY.get(v.to) : null, motivo)
+    : aplicarVotado(member, held, step, motivo);
+}
+
+/**
+ * Cargos de trilha que a trilha não dá nem vota sozinha para cada pessoa: os
+ * acima do destino de um rebaixamento aprovado. Sem isso, o Capitão (Staff)
+ * rebaixado a Recrutador ganharia o cargo de volta no ciclo seguinte, pelos
+ * pontos, e o Estrategista rebaixado ganharia outra votação automática.
+ *
+ * Vale a ordem das decisões: uma promoção votada depois destrava o cargo dela e
+ * os de baixo. A staff também pode devolver o cargo à mão.
+ * @returns {Promise<Map<string, Set<string>>>} discordId → chaves de `steps`
+ */
+async function cargosTravados(discordIds) {
+  const docs = await collections
+    .promotionVotes()
+    .find(
+      { discordId: { $in: discordIds }, status: 'approved', owner: { $nin: ['pending', 'declined'] } },
+      { projection: { discordId: 1, role: 1, kind: 1, to: 1, settledAt: 1, decidedAt: 1 } },
+    )
+    .toArray();
+  const quando = (d) => new Date(d.settledAt ?? d.decidedAt ?? 0).getTime();
+  docs.sort((a, b) => quando(a) - quando(b));
+
+  const out = new Map();
+  for (const d of docs) {
+    const step = STEP_BY_KEY.get(d.role);
+    if (!step) continue;
+    const { steps } = trackOf(step);
+    const travados = out.get(d.discordId) ?? new Set();
+    if (d.kind === DEMOTE) {
+      const destino = d.to ? steps.indexOf(STEP_BY_KEY.get(d.to)) : steps.length;
+      for (const s of steps.slice(0, destino)) travados.add(s.key);
+    } else {
+      for (const s of steps.slice(steps.indexOf(step))) travados.delete(s.key);
+    }
+    out.set(d.discordId, travados);
+  }
+  return out;
+}
+
 /** Folga antes de o reparo mexer numa votação: quem a decidiu ainda pode estar aplicando. */
 const REPARO_FOLGA_MS = 5 * 60_000;
 
@@ -265,12 +340,15 @@ async function repararVotados(client, guild, alvos, heldOf) {
   for (const v of pendentes) {
     const alvo = alvos.find((a) => a.member.id === v.discordId);
     const step = STEP_BY_KEY.get(v.role);
-    const res = await aplicarVotado(alvo.member, heldOf.get(alvo.member.id), step, 'Votação aprovada (reparo)');
+    const res = await aplicarDecisao(alvo.member, heldOf.get(alvo.member.id), v, 'Votação aprovada (reparo)');
     if (res === 'falhou') continue;
     await collections.promotionVotes().updateOne({ _id: v._id }, { $set: { appliedAt: new Date() } });
-    if (res === 'aplicado') {
-      await audit(client, guild.id, `🔧 <@${v.discordId}> recebeu <@&${step.role}>, aprovado em votação — o cargo não tinha ficado.`);
-    }
+    if (res !== 'aplicado') continue;
+    const texto =
+      v.kind === DEMOTE
+        ? `🔧 <@${v.discordId}> perdeu <@&${step.role}>, rebaixado em votação — o cargo tinha ficado.`
+        : `🔧 <@${v.discordId}> recebeu <@&${step.role}>, aprovado em votação — o cargo não tinha ficado.`;
+    await audit(client, guild.id, texto);
   }
 }
 
@@ -300,6 +378,7 @@ export async function syncTrailRoles(client, guild, alvos) {
 
   // Antes das trilhas: o cargo votado muda o que a trilha enxerga.
   await repararVotados(client, guild, alvos, heldOf);
+  const travadosOf = await cargosTravados(alvos.map((a) => a.member.id));
 
   const anuncios = new Map(Object.values(TRACKS).map((t) => [t, []]));
   const ajustes = [];
@@ -308,7 +387,7 @@ export async function syncTrailRoles(client, guild, alvos) {
     const held = heldOf.get(member.id);
     for (const track of Object.values(TRACKS)) {
       const valor = Number(s[track.stat] ?? 0);
-      const plano = planTrack(track, held, valor);
+      const plano = planTrack(track, held, valor, travadosOf.get(member.id));
 
       const dar = [plano.give && STEP_BY_KEY.get(plano.give).role, plano.team && track.team].filter(Boolean);
       const tirar = plano.remove.map((k) => STEP_BY_KEY.get(k).role);
@@ -332,7 +411,8 @@ export async function syncTrailRoles(client, guild, alvos) {
       }
 
       // A votação automática abre UMA vez por pessoa e cargo: reprovada, só um
-      // Chefe a reabre, com /promocao abrir.
+      // Chefe a reabre, com /promover. Quem foi rebaixado do cargo nem
+      // chega aqui: ele está travado (cargosTravados).
       if (plano.vote && !(await collections.promotionVotes().findOne({ discordId: member.id, role: plano.vote }))) {
         await openVote(client, guild, { member, uuid, nome, step: STEP_BY_KEY.get(plano.vote), valor });
       }
@@ -348,10 +428,34 @@ export async function syncTrailRoles(client, guild, alvos) {
   for (const linha of ajustes) await audit(client, guild.id, linha);
 }
 
-// ───────────────────────────────────────────────────── Votação de promoção
+// ───────────────────────────────────────── Votação de promoção e rebaixamento
 
-/** Prefixo dos botões. O /promocao os adota, inclusive os da DM do Fundador. */
+/** Prefixo dos botões. O /promover os adota, inclusive os da DM do Fundador. */
 export const PROMO_PREFIX = 'promo:';
+
+/**
+ * `kind` da votação de rebaixamento. Ela mora na mesma coleção e usa o mesmo
+ * voto, prazo e confirmação do Fundador; `role` é o cargo que a pessoa PERDE, e
+ * `to`, o de baixo, que ela ganha. Votação sem `kind` é de promoção.
+ */
+const DEMOTE = 'demote';
+
+const nomeDa = (v) => (v.kind === DEMOTE ? 'rebaixamento' : 'promoção');
+
+/** Para onde vai o rebaixado, em texto: o cargo, ou Recrutador (`to` nulo). */
+const destino = (v) => (v.to ? `<@&${STEP_BY_KEY.get(v.to).role}>` : `**${RANK_LABEL.recruiter}**`);
+const destinoLabel = (to) => STEP_BY_KEY.get(to)?.label ?? RANK_LABEL.recruiter;
+
+/**
+ * Quem vota nesta votação: os Chefes (Staff), menos o alvo — ninguém vota no
+ * próprio rebaixamento. Este número é o denominador do "todos votaram".
+ */
+async function eleitores(guild, v) {
+  if (!guild) return 0;
+  const n = await eligibleVoterCount(guild);
+  const alvo = guild.members.cache.get(v.discordId);
+  return alvo && canVote(alvo) ? n - 1 : n;
+}
 
 /**
  * Só Aprovar e Reprovar. Não votar JÁ é abster-se: a regra conta a maioria dos
@@ -378,10 +482,15 @@ function voteEmbed(v, eligibleCount) {
   const step = STEP_BY_KEY.get(v.role);
   const aberta = v.openedBy ? `Aberta por <@${v.openedBy}>. ` : '';
   const fundador = step.confirm === 'fundador' ? '\nAprovada, ainda precisa da confirmação do Fundador.' : '';
+  const corpo =
+    v.kind === DEMOTE
+      ? `<@${v.discordId}> perde <@&${step.role}> e volta a ${destino(v)}.`
+      : `<@${v.discordId}> tem **${trackOf(step).unidade(v.reached)}** e pode subir a <@&${step.role}>.`;
+  const motivo = v.reason ? `\n**Motivo:** ${v.reason}` : '';
   return {
-    title: `Promoção — ${v.username}`,
-    description: `${aberta}<@${v.discordId}> tem **${trackOf(step).unidade(v.reached)}** e pode subir a <@&${step.role}>.${fundador}`,
-    color: 0xf1c40f,
+    title: `${v.kind === DEMOTE ? 'Rebaixamento' : 'Promoção'} — ${v.username}`,
+    description: `${aberta}${corpo}${motivo}${fundador}`,
+    color: v.kind === DEMOTE ? 0xe67e22 : 0xf1c40f,
     fields: [
       { name: 'Aprovar', value: String(approve), inline: true },
       { name: 'Reprovar', value: String(reject), inline: true },
@@ -398,7 +507,7 @@ function voteEmbed(v, eligibleCount) {
  */
 function votePayload(v, eligibleCount, ping) {
   return {
-    content: `<@&${ROLE.chefeStaff}> votação de promoção.`,
+    content: `<@&${ROLE.chefeStaff}> votação de ${nomeDa(v)}.`,
     embeds: [voteEmbed(v, eligibleCount)],
     components: [voteButtons(v._id.toString())],
     allowedMentions: ping ? { roles: [ROLE.chefeStaff] } : { parse: [] },
@@ -407,18 +516,20 @@ function votePayload(v, eligibleCount, ping) {
 
 /**
  * Abre a votação dos Chefes (Staff) no canal deles. Serve à automática (5.000
- * pontos) e à aberta por um Chefe (`openedBy`).
+ * pontos), à aberta por um Chefe (`openedBy`) e ao rebaixamento (`demote`).
  *
  * A mensagem sai ANTES do registro, com o id gerado aqui: votação aberta sem
  * mensagem seria reenviada pelo job de reenvio, que roda em paralelo, e o canal
  * ganharia duas. Se a mensagem não sair, nada é gravado.
  *
+ * @param {{to: object|null} | null} [args.demote]  `step` é o cargo que sai, `to` o que entra (null = Recrutador)
+ * @param {string|null} [args.reason]  o motivo de quem abriu, opcional
  * @returns {Promise<boolean>} se abriu
  */
-async function openVote(client, guild, { member, uuid, nome, step, valor, openedBy = null }) {
+async function openVote(client, guild, { member, uuid, nome, step, valor, openedBy = null, demote = null, reason = null }) {
   const canal = await client.channels.fetch(CH_CHEFES).catch(() => null);
   if (!canal) {
-    log.warn('Canal dos Chefes indisponível; votação de promoção não aberta.');
+    log.warn('Canal dos Chefes indisponível; votação não aberta.');
     return false;
   }
 
@@ -433,8 +544,8 @@ async function openVote(client, guild, { member, uuid, nome, step, valor, opened
     uuid,
     username: nome,
     role: step.key,
-    stat: track.stat,
-    reached: valor,
+    ...(demote ? { kind: DEMOTE, to: demote.to?.key ?? null } : { stat: track.stat, reached: valor }),
+    ...(reason ? { reason } : {}),
     openedBy,
     status: 'open',
     votes: [],
@@ -443,9 +554,9 @@ async function openVote(client, guild, { member, uuid, nome, step, valor, opened
     channelId: canal.id,
   };
 
-  const eligibleCount = await eligibleVoterCount(guild);
+  const eligibleCount = await eleitores(guild, doc);
   const msg = await canal.send(votePayload(doc, eligibleCount, true)).catch((e) => {
-    log.error('Falha ao abrir votação de promoção:', e);
+    log.error(`Falha ao abrir votação de ${nomeDa(doc)}:`, e);
     return null;
   });
   if (!msg) return false;
@@ -455,7 +566,7 @@ async function openVote(client, guild, { member, uuid, nome, step, valor, opened
     .then(
       () => true,
       (e) => {
-        log.error('Falha ao gravar votação de promoção:', e);
+        log.error(`Falha ao gravar votação de ${nomeDa(doc)}:`, e);
         return false;
       },
     );
@@ -465,34 +576,40 @@ async function openVote(client, guild, { member, uuid, nome, step, valor, opened
     return false;
   }
   const quem = openedBy ? ` por <@${openedBy}>` : '';
-  await audit(client, guild.id, `🗳️ Votação aberta${quem}: <@${member.id}> (**${nome}**) para <@&${step.role}> — ${track.unidade(valor)}.`);
+  const texto = demote
+    ? `🗳️ Votação de rebaixamento aberta${quem}: <@${member.id}> (**${nome}**) de <@&${step.role}> para ${destino(doc)}.`
+    : `🗳️ Votação aberta${quem}: <@${member.id}> (**${nome}**) para <@&${step.role}> — ${track.unidade(valor)}.`;
+  await audit(client, guild.id, reason ? `${texto} Motivo: ${reason}` : texto);
   return true;
 }
 
 /**
- * Para que cargo um Chefe pode abrir votação com /promocao, e para quem.
- * `abaixo`: o cargo que a pessoa tem que ter hoje (um degrau por vez).
- * `minimo`: a meta da trilha, quando o cargo tem uma.
+ * Por que não dá para abrir outra votação para esta pessoa agora, ou `null`.
+ * Uma por pessoa de cada vez: promoção e rebaixamento abertos juntos se
+ * desfariam um ao outro.
  */
-export const MANUAL_VOTE = Object.freeze({
-  estrategistaStaff: Object.freeze({ abaixo: 'capitaoStaff', minimo: TRILHAS.estrategistaStaff }),
-  chefeStaff: Object.freeze({ abaixo: 'estrategistaStaff' }),
-});
+async function votacaoEmCurso(discordId) {
+  const votes = collections.promotionVotes();
+  if (await votes.findOne({ discordId, status: 'open' })) return 'Já tem uma votação aberta para essa pessoa.';
+  if (await votes.findOne({ discordId, status: 'approved', owner: 'pending' })) {
+    return 'Essa pessoa tem uma votação aprovada esperando a confirmação do Fundador.';
+  }
+  return null;
+}
 
 /**
- * /promocao abrir: um Chefe (Staff) abre a votação. Serve para Chefe (Staff), e
- * para REABRIR Estrategista (Staff) de quem já tem a meta — a votação
- * automática só abre uma vez.
+ * /promover: um Chefe (Staff) abre a votação para pôr alguém em qualquer
+ * cargo da Staff acima do que ele tem hoje, sem meta de pontos: decide a
+ * maioria dos Chefes. Pôr Chefe (Staff) ainda precisa do Fundador.
  *
  * @param {import('discord.js').Client} client
  * @param {import('discord.js').Guild} guild
- * @param {{alvoId: string, cargo: string, por: import('discord.js').GuildMember}} args
+ * @param {{alvoId: string, cargo: string, motivo?: string|null, por: import('discord.js').GuildMember}} args
  * @returns {Promise<string>} a resposta para quem abriu
  */
-export async function openManualVote(client, guild, { alvoId, cargo, por }) {
+export async function openManualVote(client, guild, { alvoId, cargo, motivo = null, por }) {
   const step = STEP_BY_KEY.get(cargo);
-  const regra = MANUAL_VOTE[cargo];
-  if (!step || !regra) return 'Cargo inválido.';
+  if (!step || !TRACKS.staff.steps.includes(step)) return 'Cargo inválido.';
   // O nível do comando já exige Chefe; aqui sai quem está Ocioso.
   if (!hasLevel(por, LEVEL.FUNDADOR) && !canVote(por)) return 'Chefe Ocioso não abre votação.';
 
@@ -501,28 +618,81 @@ export async function openManualVote(client, guild, { alvoId, cargo, por }) {
   if (!link.inGuild) return 'Essa pessoa não está na guilda.';
   const member = await guild.members.fetch({ user: alvoId, force: true }).catch(() => null);
   if (!member) return 'Essa pessoa não está no Discord.';
+  if (hasLevel(member, LEVEL.FUNDADOR)) return 'O Fundador não entra em votação.';
 
   const track = trackOf(step);
   const topo = track.steps.find((s) => member.roles.cache.has(s.role));
-  const abaixo = STEP_BY_KEY.get(regra.abaixo);
-  if (topo?.key !== abaixo.key) return `Só abre para quem é **${abaixo.label}** hoje, um degrau por vez.`;
+  if (topo && track.steps.indexOf(topo) <= track.steps.indexOf(step)) {
+    return `Essa pessoa já é **${topo.label}**. Para descer, use /rebaixar.`;
+  }
 
   const stats = await collections.guildStats().findOne({ uuid: link.uuid });
   const valor = Number(stats?.[track.stat] ?? 0);
-  if (regra.minimo != null && valor < regra.minimo) {
-    return `Precisa de **${track.unidade(regra.minimo)}**, e tem ${fmt(valor)}.`;
-  }
 
-  const votes = collections.promotionVotes();
-  if (await votes.findOne({ discordId: alvoId, role: cargo, status: 'open' })) {
-    return 'Já tem uma votação aberta para isso.';
-  }
-  if (await votes.findOne({ discordId: alvoId, role: cargo, status: 'approved', owner: 'pending' })) {
-    return 'Já foi aprovada e está esperando a confirmação do Fundador.';
-  }
+  const emCurso = await votacaoEmCurso(alvoId);
+  if (emCurso) return emCurso;
 
-  const abriu = await openVote(client, guild, { member, uuid: link.uuid, nome: link.username, step, valor, openedBy: por.id });
+  const abriu = await openVote(client, guild, {
+    member,
+    uuid: link.uuid,
+    nome: link.username,
+    step,
+    valor,
+    openedBy: por.id,
+    reason: motivo,
+  });
   return abriu ? `Votação aberta em <#${CH_CHEFES}>.` : 'Não consegui abrir a votação: o canal dos Chefes está acessível?';
+}
+
+/** Valor do /rebaixar para "sai da Staff": o destino nulo. */
+export const RECRUTADOR = 'recrutador';
+
+/**
+ * /rebaixar: um Chefe (Staff) abre a votação para descer alguém a qualquer
+ * cargo da Staff abaixo do que ele tem hoje, ou a Recrutador (fora da Staff).
+ * Mesmo voto e mesmo prazo da promoção; tirar um Chefe (Staff) precisa da
+ * confirmação do Fundador, como pôr. O que a pessoa perde não volta sozinho
+ * pela trilha (ver cargosTravados).
+ *
+ * Não pede registro nem guilda: quem está Ocioso também pode ser rebaixado.
+ *
+ * @param {{alvoId: string, cargo: string, motivo?: string|null, por: import('discord.js').GuildMember}} args
+ *   `cargo`: chave de `steps` da trilha Staff, ou RECRUTADOR
+ * @returns {Promise<string>} a resposta para quem abriu
+ */
+export async function openDemoteVote(client, guild, { alvoId, cargo, motivo = null, por }) {
+  const para = cargo === RECRUTADOR ? null : STEP_BY_KEY.get(cargo);
+  if (para === undefined || (para && !TRACKS.staff.steps.includes(para))) return 'Cargo inválido.';
+  if (!hasLevel(por, LEVEL.FUNDADOR) && !canVote(por)) return 'Chefe Ocioso não abre votação.';
+  if (alvoId === por.id) return 'Você não abre votação de rebaixamento para si mesmo.';
+
+  const member = await guild.members.fetch({ user: alvoId, force: true }).catch(() => null);
+  if (!member) return 'Essa pessoa não está no Discord.';
+  if (hasLevel(member, LEVEL.FUNDADOR)) return 'O Fundador não é rebaixado por votação.';
+
+  const { steps } = TRACKS.staff;
+  const de = steps.find((s) => member.roles.cache.has(s.role));
+  if (!de) return 'Essa pessoa não tem cargo na Staff para perder.';
+  if (para && steps.indexOf(para) <= steps.indexOf(de)) {
+    return `Essa pessoa é **${de.label}**: o rebaixamento tem que ser para um cargo abaixo. Para subir, use /promover.`;
+  }
+
+  const emCurso = await votacaoEmCurso(alvoId);
+  if (emCurso) return emCurso;
+
+  const link = await collections.members().findOne({ discordId: alvoId });
+  const abriu = await openVote(client, guild, {
+    member,
+    uuid: link?.uuid ?? null,
+    nome: link?.username ?? member.displayName,
+    step: de,
+    openedBy: por.id,
+    demote: { to: para },
+    reason: motivo,
+  });
+  return abriu
+    ? `Votação de rebaixamento aberta em <#${CH_CHEFES}>: **${de.label}** → **${destinoLabel(para?.key)}**.`
+    : 'Não consegui abrir a votação: o canal dos Chefes está acessível?';
 }
 
 /** Troca o resultado mostrado na mensagem da votação. Some calado se ela sumiu. */
@@ -531,35 +701,60 @@ async function mostrarResultado(client, v, texto, cor) {
     const canal = await client.channels.fetch(v.channelId);
     const msg = await canal.messages.fetch(v.messageId);
     const guild = await client.guilds.fetch(v.guildDiscordId).catch(() => null);
-    const embed = voteEmbed(v, guild ? await eligibleVoterCount(guild) : 0);
+    const embed = voteEmbed(v, await eleitores(guild, v));
     embed.color = cor;
     embed.fields.push({ name: 'Resultado', value: texto });
     await msg.edit({ embeds: [embed], components: [voteButtons(v._id.toString(), true)] });
   } catch (e) {
-    log.error('Falha ao editar mensagem da votação de promoção:', e);
+    log.error(`Falha ao editar mensagem da votação de ${nomeDa(v)}:`, e);
   }
 }
 
 /**
- * Aplica o cargo votado a quem está no Discord e anuncia. Sem conseguir, deixa
- * sem `appliedAt`, e o reparo do roleSync tenta de novo.
+ * Aplica o resultado aprovado a quem está no Discord. Promoção é anunciada no
+ * canal da trilha; rebaixamento fica só na auditoria — não é notícia para a
+ * guilda. Sem conseguir, deixa sem `appliedAt`, e o reparo do roleSync tenta
+ * de novo.
+ *
+ * @param {(member, step, track) => string} anuncio  o texto do anúncio da promoção
  */
-async function concluirPromocao(client, guild, v, anuncio) {
+async function concluir(client, guild, v, anuncio) {
   const step = STEP_BY_KEY.get(v.role);
   const track = trackOf(step);
+  const rebaixa = v.kind === DEMOTE;
   // `force`: o cache pode estar atrasado, e é dele que sai o que tirar.
   const member = guild ? await guild.members.fetch({ user: v.discordId, force: true }).catch(() => null) : null;
   if (!member) {
-    await audit(client, v.guildDiscordId, `⚠️ **${v.username}** não está no Discord — <@&${step.role}> fica para quando voltar.`);
+    const fica = rebaixa ? `o rebaixamento de <@&${step.role}>` : `<@&${step.role}>`;
+    await audit(client, v.guildDiscordId, `⚠️ **${v.username}** não está no Discord — ${fica} fica para quando voltar.`);
     return;
   }
-  const res = await aplicarVotado(member, new Set(member.roles.cache.keys()), step, 'Promoção aprovada');
+  const res = await aplicarDecisao(member, new Set(member.roles.cache.keys()), v, rebaixa ? 'Rebaixamento aprovado' : 'Promoção aprovada');
   if (res === 'falhou') {
-    await audit(client, v.guildDiscordId, `⚠️ Não consegui dar <@&${step.role}> a <@${member.id}> — o cargo do bot está abaixo?`);
+    const acao = rebaixa ? `rebaixar <@${member.id}> de <@&${step.role}>` : `dar <@&${step.role}> a <@${member.id}>`;
+    await audit(client, v.guildDiscordId, `⚠️ Não consegui ${acao} — o cargo do bot está abaixo?`);
     return;
   }
   await collections.promotionVotes().updateOne({ _id: v._id }, { $set: { appliedAt: new Date() } });
-  if (res === 'aplicado') await anunciar(client, track, [{ userId: member.id, texto: anuncio(member, step, track) }]);
+  if (res !== 'aplicado') return;
+  if (rebaixa) {
+    await audit(client, v.guildDiscordId, `⬇️ <@${member.id}> perdeu <@&${step.role}> e voltou a ${destino(v)}.`);
+  } else {
+    await anunciar(client, track, [{ userId: member.id, texto: anuncio(member, step, track) }]);
+  }
+}
+
+/**
+ * "promoção de **Fulano** a @Cargo" ou "rebaixamento de **Fulano** de @Cargo
+ * para @Outro", para a auditoria. `inicio`: com a primeira letra maiúscula.
+ */
+function assunto(v, inicio = false) {
+  const step = STEP_BY_KEY.get(v.role);
+  const texto =
+    v.kind === DEMOTE
+      ? `rebaixamento de **${v.username}** de <@&${step.role}> para ${destino(v)}`
+      : `promoção de **${v.username}** a <@&${step.role}>`;
+  return inicio ? texto[0].toUpperCase() + texto.slice(1) : texto;
 }
 
 /**
@@ -577,7 +772,7 @@ export async function finalizePromotionVote(client, id, cause = 'deadline') {
 
   const cfg = await getConfig(v.guildDiscordId);
   const guild = await client.guilds.fetch(v.guildDiscordId).catch(() => null);
-  const eligibleCount = guild ? await eligibleVoterCount(guild) : 0;
+  const eligibleCount = await eleitores(guild, v);
   const result = decide(v.votes, cfg.params?.voteRule || 'effective', eligibleCount);
   const step = STEP_BY_KEY.get(v.role);
   const doFundador = result === 'approved' && step.confirm === 'fundador';
@@ -591,18 +786,15 @@ export async function finalizePromotionVote(client, id, cause = 'deadline') {
 
   const texto = result !== 'approved' ? '❌ Reprovada' : doFundador ? '✅ Aprovada — aguardando o Fundador' : '✅ Aprovada';
   await mostrarResultado(client, v, texto, result === 'approved' ? 0x2ecc71 : 0xe74c3c);
-  await audit(
-    client,
-    v.guildDiscordId,
-    `Promoção de **${v.username}** a <@&${step.role}>: ${result === 'approved' ? '✅ aprovada' : '❌ reprovada'} (${cause}).`,
-  );
+  const a = v.kind === DEMOTE ? 'o' : 'a';
+  await audit(client, v.guildDiscordId, `${assunto(v, true)}: ${result === 'approved' ? `✅ aprovad${a}` : `❌ reprovad${a}`} (${cause}).`);
   if (result !== 'approved') return result;
 
   if (doFundador) {
     await pedirFundador(client, guild, v);
     return result;
   }
-  await concluirPromocao(
+  await concluir(
     client,
     guild,
     v,
@@ -635,17 +827,18 @@ function ownerButtons(id, disabled = false) {
 async function ownerPayload(client, guild, v, decisao = null) {
   const step = STEP_BY_KEY.get(v.role);
   const { approve, reject } = tally(v.votes);
-  const texto = await plainMentions(
-    client,
-    guild,
-    `<@${v.discordId}> (**${v.username}**) foi aprovado pelos Chefes (Staff) para **${step.label}**, ${approve} a ${reject}. ` +
-      'Só vale depois da sua confirmação.',
-  );
+  const rebaixa = v.kind === DEMOTE;
+  const aprovado = rebaixa
+    ? `O rebaixamento de <@${v.discordId}> (**${v.username}**) de **${step.label}** para **${destinoLabel(v.to)}** ` +
+      `foi aprovado pelos Chefes (Staff), ${approve} a ${reject}.`
+    : `<@${v.discordId}> (**${v.username}**) foi aprovado pelos Chefes (Staff) para **${step.label}**, ${approve} a ${reject}.`;
+  const motivo = v.reason ? `\n**Motivo:** ${v.reason}\n` : ' ';
+  const texto = await plainMentions(client, guild, `${aprovado}${motivo}Só vale depois da sua confirmação.`);
   const fim = decisao === 'confirm' ? '✅ Confirmada' : decisao === 'decline' ? '❌ Recusada' : null;
   return {
     embeds: [
       {
-        title: `🛡️ Promoção a ${step.label}`,
+        title: rebaixa ? `🛡️ Rebaixamento de ${step.label}` : `🛡️ Promoção a ${step.label}`,
         description: fim ? `${texto}\n\n**${fim}.**` : texto,
         color: fim ? (decisao === 'confirm' ? 0x2ecc71 : 0xe74c3c) : 0xf1c40f,
         footer: { text: `ID: ${v._id}` },
@@ -657,7 +850,7 @@ async function ownerPayload(client, guild, v, decisao = null) {
 }
 
 /**
- * Chefe (Staff) aprovado só vale com o clique do Fundador: DM a cada um. Se
+ * Pôr ou tirar Chefe (Staff) só vale com o clique do Fundador: DM a cada um. Se
  * nenhuma DM passar, o pedido vai para o canal dos Chefes — só o Fundador
  * consegue clicar.
  */
@@ -678,7 +871,7 @@ async function pedirFundador(client, guild, v) {
   await audit(
     client,
     guild.id,
-    `📨 Promoção de **${v.username}** a <@&${STEP_BY_KEY.get(v.role).role}> aguardando o Fundador` +
+    `📨 ${assunto(v, true)} aguardando o Fundador` +
       (entregues ? ' (DM enviada).' : ' — DM fechada, o pedido foi para o canal dos Chefes.'),
   );
 }
@@ -691,7 +884,7 @@ async function handleOwnerButton(interaction, id, decisao) {
   const guild = await client.guilds.fetch(v0.guildDiscordId).catch(() => null);
   const quem = guild ? await guild.members.fetch(interaction.user.id).catch(() => null) : null;
   const fundador = guild?.ownerId === interaction.user.id || !!quem?.roles.cache.has(ROLE.fundador);
-  if (!fundador) return interaction.reply({ content: 'Só o Fundador confirma promoção a Chefe (Staff).', ephemeral: true });
+  if (!fundador) return interaction.reply({ content: 'Só o Fundador confirma pôr ou tirar Chefe (Staff).', ephemeral: true });
 
   const agora = new Date();
   const $set = { owner: decisao === 'confirm' ? 'confirmed' : 'declined', ownerBy: interaction.user.id, ownerAt: agora };
@@ -700,10 +893,9 @@ async function handleOwnerButton(interaction, id, decisao) {
   const v = await collections
     .promotionVotes()
     .findOneAndUpdate({ _id: v0._id, status: 'approved', owner: 'pending' }, { $set }, { returnDocument: 'after' });
-  if (!v) return interaction.reply({ content: 'Esta promoção já foi decidida.', ephemeral: true });
+  if (!v) return interaction.reply({ content: 'Isto já foi decidido.', ephemeral: true });
 
   await interaction.update(await ownerPayload(client, guild, v, decisao));
-  const step = STEP_BY_KEY.get(v.role);
   await mostrarResultado(
     client,
     v,
@@ -713,10 +905,10 @@ async function handleOwnerButton(interaction, id, decisao) {
   await audit(
     client,
     v.guildDiscordId,
-    `${decisao === 'confirm' ? '✅' : '❌'} <@${interaction.user.id}> ${decisao === 'confirm' ? 'confirmou' : 'recusou'} a promoção de **${v.username}** a <@&${step.role}>.`,
+    `${decisao === 'confirm' ? '✅' : '❌'} <@${interaction.user.id}> ${decisao === 'confirm' ? 'confirmou' : 'recusou'} o ${assunto(v)}.`,
   );
   if (decisao !== 'confirm') return;
-  await concluirPromocao(
+  await concluir(
     client,
     guild,
     v,
@@ -738,16 +930,17 @@ export async function handlePromotionButton(interaction) {
     return interaction.reply({ content: 'Para se abster, é só não votar.', ephemeral: true });
   }
   if (!canVote(interaction.member)) {
-    return interaction.reply({ content: 'Só os Chefes (Staff) votam promoção.', ephemeral: true });
+    return interaction.reply({ content: 'Só os Chefes (Staff) votam promoção e rebaixamento.', ephemeral: true });
   }
 
   // Um voto por pessoa, numa operação só: tira o voto anterior deste Chefe e
   // põe o novo no MESMO update. Ler, mudar e regravar a lista perderia o voto
   // de quem clicasse no mesmo instante, e dois cliques rápidos da mesma pessoa
-  // podiam deixá-la com dois votos.
+  // podiam deixá-la com dois votos. O alvo fica de fora do filtro: um Chefe não
+  // vota no próprio rebaixamento.
   const voter = interaction.user.id;
   const v = await collections.promotionVotes().findOneAndUpdate(
-    { _id: new ObjectId(id), status: 'open' },
+    { _id: new ObjectId(id), status: 'open', discordId: { $ne: voter } },
     [
       {
         $set: {
@@ -762,9 +955,13 @@ export async function handlePromotionButton(interaction) {
     ],
     { returnDocument: 'after' },
   );
-  if (!v) return interaction.reply({ content: 'Esta votação já foi encerrada.', ephemeral: true });
+  if (!v) {
+    const propria = await collections.promotionVotes().findOne({ _id: new ObjectId(id), discordId: voter });
+    const content = propria ? 'Você não vota na votação sobre você.' : 'Esta votação já foi encerrada.';
+    return interaction.reply({ content, ephemeral: true });
+  }
 
-  const eligibleCount = await eligibleVoterCount(interaction.guild);
+  const eligibleCount = await eleitores(interaction.guild, v);
   await interaction.update({ embeds: [voteEmbed(v, eligibleCount)], components: [voteButtons(id)] });
   await interaction.followUp({
     content: `Voto registrado: **${labelFor(choice)}**. Ninguém vê o seu voto; clicar no outro botão troca.`,
@@ -794,7 +991,7 @@ async function ensureVoteMessages(client) {
     const canal = await client.channels.fetch(v.channelId ?? CH_CHEFES).catch(() => null);
     if (!canal) continue;
     const guild = await client.guilds.fetch(v.guildDiscordId).catch(() => null);
-    const eligibleCount = async () => (guild ? eligibleVoterCount(guild) : 0);
+    const eligibleCount = () => eleitores(guild, v);
 
     if (v.messageId) {
       const achou = await canal.messages.fetch({ message: v.messageId, force: true }).then(
@@ -814,14 +1011,14 @@ async function ensureVoteMessages(client) {
     }
 
     const msg = await canal.send(votePayload(v, await eligibleCount(), false)).catch((e) => {
-      log.error('Falha ao reenviar votação de promoção:', e);
+      log.error(`Falha ao reenviar votação de ${nomeDa(v)}:`, e);
       return null;
     });
     if (!msg) continue;
     await collections
       .promotionVotes()
       .updateOne({ _id: v._id }, { $set: { messageId: msg.id, channelId: canal.id } });
-    await audit(client, v.guildDiscordId, `🔁 A votação de promoção de **${v.username}** foi apagada e reenviada, com os votos que já tinha.`);
+    await audit(client, v.guildDiscordId, `🔁 A votação de ${nomeDa(v)} de **${v.username}** foi apagada e reenviada, com os votos que já tinha.`);
   }
 }
 

@@ -108,18 +108,33 @@ function rewardAccess(interaction) {
 }
 
 /**
+ * Pôr ou tirar guilda da black-list bane ou desbane todos os membros dela, e
+ * banir é de Chefe. Ver as listas e cuidar das aliadas é gestão: Estrategista.
+ */
+function guildsAccess(interaction) {
+  const grupo = interaction.options.getSubcommandGroup(false);
+  const sub = interaction.options.getSubcommand(false);
+  return grupo === 'blacklist' && sub !== 'list' ? CHEFE : ESTRATEGISTA;
+}
+
+/**
  * Nível de cada comando de barra: um nível para o comando inteiro, um por
  * subcomando (ou grupo), ou uma função. O que não está aqui é de todos.
+ *
+ * Moderação e gestão do dia a dia (vínculo, cargos, painel de registro) vão de
+ * Estrategista (Staff) para cima. Ficam só com o Chefe o que bane (regra da
+ * staff), o que reescreve pontos e contadores, as seasons, o /config e as
+ * votações de cargo.
  */
 const COMMAND_ACCESS = Object.freeze({
   ban: { add: CHEFE, remove: FUNDADOR, list: STAFF, check: STAFF },
   warn: { add: ESTRATEGISTA, remove: ESTRATEGISTA, clear: ESTRATEGISTA, list: STAFF },
-  unlink: CHEFE,
-  forcelink: CHEFE,
-  reconciliar: CHEFE,
-  guilds: CHEFE,
+  unlink: ESTRATEGISTA,
+  forcelink: ESTRATEGISTA,
+  reconciliar: ESTRATEGISTA,
+  guilds: guildsAccess,
   config: CHEFE,
-  registro: CHEFE,
+  registro: ESTRATEGISTA,
   season: { start: CHEFE, end: CHEFE },
   points: { add: CHEFE, recalcular: CHEFE, apurar: CHEFE },
   tome: { grant: STAFF, corrigir: CHEFE },
@@ -131,7 +146,8 @@ const COMMAND_ACCESS = Object.freeze({
   evento: { criar: ESTRATEGISTA, encerrar: ESTRATEGISTA, cancelar: ESTRATEGISTA, apurar: ESTRATEGISTA, blacklist: ESTRATEGISTA },
   giveaway: { criar: ESTRATEGISTA, encerrar: ESTRATEGISTA, reroll: ESTRATEGISTA },
   leaderboard: { atualizar: STAFF },
-  promocao: CHEFE,
+  promover: CHEFE,
+  rebaixar: CHEFE,
 });
 
 /** O nível exigido por um comando de barra, já com o subcomando resolvido. */

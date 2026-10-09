@@ -70,7 +70,6 @@ export default {
   data: new SlashCommandBuilder()
     .setName('warn')
     .setDescription('(Staff) Advertências')
-    .setDefaultMemberPermissions(0)
     .addSubcommand((s) =>
       s
         .setName('add')

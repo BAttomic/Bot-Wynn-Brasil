@@ -15,7 +15,6 @@ export default {
   data: new SlashCommandBuilder()
     .setName('fila')
     .setDescription('(Staff) Fila de entrada: quem foi aprovado e ainda não entrou na guilda')
-    .setDefaultMemberPermissions(0)
     .toJSON(),
 
   owns(interaction) {

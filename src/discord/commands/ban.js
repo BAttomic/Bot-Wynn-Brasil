@@ -45,7 +45,6 @@ export default {
   data: new SlashCommandBuilder()
     .setName('ban')
     .setDescription('(Staff) Lista de banimentos permanentes')
-    .setDefaultMemberPermissions(0)
     .addSubcommand((s) =>
       s
         .setName('add')

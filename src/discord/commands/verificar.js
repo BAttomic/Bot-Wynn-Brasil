@@ -6,7 +6,6 @@ export default {
   data: new SlashCommandBuilder()
     .setName('verificar')
     .setDescription('(Staff) Relatório de verificação: quem está na guilda vs. vínculo no Discord')
-    .setDefaultMemberPermissions(0)
     .toJSON(),
 
   // Os botões do check-in de inatividade chegam pela DM, sem comando por trás. O

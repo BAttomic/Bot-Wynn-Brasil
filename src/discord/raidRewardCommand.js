@@ -325,7 +325,6 @@ export function raidRewardCommand(kind, name, description) {
     data: new SlashCommandBuilder()
       .setName(name)
       .setDescription(description)
-      .setDefaultMemberPermissions(0)
       .addUserOption((o) => o.setName('user').setDescription(`Ver o saldo de um jogador específico`).setRequired(false))
       // Correção de entrega digitada errada. Vivem como OPÇÕES, e não como
       // subcomando, para o comando puro continuar listando todo mundo.

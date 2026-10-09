@@ -9,14 +9,13 @@ import { LEVEL, hasLevel, deniedMessage } from '../../services/permissions.js';
  * @returns {Promise<boolean>}
  */
 async function canForceLink(interaction) {
-  return hasLevel(interaction.member, LEVEL.CHEFE);
+  return hasLevel(interaction.member, LEVEL.ESTRATEGISTA);
 }
 
 export default {
   data: new SlashCommandBuilder()
     .setName('forcelink')
     .setDescription('(Staff) Vincula à força um usuário a uma conta do WynnCraft')
-    .setDefaultMemberPermissions(0)
     .addUserOption((o) => o.setName('user').setDescription('Usuário do Discord').setRequired(true))
     .addStringOption((o) => o.setName('nick').setDescription('Nick no WynnCraft').setRequired(true))
     .toJSON(),

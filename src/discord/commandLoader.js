@@ -33,14 +33,15 @@ import evento from './commands/evento.js';
 import giveaway from './commands/giveaway.js';
 import guilds from './commands/guilds.js';
 import fila from './commands/fila.js';
-import promocao from './commands/promocao.js';
+import promover from './commands/promover.js';
+import rebaixar from './commands/rebaixar.js';
 
 // TODO ARQUIVO de commands/ precisa estar aqui. A lista é explícita (e não uma
 // varredura da pasta) para o registro no Discord ser previsível, mas o preço é
 // este: comando novo que não entre na lista não é registrado E não recebe os
 // próprios botões — o clique cai em "Este botão não responde mais", porque o
 // `owns()` dele nunca chega a ser consultado. Ver `ownerOf` abaixo.
-const commands = [link, unlink, config, apply, season, leaderboard, profile, tome, loan, calc, points, verificar, reconciliar, membros, registro, missao, ban, warn, forcelink, uniforme, modpack, booth, apelacao, aspects, esmeraldas, evento, giveaway, guilds, fila, promocao];
+const commands = [link, unlink, config, apply, season, leaderboard, profile, tome, loan, calc, points, verificar, reconciliar, membros, registro, missao, ban, warn, forcelink, uniforme, modpack, booth, apelacao, aspects, esmeraldas, evento, giveaway, guilds, fila, promover, rebaixar];
 const byName = new Map(commands.map((c) => [c.data.name, c]));
 
 /** Só para o selftest conferir os limites do Discord sem ligar o bot. */
@@ -125,8 +126,9 @@ export function attachHandlers(client, ctx) {
 
     const cmd = byName.get(interaction.commandName);
     if (!cmd) return;
-    // Cargo antes de tudo. Esconder o comando no Discord (Integrações) só tira
-    // da lista: quem conhece o nome ainda consegue chamar, e é aqui que barra.
+    // Cargo antes de tudo, e só aqui. Nenhum comando é registrado escondido
+    // (`setDefaultMemberPermissions(0)`): escondido, só quem tem Administrador o
+    // vê, e os Chefes (Staff) não têm — ficavam sem os comandos da staff.
     if (!(await requireLevel(interaction, commandLevel(interaction)))) return;
     try {
       await cmd.execute(interaction, ctx);

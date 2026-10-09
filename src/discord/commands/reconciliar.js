@@ -15,14 +15,13 @@ const APPLY_SCOPES = new Set(['member', 'ally', 'neutral', 'banned', 'unregister
  * Quem pode usar o painel: Chefe (Staff) ou acima (ver services/permissions.js).
  */
 async function isStaff(interaction) {
-  return hasLevel(interaction.member, LEVEL.CHEFE);
+  return hasLevel(interaction.member, LEVEL.ESTRATEGISTA);
 }
 
 export default {
   data: new SlashCommandBuilder()
     .setName('reconciliar')
     .setDescription('(Staff) Painel para conferir e corrigir os cargos e apelidos de todo o servidor')
-    .setDefaultMemberPermissions(0)
     .toJSON(),
 
   owns(interaction) {

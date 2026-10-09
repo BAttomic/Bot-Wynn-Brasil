@@ -384,7 +384,6 @@ export default {
   data: new SlashCommandBuilder()
     .setName('loan')
     .setDescription('Empréstimos da guilda (esmeraldas/itens)')
-    .setDefaultMemberPermissions(0)
     .addSubcommand((s) =>
       s
         .setName('new')

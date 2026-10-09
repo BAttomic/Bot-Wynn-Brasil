@@ -45,7 +45,6 @@ export default {
     .setDescription('(Staff) Remove o vínculo de um usuário e seus cargos')
     .addUserOption((o) => o.setName('user').setDescription('Usuário do Discord').setRequired(false))
     .addStringOption((o) => o.setName('nick').setDescription('Nick no WynnCraft').setRequired(false))
-    .setDefaultMemberPermissions(0)
     .toJSON(),
 
   async execute(interaction) {

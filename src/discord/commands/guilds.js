@@ -6,7 +6,7 @@ import { getConfig } from '../../config/guildConfig.js';
 import { collections } from '../../db/mongo.js';
 import { brDateTime } from '../../util/format.js';
 import { audit } from '../../services/audit.js';
-import { LEVEL, hasLevel, deniedMessage } from '../../services/permissions.js';
+import { commandLevel, hasLevel, deniedMessage } from '../../services/permissions.js';
 
 /**
  * Guildas que o bot rastreia, em dois papéis opostos.
@@ -28,7 +28,8 @@ import { LEVEL, hasLevel, deniedMessage } from '../../services/permissions.js';
 const APLICAR_SCOPE = { [KIND_BLACKLIST]: 'banned', [KIND_ALLY]: 'ally' };
 
 async function isStaff(interaction) {
-  return hasLevel(interaction.member, LEVEL.CHEFE);
+  // O nível muda por subcomando: o mesmo do roteador (guildsAccess).
+  return hasLevel(interaction.member, commandLevel(interaction));
 }
 
 const tagOption = (o) =>
@@ -47,7 +48,6 @@ export default {
   data: new SlashCommandBuilder()
     .setName('guilds')
     .setDescription('(Staff) Guildas rastreadas: black-list e aliadas')
-    .setDefaultMemberPermissions(0)
     .addSubcommandGroup((g) =>
       grupo(
         g,
