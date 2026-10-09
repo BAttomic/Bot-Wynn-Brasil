@@ -325,7 +325,7 @@ function staffPayload(p) {
 
 ## 1. Moderação pelo bot
 > - Ninguém usa kick ou ban do Discord: tudo passa pelo bot e fica registrado.
-> - **/warn** — ${r('estrategistaStaff')} ou acima. Registra e avisa por DM; não bane.
+> - **/warn** — ${r('estrategistaStaff')} ou acima. Registra e avisa por DM; não bane. Gravidade **baixa**, **média** ou **grave**: vale 1, 2 ou 3 pontos e conta por 1, 2 ou 3 meses.
 > - **/ban** — só ${r('chefeStaff')}. Bane a pessoa inteira: todas as contas e todos os Discords.
 > - **Unban** e **promoção a Chefe** — só o ${r('fundador')}.
 

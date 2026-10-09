@@ -83,7 +83,6 @@ export const PARAM_KEYS = Object.freeze([
   'rewardMinGuildDays',
   'tomeMinClassLevel',
   'warnsToBan',
-  'warnExpiryDays',
 ]);
 
 /**
@@ -130,7 +129,6 @@ export const PARAM_KEYS = Object.freeze([
  * @property {number}         rewardMinGuildDays    dias mínimos na guilda p/ fila de Tomes e receber aspects/esmeraldas
  * @property {number}         tomeMinClassLevel     nível mínimo de uma classe p/ entrar na fila de Tomes
  * @property {number}         warnsToBan            advertências ativas que disparam o ban automático
- * @property {number}         warnExpiryDays        dias até uma advertência parar de contar
  */
 
 /** @type {GuildParams} */
@@ -225,9 +223,8 @@ const DEFAULT_PARAMS = Object.freeze({
   // Advertências ATIVAS que disparam o ban automático. A staff continua podendo
   // banir antes disso à mão, ou isentar depois com /ban remove.
   warnsToBan: 3,
-  // Depois disto a advertência para de contar para o ban, mas continua no
-  // histórico. Nada é apagado: /warn list mostra ativas e expiradas.
-  warnExpiryDays: 90,
+  // O prazo de cada advertência vem da gravidade dela (GRAVIDADES em
+  // services/warns.js), não daqui.
 });
 
 /**

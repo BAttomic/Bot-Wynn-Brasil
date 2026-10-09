@@ -128,7 +128,7 @@ function guildsAccess(interaction) {
  */
 const COMMAND_ACCESS = Object.freeze({
   ban: { add: CHEFE, remove: FUNDADOR, list: STAFF, check: STAFF },
-  warn: { add: ESTRATEGISTA, remove: ESTRATEGISTA, clear: ESTRATEGISTA, list: STAFF },
+  warn: { add: ESTRATEGISTA, edit: ESTRATEGISTA, remove: ESTRATEGISTA, clear: ESTRATEGISTA, list: STAFF },
   unlink: ESTRATEGISTA,
   forcelink: ESTRATEGISTA,
   reconciliar: ESTRATEGISTA,

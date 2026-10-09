@@ -552,48 +552,68 @@ async function main() {
     check('motivo novo prevalece', (await B2.findBan({ uuid: 'uuid-gsw' })).reason, 'reincidiu');
 
     // ---------------------------------------------------- Advertências
-    section('10b. Advertências acumulam, expiram e escalam para ban');
+    section('10b. Advertências: gravidade, pontos e prazo — e não banem');
     const W = await import('../src/services/warns.js');
     const GID = process.env.DISCORD_GUILD_ID;
 
-    // Corte de expiração é função pura: dá para conferir sem tocar no banco.
-    check('expiração desligada com 0 dias', W.expiryCutoff(0), null);
-    check('90 dias vira uma data no passado', W.expiryCutoff(90) < new Date(), true);
+    // O prazo é função pura: dá para conferir sem tocar no banco.
+    const ate = (iso, severity) => W.expiresAt({ at: new Date(iso), severity }).toISOString().slice(0, 10);
+    check('baixa conta 1 mês', ate('2026-01-10T12:00:00Z', 'baixa'), '2026-02-10');
+    check('média conta 2 meses', ate('2026-01-10T12:00:00Z', 'media'), '2026-03-10');
+    check('grave conta 3 meses', ate('2026-01-10T12:00:00Z', 'grave'), '2026-04-10');
+    check('31/jan + 1 mês cai no fim de fevereiro', ate('2026-01-31T12:00:00Z', 'baixa'), '2026-02-28');
+    check('warn antigo, sem gravidade, conta como baixa', [W.gravidadeDe({}).pontos, W.gravidadeDe({}).meses], [1, 1]);
 
     const alvo = { uuid: 'uuid-warn', username: 'Advertido', discordId: 'discord-w1' };
-    const w1 = await W.recordWarn(GID, { ...alvo, reason: 'flood', by: 'staff-1' });
-    check('primeira advertência conta 1', w1.active, 1);
-    check('limiar vem da config', w1.threshold, 3);
+    const w1 = await W.recordWarn(GID, { ...alvo, reason: 'flood', severity: 'baixa', by: 'staff-1' });
+    check('baixa: 1 advertência, 1 ponto', [w1.active, w1.pontos], [1, 1]);
     check('id curto para o /warn remove', w1.warn.warnId.length, 8);
-    check('ainda não bane', (await W.escalate(GID, { ...alvo, ...w1 })).banned, false);
 
     // A teia de identidade vale aqui também: mesmo Discord, conta nova.
-    const w2 = await W.recordWarn(GID, { uuid: 'uuid-warn-2', discordId: 'discord-w1', reason: 'spam', by: 'staff-1' });
-    check('conta nova, mesmo Discord => acumula', w2.active, 2);
+    const w2 = await W.recordWarn(GID, { uuid: 'uuid-warn-2', discordId: 'discord-w1', reason: 'spam', severity: 'media', by: 'staff-1' });
+    check('conta nova, mesmo Discord => soma', [w2.active, w2.pontos], [2, 3]);
 
-    const w3 = await W.recordWarn(GID, { ...alvo, reason: 'desrespeito', by: 'staff-1' });
-    check('terceira atinge o limiar', w3.active, 3);
-    const esc = await W.escalate(GID, { ...alvo, ...w3 });
-    check('escalou para ban', esc.banned, true);
-    check('e o ban existe de verdade', await B2.isBanned({ uuid: 'uuid-warn' }), true);
+    const w3 = await W.recordWarn(GID, { ...alvo, reason: 'desrespeito', severity: 'grave', by: 'staff-1' });
+    check('grave soma 3', [w3.active, w3.pontos], [3, 6]);
+    check('advertência não bane', await B2.isBanned({ uuid: 'uuid-warn' }), false);
 
-    // Sem uuid não dá para banir: o ban é indexado por conta do jogo.
-    const semConta = { uuid: null, discordId: 'discord-w9' };
-    const w4 = await W.recordWarn(GID, { ...semConta, reason: 'a', by: 'staff-1' });
-    check('escalação sem uuid é recusada', (await W.escalate(GID, { ...semConta, active: 99, threshold: 3 })).reason, 'noUuid');
-    check('mas a advertência foi registrada', w4.active, 1);
+    // Cada uma vence no prazo da própria gravidade: de 40 dias atrás, a baixa
+    // já saiu da conta e a grave ainda conta.
+    const antiga = (warnId, severity) => ({
+      warnId, guildDiscordId: GID, ...alvo, reason: 'antiga', severity, by: 'staff-1', at: new Date(Date.now() - 40 * 86_400_000), removed: false,
+    });
+    await collections.warns().insertMany([antiga('velhabxa', 'baixa'), antiga('velhagrv', 'grave')]);
+    check('baixa de 40 dias venceu, grave de 40 dias conta', await W.activeSummary(GID, alvo), { active: 4, pontos: 9 });
+    const hist0 = await W.warnHistory(GID, alvo);
+    check('histórico marca a vencida', hist0.find((w) => w.warnId === 'velhabxa').expired, true);
 
     // Perdão mantém o registro e tira da contagem.
     check('perdoar devolve true', await W.removeWarn(w1.warn.warnId, 'staff-2', 'apelou'), true);
     check('perdoar de novo devolve false', await W.removeWarn(w1.warn.warnId, 'staff-2'), false);
-    check('ativas caem para 2', await W.countActiveWarns(GID, alvo), 2);
+    check('perdoada sai da soma', await W.activeSummary(GID, alvo), { active: 3, pontos: 8 });
     const hist = await W.warnHistory(GID, alvo);
-    check('histórico mantém a perdoada', hist.length, 3);
+    check('histórico mantém a perdoada', hist.length, 5);
     check('e a marca como não-ativa', hist.find((w) => w.warnId === w1.warn.warnId).active, false);
 
-    check('clear perdoa as restantes', await W.clearWarns(GID, alvo, 'staff-2'), 2);
-    check('sobra zero ativa', await W.countActiveWarns(GID, alvo), 0);
-    check('histórico continua inteiro', (await W.warnHistory(GID, alvo)).length, 3);
+    check('clear perdoa as restantes', await W.clearWarns(GID, alvo, 'staff-2'), 3);
+    check('sobra zero', await W.activeSummary(GID, alvo), { active: 0, pontos: 0 });
+    check('histórico continua inteiro', (await W.warnHistory(GID, alvo)).length, 5);
+
+    // Edição: muda gravidade e motivo, guarda o que era, e o prazo segue
+    // contando da data original.
+    const outro = { uuid: 'uuid-warn-e', username: 'Editado', discordId: 'discord-we' };
+    const we = await W.recordWarn(GID, { ...outro, reason: 'flood', severity: 'baixa', by: 'staff-1' });
+    const ed = await W.editWarn(we.warn.warnId, { severity: 'grave', reason: 'flood repetido' }, 'staff-2');
+    check('edição troca gravidade e motivo', [ed.severity, ed.reason], ['grave', 'flood repetido']);
+    check('e guarda o que era', ed.edits.map((e) => [e.by, e.antes.severity, e.antes.reason]), [['staff-2', 'baixa', 'flood']]);
+    check('a soma acompanha a gravidade nova', await W.activeSummary(GID, outro), { active: 1, pontos: 3 });
+    check('o prazo conta da data original', W.expiresAt(ed).getTime(), W.addMonths(we.warn.at, 3).getTime());
+    check('editar para o que já é não muda nada', await W.editWarn(we.warn.warnId, { severity: 'grave' }, 'staff-2'), null);
+    await collections.warns().insertOne({ warnId: 'legado01', guildDiscordId: GID, ...outro, reason: 'velho', by: 'staff-1', at: new Date(), removed: false });
+    const leg = await W.editWarn('legado01', { reason: 'velho, corrigido' }, 'staff-2');
+    check('warn antigo: só o motivo muda, segue baixa', [leg.reason, W.gravidadeDe(leg).label], ['velho, corrigido', 'Baixa']);
+    await W.removeWarn(we.warn.warnId, 'staff-2');
+    check('perdoada não se edita', await W.editWarn(we.warn.warnId, { severity: 'baixa' }, 'staff-2'), null);
 
     // ------------------------------------------------ Season e off-season
     section('11. Season do jogo e off-season');
