@@ -31,7 +31,7 @@ async function main() {
   const reg = await import('../src/services/registration.js');
   const terr = await import('../src/services/territories.js');
   const gd = await import('../src/services/guildData.js');
-  const { detectGuildRaids } = await import('../src/services/watcher.js');
+  const { detectGuildRaids, detectWeeklyCompletions } = await import('../src/services/watcher.js');
 
   // ------------------------------------------------- Comandos construíveis
   //
@@ -190,6 +190,30 @@ async function main() {
   check('duas raids somam 1 aspect inteiro', RR.wholeUnits(RR.PER_RAID.aspects * 2), 1);
   check('frações somam sem perder unidade (3 × 2/3 = 2)', RR.wholeUnits(2 / 3 + 2 / 3 + 2 / 3), 2);
   check('saldo negativo não vira entrega', RR.wholeUnits(-2), 0);
+
+  section('5b. Objetivo semanal: comparado com o último estado conhecido');
+  const semana = (pessoas) => ({
+    members: { recruit: Object.fromEntries(pessoas.map(([u, weekly]) => [u, { uuid: `uuid-${u}`, weekly }])) },
+  });
+  const vistos = new Map([
+    ['uuid-ana', { completed: false, streak: 3 }],
+    ['uuid-bia', { completed: true, streak: 5 }],
+    ['uuid-caio', { completed: true, streak: 2 }],
+    ['uuid-duda', { completed: false, streak: 0 }],
+  ]);
+  const wk = detectWeeklyCompletions(vistos, semana([
+    ['ana', { completed: true, streak: 4 }], // concluiu agora
+    ['bia', { completed: true, streak: 5 }], // nada mudou
+    ['caio', { completed: true, streak: 3 }], // bot fora do ar no reset: semana nova
+    ['duda', {}], // poll com o campo vazio
+    ['enzo', { completed: true, streak: 1 }], // sem estado guardado (reinício, membro novo)
+  ]));
+  check('credita quem concluiu, a semana nova e quem não tinha estado', wk.done.map((w) => w.username), ['ana', 'caio', 'enzo']);
+  check('a sequência vai junto', wk.done.map((w) => w.streak), [4, 3, 1]);
+  check('campo vazio não mexe no estado guardado', wk.states.map(([u]) => u), ['uuid-ana', 'uuid-caio', 'uuid-enzo']);
+  check('o mapa recebido não é alterado', vistos.get('uuid-ana'), { completed: false, streak: 3 });
+  const reset = detectWeeklyCompletions(vistos, semana([['bia', { completed: false, streak: 5 }]]));
+  check('reset semanal (true → false) só atualiza o estado', [reset.done.length, reset.states.length], [0, 1]);
 
   section('6. Perdão de inatividade pela contribuição');
   const inat = await import('../src/services/inactivity.js');
@@ -996,6 +1020,15 @@ async function main() {
     const reroll = await G.rerollGiveaway({}, await G.getGiveaway('mythic'));
     check('o reroll não repete quem já ganhou', reroll.winners.every((w) => !sorteio.winners.some((v) => v.discordId === w.discordId)), true);
     check('e sorteia entre os 3 que sobraram', reroll.winners.length, 2);
+
+    section('18. Objetivo semanal: um crédito por semana, identificada pela sequência');
+    const W1 = { uuid: 'uuid-weekly', username: 'Semanal' };
+    const dia = (d, h = 12) => new Date(Date.UTC(2026, 9, d, h));
+    check('primeira conclusão credita', await P.recordWeeklyCompletion({ ...W1, streak: 4, at: dia(5, 10) }), true);
+    check('mesma sequência minutos depois é oscilação', await P.recordWeeklyCompletion({ ...W1, streak: 4, at: dia(5, 11) }), false);
+    check('semana seguinte no MESMO dia credita', await P.recordWeeklyCompletion({ ...W1, streak: 5, at: dia(5, 20) }), true);
+    check('sequência quebrada e refeita credita de novo', await P.recordWeeklyCompletion({ ...W1, streak: 4, at: dia(20) }), true);
+    check('três objetivos no contador', (await collections.guildStats().findOne({ uuid: W1.uuid }))?.weeklyObjectives, 3);
   } finally {
     await getDb().dropDatabase();
     await closeMongo();

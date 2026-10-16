@@ -265,27 +265,68 @@ export function detectGuildRaids(prev, curr, marcas = raidMarks) {
   return [...parties.values()];
 }
 
-// Objetivo semanal: a API (autenticada) só diz se o desta semana está feito.
-// Anunciamos a virada de "não fez" para "fez". Sem WYNN_API_KEY o campo é
-// indefinido para todos, e nada é anunciado.
-export function detectWeeklyCompletions(prev, curr) {
-  if (!prev) return [];
-  const before = new Map();
-  for (const rank of RANKS) {
-    for (const m of Object.values(prev.members[rank] || {})) {
-      before.set(m.uuid, m.weekly?.completed);
-    }
-  }
+// Objetivo semanal: a API (autenticada) só diz se o desta semana está feito, e
+// quantas semanas seguidas. Sem WYNN_API_KEY o campo vem vazio para todos, e
+// nada é anunciado.
+//
+// A comparação é com o ÚLTIMO ESTADO CONHECIDO de cada membro, salvo no Mongo —
+// e não com o poll anterior em memória, como era. Contra o poll anterior, o
+// objetivo se perdia para sempre:
+//   • a cada reinício (deploy, crash), o primeiro poll virava baseline, e quem
+//     concluiu nesse intervalo ficava `true` até o reset sem a virada ser vista;
+//   • num poll com o campo vazio, `false → vazio → true` não tinha o `false`
+//     imediatamente antes da conclusão.
+// O `completed` sozinho também não separa o `true` de uma semana do da seguinte
+// (bot fora do ar no reset). A sequência separa: ela sobe junto com a conclusão,
+// então `true` com sequência diferente da guardada é semana nova.
+let weeklySeen = null; // uuid -> { completed, streak }; carregado no 1º poll
 
+async function loadWeeklySeen() {
+  const doc = await collections.watcherState().findOne({ _id: 'weekly' });
+  return new Map(Object.entries(doc?.members ?? {}));
+}
+
+async function saveWeeklySeen(states) {
+  await collections.watcherState().updateOne(
+    { _id: 'weekly' },
+    { $set: Object.fromEntries(states.map(([uuid, s]) => [`members.${uuid}`, s])) },
+    { upsert: true },
+  );
+  for (const [uuid, s] of states) weeklySeen.set(uuid, s);
+}
+
+/**
+ * Quem concluiu o objetivo desde o último estado conhecido.
+ *
+ * Membro sem estado guardado conta como "não fez": é quem entrou há pouco, ou
+ * todo mundo no primeiro boot desta versão. Quem já aparece `true` nesse boot é
+ * justamente quem as viradas perdidas deixaram sem crédito; quem já foi
+ * creditado nesta semana, recordWeeklyCompletion recusa.
+ *
+ * @param {Map<string, {completed: boolean, streak: number}>} seen  não é alterado
+ * @param curr  snapshot atual da guilda
+ * @returns {{done: Array<{uuid: string, username: string, streak: number}>,
+ *            states: Array<[string, {completed: boolean, streak: number}]>}}
+ *   `states` são os estados que mudaram, a gravar depois do crédito
+ */
+export function detectWeeklyCompletions(seen, curr) {
   const done = [];
+  const states = [];
   for (const rank of RANKS) {
     for (const [username, m] of Object.entries(curr.members[rank] || {})) {
-      if (m.weekly?.completed === true && before.get(m.uuid) === false) {
-        done.push({ uuid: m.uuid, username, streak: Number(m.weekly.streak ?? 0) });
+      // Campo vazio não é "não fez": não dá para afirmar nada, e o estado
+      // guardado fica como está.
+      if (typeof m.weekly?.completed !== 'boolean') continue;
+      const agora = { completed: m.weekly.completed, streak: Number(m.weekly.streak ?? 0) };
+      const antes = seen.get(m.uuid);
+      if (antes?.completed === agora.completed && antes?.streak === agora.streak) continue;
+      states.push([m.uuid, agora]);
+      if (agora.completed && (!antes?.completed || antes.streak !== agora.streak)) {
+        done.push({ uuid: m.uuid, username, streak: agora.streak });
       }
     }
   }
-  return done;
+  return { done, states };
 }
 
 async function announceWeekly(client, cfg, guild, done) {
@@ -370,15 +411,20 @@ export async function runGuildWatch(client) {
       }
       await announceGuildRaids(client, cfg, guild, raids);
     }
-    const weekly = detectWeeklyCompletions(prevGuild, guild);
-    if (weekly.length) {
-      // Pontuar vem primeiro e não depende de canal configurado: o anúncio é
-      // enfeite, o evento é o que conta.
-      for (const w of weekly) {
-        await recordWeeklyCompletion({ uuid: w.uuid, username: w.username, streak: w.streak });
-      }
-      await announceWeekly(client, cfg, guild, weekly);
+    // Roda já no primeiro poll: o estado de comparação vem do Mongo, não do
+    // poll anterior.
+    if (!weeklySeen) weeklySeen = await loadWeeklySeen();
+    const { done, states } = detectWeeklyCompletions(weeklySeen, guild);
+    // Pontuar vem primeiro e não depende de canal configurado: o anúncio é
+    // enfeite, o evento é o que conta. Só anuncia quem foi creditado agora.
+    const creditados = [];
+    for (const w of done) {
+      if (await recordWeeklyCompletion(w)) creditados.push(w);
     }
+    // O estado só anda depois do crédito: se a gravação falhar no meio, o
+    // próximo poll vê a mesma conclusão e tenta de novo.
+    if (states.length) await saveWeeklySeen(states);
+    if (creditados.length) await announceWeekly(client, cfg, guild, creditados);
     await updatePanel(client, cfg, guild);
     prevGuild = guild;
   }

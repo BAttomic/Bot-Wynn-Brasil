@@ -336,19 +336,30 @@ export async function reconcileGuildRaidLedger() {
  * aparece `true` em ambos. A virada nunca acontece na janela diária e a pessoa
  * nunca pontua, por ser rápida. O poller de 60s vê a virada de verdade.
  *
- * `meta.day` deixa a gravação idempotente: ninguém conclui dois objetivos
- * semanais no mesmo dia, então uma segunda inserção só pode ser oscilação da API.
+ * A sequência é o que identifica a semana. Ela sobe a cada objetivo cumprido,
+ * então dois créditos com a MESMA sequência só são semanas diferentes se ela
+ * quebrou entre os dois — e aí há pelo menos uma semana inteira no meio. Mesma
+ * sequência em menos de 7 dias é a mesma semana vista de novo: oscilação da API,
+ * ou o watcher repetindo depois de uma falha.
+ *
+ * A trava antiga era um crédito por dia (`meta.day`), e recusava quem fechava o
+ * objetivo da semana que acabava e o da que começava no mesmo dia.
  *
  * @param {{uuid: string, username: string, streak?: number, at?: Date}} completion
  * @returns {Promise<boolean>} false = já estava registrado
  */
 export async function recordWeeklyCompletion({ uuid, username, streak = 0, at = new Date() }) {
+  const mesmaSemana = await collections.pointsEvents().findOne(
+    { uuid, type: 'weekly', 'meta.streak': streak, at: { $gt: new Date(at.getTime() - 7 * 86_400_000) } },
+    { projection: { _id: 1 } },
+  );
+  if (mesmaSemana) return false;
   const inserted = await recordEvent({
     uuid,
     username,
     type: 'weekly',
     qty: 1,
-    meta: { day: at.toISOString().slice(0, 10), streak },
+    meta: { streak },
     at,
   });
   if (!inserted) return false;

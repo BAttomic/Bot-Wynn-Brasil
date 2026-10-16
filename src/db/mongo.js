@@ -107,15 +107,10 @@ async function ensureIndexes() {
       { uuid: 1, type: 1, 'meta.snapshotAt': 1 },
       { unique: true, partialFilterExpression: { 'meta.snapshotAt': { $exists: true } } },
     );
-  // Idempotência do objetivo semanal visto ao vivo: um por membro/tipo/dia.
-  // Ninguém conclui dois objetivos semanais no mesmo dia, então uma segunda
-  // inserção só pode ser oscilação da API (ou o watcher reiniciando).
-  await collections
-    .pointsEvents()
-    .createIndex(
-      { uuid: 1, type: 1, 'meta.day': 1 },
-      { unique: true, partialFilterExpression: { 'meta.day': { $exists: true } } },
-    );
+  // O objetivo semanal tinha um índice único por dia, que recusava quem fechava
+  // a semana que acabava e a que começava no mesmo dia. A trava agora é a
+  // sequência (ver recordWeeklyCompletion em services/points.js).
+  await collections.pointsEvents().dropIndex('uuid_1_type_1_meta.day_1').catch(() => {});
   // Idempotência do crédito de captura: um evento de território por membro e
   // captura. Sem isto, reprocessar um resumo (ou rodar o backfill duas vezes)
   // pagaria o mesmo peso de novo.
