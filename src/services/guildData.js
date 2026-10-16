@@ -110,7 +110,11 @@ function total(value) {
 export async function fetchGuildMembers(prefix) {
   const data = await wynn.guildByPrefix(prefix);
   if (!data || !data.members) return null;
+  return { guild: data, members: normalizeMembers(data) };
+}
 
+/** Os membros de uma resposta de guilda já em mãos, no formato de fetchGuildMembers. */
+export function normalizeMembers(data) {
   const members = [];
   for (const rank of RANKS) {
     const group = data.members[rank];
@@ -136,5 +140,5 @@ export async function fetchGuildMembers(prefix) {
       });
     }
   }
-  return { guild: data, members };
+  return members;
 }

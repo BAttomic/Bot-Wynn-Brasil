@@ -1030,6 +1030,32 @@ async function main() {
     check('semana seguinte no MESMO dia credita', await P.recordWeeklyCompletion({ ...W1, streak: 5, at: dia(5, 20) }), true);
     check('sequência quebrada e refeita credita de novo', await P.recordWeeklyCompletion({ ...W1, streak: 4, at: dia(20) }), true);
     check('três objetivos no contador', (await collections.guildStats().findOne({ uuid: W1.uuid }))?.weeklyObjectives, 3);
+
+    // Sequência 3 sem a desta semana e nada no livro-razão: as 3 anteriores entram.
+    const T = new Date(Date.UTC(2026, 9, 16, 1));
+    const diasAntes = (d) => new Date(T - d * 86_400_000);
+    const inert = { uuid: 'uuid-inert', username: 'Inert', weeklyCompleted: false, weeklyStreak: 3, joined: diasAntes(36) };
+    const rec1 = await P.reconcileWeeklyLedger([inert], T);
+    check('sequência 3 recupera as 3 semanas', rec1.map((r) => r.added), [3]);
+    check('contador vai a 3', (await collections.guildStats().findOne({ uuid: inert.uuid }))?.weeklyObjectives, 3);
+    check('rodar de novo não dobra', (await P.reconcileWeeklyLedger([inert], T)).length, 0);
+    check('a desta semana ainda credita', await P.recordWeeklyCompletion({ ...inert, streak: 4, at: diasAntes(-2) }), true);
+    const semanaQueVem = { ...inert, weeklyCompleted: true, weeklyStreak: 5 };
+    check('na semana seguinte, só a nova falta', (await P.reconcileWeeklyLedger([semanaQueVem], diasAntes(-9))).map((r) => r.added), [1]);
+    check('total: 3 recuperadas + 2 feitas', (await collections.guildStats().findOne({ uuid: inert.uuid }))?.weeklyObjectives, 5);
+
+    // Sequência antiga (quebrada) não conta para a atual, e vice-versa.
+    const volta = { uuid: 'uuid-volta', username: 'Volta', weeklyCompleted: true, weeklyStreak: 2, joined: diasAntes(200) };
+    for (const [k, d] of [[1, 60], [2, 53], [3, 46]]) {
+      await P.recordWeeklyCompletion({ uuid: volta.uuid, username: volta.username, streak: k, at: diasAntes(d) });
+    }
+    check('sequência nova depois de quebrar: +2, sem confundir com a antiga', (await P.reconcileWeeklyLedger([volta], T)).map((r) => r.added), [2]);
+
+    // Teto pelo tempo de guilda: 10 dias de guilda não sustentam 5 semanas.
+    const novato = { uuid: 'uuid-novato', username: 'Novato', weeklyCompleted: false, weeklyStreak: 5, joined: diasAntes(10) };
+    check('sequência maior que o tempo de guilda é cortada', (await P.reconcileWeeklyLedger([novato], T)).map((r) => r.added), [3]);
+    check('sem sequência, nada', (await P.reconcileWeeklyLedger([{ ...novato, uuid: 'uuid-zero', weeklyStreak: 0 }], T)).length, 0);
+    check('campo vazio, nada', (await P.reconcileWeeklyLedger([{ ...novato, uuid: 'uuid-vazio', weeklyCompleted: null }], T)).length, 0);
   } finally {
     await getDb().dropDatabase();
     await closeMongo();

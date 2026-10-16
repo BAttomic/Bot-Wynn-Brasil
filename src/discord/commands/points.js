@@ -7,6 +7,7 @@ import {
   recomputePoints,
   rebuildLeaderboards,
   recordWeeklyCompletion,
+  reconcileWeeklyLedger,
 } from '../../services/points.js';
 import { fetchGuildMembers } from '../../services/guildData.js';
 import { tomeCredits } from '../../services/tomes.js';
@@ -64,7 +65,7 @@ export default {
     .addSubcommand((s) =>
       s
         .setName('semanal')
-        .setDescription('(Staff) Credita o objetivo semanal de quem fez o desta semana e ficou sem o crédito'),
+        .setDescription('(Staff) Credita objetivos semanais que ficaram sem contar (desta semana e da sequência)'),
     )
     .toJSON(),
 
@@ -107,36 +108,46 @@ export default {
         const novo = await recordWeeklyCompletion({ uuid: m.uuid, username: m.username, streak: m.weeklyStreak });
         (novo ? creditados : jaTinham).push(m.username);
       }
-      // Fez a semanal e mesmo assim não tem Tome: já recebeu mais Tomes do que
-      // semanais contadas (as que o bot perdeu, por exemplo). A regra quita esse
-      // excedente antes de dar direito de novo; quem decide se corrige é a staff.
+      // As semanas ANTERIORES que a sequência prova e o livro-razão não tem. O
+      // watcher faz o mesmo sozinho a cada boot; aqui é para não esperar.
+      const recuperadas = await reconcileWeeklyLedger(conhecidos);
+      // Tem semanal contada e mesmo assim não tem Tome: já recebeu mais Tomes do
+      // que semanais contadas. A regra quita esse excedente antes de dar direito
+      // de novo; quem decide se corrige é a staff.
+      const afetados = new Set([...fizeram.map((m) => m.uuid), ...recuperadas.map((r) => r.uuid)]);
       const stats = await collections
         .guildStats()
-        .find({ uuid: { $in: fizeram.map((m) => m.uuid) } }, { projection: { username: 1, weeklyObjectives: 1, tomesDelivered: 1 } })
+        .find({ uuid: { $in: [...afetados] } }, { projection: { username: 1, weeklyObjectives: 1, tomesDelivered: 1 } })
         .toArray();
       const semTome = stats
         .filter((s) => tomeCredits(s) <= 0)
         .map((s) => `${s.username} (${s.tomesDelivered ?? 0} recebidos / ${s.weeklyObjectives ?? 0} contadas)`);
-      if (creditados.length) {
+      if (creditados.length || recuperadas.length) {
         await rebuildLeaderboards();
         await ensureLeaderboardPanel(interaction.client, interaction.guildId);
-        audit(
-          interaction.client,
-          interaction.guildId,
-          `📅 <@${interaction.user.id}> creditou o objetivo semanal de ${creditados.length} membro(s): ${creditados.join(', ')}.`,
-        );
+        const partes = [
+          creditados.length && `desta semana: ${creditados.join(', ')}`,
+          recuperadas.length && `anteriores, pela sequência: ${recuperadas.map((r) => `${r.username} +${r.added}`).join(', ')}`,
+        ].filter(Boolean);
+        audit(interaction.client, interaction.guildId, `📅 <@${interaction.user.id}> creditou objetivos semanais — ${partes.join(' · ')}.`);
       }
       const lista = (nomes) => (nomes.length ? nomes.join(', ').slice(0, 1000) : 'Ninguém');
       return interaction.editReply({
         embeds: [{
-          title: '📅 Objetivo semanal desta semana',
+          title: '📅 Objetivo semanal',
           color: 0x1abc9c,
           fields: [
-            { name: `✅ Creditados agora (${creditados.length})`, value: lista(creditados) },
-            { name: `☑️ Já tinham o crédito (${jaTinham.length})`, value: lista(jaTinham) },
+            { name: `✅ Desta semana, creditados agora (${creditados.length})`, value: lista(creditados) },
+            { name: `☑️ Desta semana, já tinham o crédito (${jaTinham.length})`, value: lista(jaTinham) },
+            {
+              name: `🔁 Semanas anteriores recuperadas pela sequência (${recuperadas.length})`,
+              value: recuperadas.length
+                ? lista(recuperadas.map((r) => `${r.username} +${r.added}`))
+                : 'Nenhuma faltando: o livro-razão já bate com a sequência de todo mundo.',
+            },
             ...(semTome.length
               ? [{
-                  name: `📜 Fizeram, mas seguem sem Tome (${semTome.length})`,
+                  name: `📜 Com semanal contada, mas sem Tome (${semTome.length})`,
                   value: `${lista(semTome)}\n-# Já receberam mais Tomes do que semanais contadas. Se foram semanais que o bot perdeu, ajuste com \`/tome corrigir\`.`.slice(0, 1024),
                 }]
               : []),

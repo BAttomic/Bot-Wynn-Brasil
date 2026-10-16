@@ -369,6 +369,87 @@ export async function recordWeeklyCompletion({ uuid, username, streak = 0, at = 
   return true;
 }
 
+const DAY_MS = 86_400_000;
+
+/**
+ * Completa o livro-razão de objetivo semanal pela SEQUÊNCIA da API.
+ *
+ * A API não tem histórico do objetivo semanal, mas a sequência é um: quem está
+ * com sequência N fez as N últimas semanas. E cada semana da sequência tem o seu
+ * número — 1 na primeira, N na mais recente —, o mesmo `meta.streak` que a
+ * conclusão grava. Então dá para saber QUAIS semanas faltam, e não só quantas.
+ * Foi assim que se recuperou o que as viradas perdidas pelo watcher deixaram de
+ * contar (reinício, poll com o campo vazio).
+ *
+ * Janela: a sequência atual começou há no máximo 7×N dias (7×(N+1) se a desta
+ * semana ainda não foi feita), e a anterior acabou pelo menos uma semana inteira
+ * antes — sem objetivo no meio, senão não teria quebrado. Evento dentro da
+ * janela é desta sequência; fora, de outra. A data gravada na semana recuperada
+ * cai dentro da semana de verdade dela, então a conta continua valendo nas
+ * próximas rodadas.
+ *
+ * A semana recuperada entra como linha de base (`meta.baseline`), igual à guild
+ * raid reconciliada: conta no acumulado e no direito a Tome, não na season — o
+ * dia exato em que foi feita não se sabe.
+ *
+ * Idempotente: com o livro-razão em dia, nada é gravado.
+ *
+ * @param {Array<{uuid: string, username: string, weeklyCompleted: boolean|null,
+ *   weeklyStreak: number, joined?: Date|null}>} members  ver normalizeMembers
+ * @returns {Promise<Array<{uuid: string, username: string, added: number}>>}
+ */
+export async function reconcileWeeklyLedger(members, now = new Date()) {
+  const alvos = members.filter((m) => typeof m.weeklyCompleted === 'boolean' && m.weeklyStreak > 0);
+  if (!alvos.length) return [];
+
+  const maisLonga = Math.max(...alvos.map((m) => m.weeklyStreak)) + 1;
+  const eventos = await collections
+    .pointsEvents()
+    .find(
+      { type: 'weekly', uuid: { $in: alvos.map((m) => m.uuid) }, at: { $gt: new Date(now - 7 * maisLonga * DAY_MS) } },
+      { projection: { uuid: 1, at: 1, 'meta.streak': 1 } },
+    )
+    .toArray();
+
+  const faltas = [];
+  const resumo = [];
+  for (const m of alvos) {
+    const n = m.weeklyStreak;
+    // Semanas entre a mais recente da sequência e esta: 0 se a desta já foi feita.
+    const atraso = m.weeklyCompleted ? 0 : 1;
+    const inicio = now - 7 * (n + atraso) * DAY_MS;
+    const vistas = new Set(
+      eventos.filter((e) => e.uuid === m.uuid && e.at > inicio).map((e) => Number(e.meta?.streak)),
+    );
+    // Teto pelo tempo de guilda. A sequência é da guilda (nenhum membro passa
+    // disso), mas um deslize da API não pode creditar semana de antes da entrada.
+    const teto = m.joined ? Math.ceil((now - m.joined) / (7 * DAY_MS)) + 1 : n;
+    let added = 0;
+    for (let k = Math.max(1, n - teto + 1); k <= n; k += 1) {
+      if (vistas.has(k)) continue;
+      faltas.push({
+        uuid: m.uuid,
+        username: m.username,
+        type: 'weekly',
+        qty: 1,
+        meta: { streak: k, baseline: true, reconciled: true },
+        seasonId: null,
+        at: new Date(now - 7 * (n - k + atraso) * DAY_MS),
+      });
+      added += 1;
+    }
+    if (added) resumo.push({ uuid: m.uuid, username: m.username, added });
+  }
+
+  if (!faltas.length) return [];
+  await collections.pointsEvents().insertMany(faltas, { ordered: false });
+  for (const r of resumo) await recomputePoints({ uuid: r.uuid });
+  log.info(
+    `Objetivo semanal reconciliado pela sequência: ${resumo.map((r) => `${r.username} +${r.added}`).join(', ')}.`,
+  );
+  return resumo;
+}
+
 // Concessão manual da staff. Vira um evento como qualquer outro; o efeito é
 // imediato para o membro afetado, mas o leaderboard só reflete na virada do dia.
 export async function awardPoints(uuid, username, amount, reason = null) {

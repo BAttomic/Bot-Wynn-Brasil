@@ -7,7 +7,9 @@ import { xpBarEmoji, EMOJI } from '../util/emojis.js';
 import { captureValue, recordCapture, attributeCaptures, captureId } from './territories.js';
 // Território não pontua mais ninguém individualmente, então este arquivo não
 // escreve no livro-razão de guerra — só o snapshot escreve.
-import { recordWeeklyCompletion, recordEvent, recomputePoints } from './points.js';
+import { recordWeeklyCompletion, reconcileWeeklyLedger, recordEvent, recomputePoints } from './points.js';
+import { normalizeMembers } from './guildData.js';
+import { audit } from './audit.js';
 import { creditGuildRaidParty } from './events.js';
 import { creditRaidRewards, ensureRaidRewardPanel } from './raidRewards.js';
 import { blockedUuids } from './eventBlacklist.js';
@@ -336,6 +338,7 @@ export function detectWeeklyCompletions(seen, curr) {
 // vazio para todo mundo e nenhum objetivo é contado — em silêncio. Avisa uma vez
 // por boot (log e canal de erros), e de novo se o dado sumir depois de voltar.
 let weeklyBlindWarned = false;
+let weeklyReconciled = false; // a reconciliação pela sequência já rodou neste boot
 
 async function watchWeekly(client, cfg, guild) {
   // Roda já no primeiro poll: o estado de comparação vem do Mongo, não do
@@ -363,6 +366,19 @@ async function watchWeekly(client, cfg, guild) {
     if (await recordWeeklyCompletion(w)) creditados.push(w);
   }
   if (creditados.length) log.info(`Objetivo semanal: ${creditados.map((w) => w.username).join(', ')} creditado(s).`);
+  // Semanas que a sequência prova e o livro-razão não tem. A sequência só muda
+  // junto com o estado, então basta conferir no boot e a cada mudança.
+  if (!weeklyReconciled || states.length) {
+    const recuperadas = await reconcileWeeklyLedger(normalizeMembers(guild));
+    weeklyReconciled = true;
+    if (recuperadas.length) {
+      audit(
+        client,
+        optional('DISCORD_GUILD_ID'),
+        `📅 Objetivos semanais recuperados pela sequência da API: ${recuperadas.map((r) => `**${r.username}** +${r.added}`).join(', ')}.`,
+      );
+    }
+  }
   // O estado só anda depois do crédito: se a gravação falhar no meio, o
   // próximo poll vê a mesma conclusão e tenta de novo.
   if (states.length) await saveWeeklySeen(states);
