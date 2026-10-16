@@ -6,7 +6,11 @@ import {
   pointsLeaderboard,
   recomputePoints,
   rebuildLeaderboards,
+  recordWeeklyCompletion,
 } from '../../services/points.js';
+import { fetchGuildMembers } from '../../services/guildData.js';
+import { tomeCredits } from '../../services/tomes.js';
+import { optional } from '../../config/env.js';
 import { ensureLeaderboardPanel, PAGE_SIZE } from '../../services/leaderboardPanel.js';
 import { runProgressSnapshot } from '../../jobs/progressSnapshot.js';
 import { audit } from '../../services/audit.js';
@@ -57,6 +61,11 @@ export default {
         .setName('apurar')
         .setDescription('(Staff) Roda a apuração agora, sem esperar o horário diário'),
     )
+    .addSubcommand((s) =>
+      s
+        .setName('semanal')
+        .setDescription('(Staff) Credita o objetivo semanal de quem fez o desta semana e ficou sem o crédito'),
+    )
     .toJSON(),
 
   async execute(interaction) {
@@ -72,6 +81,69 @@ export default {
       return interaction.editReply(
         `Apuração concluída. **${total}** membro(s) com pontos.\n-# A primeira apuração cria a linha de base: XP contribuído e guild raids entram por inteiro. Guerras e objetivos semanais só contam daqui em diante.`,
       );
+    }
+
+    if (sub === 'semanal') {
+      // O watcher já credita sozinho; isto é para conferir e cobrir quem ficou
+      // de fora. Quem já tem o crédito desta semana não dobra
+      // (recordWeeklyCompletion recusa a mesma sequência em 7 dias).
+      if (!optional('WYNN_API_KEY')) {
+        return interaction.editReply(
+          '⚠️ A `WYNN_API_KEY` não está configurada no ambiente do bot. Sem ela a API não mostra o objetivo semanal e **nenhum** é contado. Configure a variável no Dokploy e faça o redeploy.',
+        );
+      }
+      const res = await fetchGuildMembers(optional('WYNN_GUILD_PREFIX'));
+      if (!res) return interaction.editReply('Não consegui buscar a guilda na API. Tente de novo em instantes.');
+      const conhecidos = res.members.filter((m) => m.weeklyCompleted !== null);
+      if (!conhecidos.length) {
+        return interaction.editReply(
+          '⚠️ A `WYNN_API_KEY` está configurada, mas a API não devolve o objetivo semanal: a chave precisa ser de um **membro desta guilda**, ou foi revogada. Enquanto isso, **nenhum** objetivo é contado.',
+        );
+      }
+      const creditados = [];
+      const jaTinham = [];
+      const fizeram = conhecidos.filter((c) => c.weeklyCompleted);
+      for (const m of fizeram) {
+        const novo = await recordWeeklyCompletion({ uuid: m.uuid, username: m.username, streak: m.weeklyStreak });
+        (novo ? creditados : jaTinham).push(m.username);
+      }
+      // Fez a semanal e mesmo assim não tem Tome: já recebeu mais Tomes do que
+      // semanais contadas (as que o bot perdeu, por exemplo). A regra quita esse
+      // excedente antes de dar direito de novo; quem decide se corrige é a staff.
+      const stats = await collections
+        .guildStats()
+        .find({ uuid: { $in: fizeram.map((m) => m.uuid) } }, { projection: { username: 1, weeklyObjectives: 1, tomesDelivered: 1 } })
+        .toArray();
+      const semTome = stats
+        .filter((s) => tomeCredits(s) <= 0)
+        .map((s) => `${s.username} (${s.tomesDelivered ?? 0} recebidos / ${s.weeklyObjectives ?? 0} contadas)`);
+      if (creditados.length) {
+        await rebuildLeaderboards();
+        await ensureLeaderboardPanel(interaction.client, interaction.guildId);
+        audit(
+          interaction.client,
+          interaction.guildId,
+          `📅 <@${interaction.user.id}> creditou o objetivo semanal de ${creditados.length} membro(s): ${creditados.join(', ')}.`,
+        );
+      }
+      const lista = (nomes) => (nomes.length ? nomes.join(', ').slice(0, 1000) : 'Ninguém');
+      return interaction.editReply({
+        embeds: [{
+          title: '📅 Objetivo semanal desta semana',
+          color: 0x1abc9c,
+          fields: [
+            { name: `✅ Creditados agora (${creditados.length})`, value: lista(creditados) },
+            { name: `☑️ Já tinham o crédito (${jaTinham.length})`, value: lista(jaTinham) },
+            ...(semTome.length
+              ? [{
+                  name: `📜 Fizeram, mas seguem sem Tome (${semTome.length})`,
+                  value: `${lista(semTome)}\n-# Já receberam mais Tomes do que semanais contadas. Se foram semanais que o bot perdeu, ajuste com \`/tome corrigir\`.`.slice(0, 1024),
+                }]
+              : []),
+          ],
+          footer: { text: `${creditados.length + jaTinham.length} de ${conhecidos.length} membros fizeram o desta semana` },
+        }],
+      });
     }
 
     if (sub === 'recalcular') {

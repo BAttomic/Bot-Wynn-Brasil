@@ -212,6 +212,7 @@ async function main() {
   check('a sequência vai junto', wk.done.map((w) => w.streak), [4, 3, 1]);
   check('campo vazio não mexe no estado guardado', wk.states.map(([u]) => u), ['uuid-ana', 'uuid-caio', 'uuid-enzo']);
   check('o mapa recebido não é alterado', vistos.get('uuid-ana'), { completed: false, streak: 3 });
+  check('conta só quem veio com o dado (sem chave = 0, e o watcher avisa)', wk.visiveis, 4);
   const reset = detectWeeklyCompletions(vistos, semana([['bia', { completed: false, streak: 5 }]]));
   check('reset semanal (true → false) só atualiza o estado', [reset.done.length, reset.states.length], [0, 1]);
 

@@ -136,7 +136,7 @@ const COMMAND_ACCESS = Object.freeze({
   config: CHEFE,
   registro: ESTRATEGISTA,
   season: { start: CHEFE, end: CHEFE },
-  points: { add: CHEFE, recalcular: CHEFE, apurar: CHEFE },
+  points: { add: CHEFE, recalcular: CHEFE, apurar: CHEFE, semanal: CHEFE },
   tome: { grant: STAFF, corrigir: CHEFE },
   aspects: rewardAccess,
   esmeraldas: rewardAccess,

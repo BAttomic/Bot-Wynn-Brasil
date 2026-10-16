@@ -13,6 +13,7 @@ import { creditRaidRewards, ensureRaidRewardPanel } from './raidRewards.js';
 import { blockedUuids } from './eventBlacklist.js';
 import { communityRow, downloadsRow, downloadsField } from './leaderboardPanel.js';
 import { logoAttachment, brandWithLogo } from '../util/assets.js';
+import { reportError } from './errorReport.js';
 import { log } from '../util/log.js';
 
 const RANKS = ['owner', 'chief', 'strategist', 'captain', 'recruiter', 'recruit'];
@@ -312,11 +313,13 @@ async function saveWeeklySeen(states) {
 export function detectWeeklyCompletions(seen, curr) {
   const done = [];
   const states = [];
+  let visiveis = 0;
   for (const rank of RANKS) {
     for (const [username, m] of Object.entries(curr.members[rank] || {})) {
       // Campo vazio não é "não fez": não dá para afirmar nada, e o estado
       // guardado fica como está.
       if (typeof m.weekly?.completed !== 'boolean') continue;
+      visiveis += 1;
       const agora = { completed: m.weekly.completed, streak: Number(m.weekly.streak ?? 0) };
       const antes = seen.get(m.uuid);
       if (antes?.completed === agora.completed && antes?.streak === agora.streak) continue;
@@ -326,7 +329,44 @@ export function detectWeeklyCompletions(seen, curr) {
       }
     }
   }
-  return { done, states };
+  return { done, states, visiveis };
+}
+
+// Sem a chave, ou com a chave de quem não é da guilda, a API manda `weekly`
+// vazio para todo mundo e nenhum objetivo é contado — em silêncio. Avisa uma vez
+// por boot (log e canal de erros), e de novo se o dado sumir depois de voltar.
+let weeklyBlindWarned = false;
+
+async function watchWeekly(client, cfg, guild) {
+  // Roda já no primeiro poll: o estado de comparação vem do Mongo, não do
+  // poll anterior.
+  if (!weeklySeen) weeklySeen = await loadWeeklySeen();
+  const { done, states, visiveis } = detectWeeklyCompletions(weeklySeen, guild);
+
+  if (!visiveis) {
+    if (!weeklyBlindWarned) {
+      weeklyBlindWarned = true;
+      const motivo = optional('WYNN_API_KEY')
+        ? 'a WYNN_API_KEY está configurada, mas a API não devolve o objetivo semanal (a chave precisa ser de um membro da guilda, ou foi revogada)'
+        : 'a WYNN_API_KEY não está configurada';
+      log.warn(`Objetivo semanal invisível: ${motivo}. Nenhum objetivo está sendo contado.`);
+      await reportError('Objetivo semanal não está sendo contado', `Motivo: ${motivo}.`);
+    }
+    return;
+  }
+  weeklyBlindWarned = false;
+
+  // Pontuar vem primeiro e não depende de canal configurado: o anúncio é
+  // enfeite, o evento é o que conta. Só anuncia quem foi creditado agora.
+  const creditados = [];
+  for (const w of done) {
+    if (await recordWeeklyCompletion(w)) creditados.push(w);
+  }
+  if (creditados.length) log.info(`Objetivo semanal: ${creditados.map((w) => w.username).join(', ')} creditado(s).`);
+  // O estado só anda depois do crédito: se a gravação falhar no meio, o
+  // próximo poll vê a mesma conclusão e tenta de novo.
+  if (states.length) await saveWeeklySeen(states);
+  if (creditados.length) await announceWeekly(client, cfg, guild, creditados);
 }
 
 async function announceWeekly(client, cfg, guild, done) {
@@ -380,6 +420,9 @@ export async function runGuildWatch(client) {
 
   const guild = await wynn.guildByPrefix(prefix, { fresh: true }).catch(() => null);
   if (guild && guild.members) {
+    // Primeiro de tudo: uma falha nos passos de baixo (guild raid, painéis,
+    // anúncios) não pode pular a contagem do objetivo semanal deste poll.
+    await watchWeekly(client, cfg, guild);
     if (prevGuild) {
       const changes = diffPaths(prevGuild, guild);
       if (changes.length) await handleGuildChanges(client, cfg, guild, prevGuild, changes);
@@ -411,20 +454,6 @@ export async function runGuildWatch(client) {
       }
       await announceGuildRaids(client, cfg, guild, raids);
     }
-    // Roda já no primeiro poll: o estado de comparação vem do Mongo, não do
-    // poll anterior.
-    if (!weeklySeen) weeklySeen = await loadWeeklySeen();
-    const { done, states } = detectWeeklyCompletions(weeklySeen, guild);
-    // Pontuar vem primeiro e não depende de canal configurado: o anúncio é
-    // enfeite, o evento é o que conta. Só anuncia quem foi creditado agora.
-    const creditados = [];
-    for (const w of done) {
-      if (await recordWeeklyCompletion(w)) creditados.push(w);
-    }
-    // O estado só anda depois do crédito: se a gravação falhar no meio, o
-    // próximo poll vê a mesma conclusão e tenta de novo.
-    if (states.length) await saveWeeklySeen(states);
-    if (creditados.length) await announceWeekly(client, cfg, guild, creditados);
     await updatePanel(client, cfg, guild);
     prevGuild = guild;
   }
