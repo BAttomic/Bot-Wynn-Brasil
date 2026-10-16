@@ -152,7 +152,9 @@ export async function addGuild({ tag, kind, by = null }) {
 
   await collections.trackedGuilds().updateOne(
     { uuid: data.uuid },
-    { $set: set, $setOnInsert: { uuid: data.uuid, addedAt: now, addedBy: by, roleId: null } },
+    // O mesmo campo nos dois operadores o Mongo recusa (código 40), mesmo
+    // quando o documento já existe e o $setOnInsert nem seria aplicado.
+    { $set: set, $setOnInsert: { uuid: data.uuid, addedAt: now, addedBy: by, ...(!('roleId' in set) && { roleId: null }) } },
     { upsert: true },
   );
   invalidateGuildIndex();
